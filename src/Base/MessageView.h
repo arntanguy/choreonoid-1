@@ -13,11 +13,10 @@
 
 namespace cnoid {
 
-class MessageViewImpl;
-
 class CNOID_EXPORT MessageView : public View
 {
 public:
+    static void postMessageBeforeInitialization(const std::string& message, int type = Normal);
     static void initializeClass(ExtensionManager* ext);
 
     static MessageView* mainInstance();
@@ -36,58 +35,62 @@ public:
         NORMAL = Normal, ERROR = Error, WARNING = Warning, HIGHLIGHT = Highlight
     };
 
-    void put(const char* message, int type = Normal);
     void put(const std::string& message, int type = Normal);
+    void put(std::string&& message, int type = Normal);
+    void put(const char* message, int type = Normal);
     void put(const QString& message, int type = Normal);
 
-    void putln();
-    void putln(const char* message, int type = Normal);
     void putln(const std::string& message, int type = Normal);
+    void putln(std::string&& message, int type = Normal);
+    void putln(const char* message, int type = Normal);
     void putln(const QString& message, int type = Normal);
+    void putln();
 
-    void notify(const char* message, int type = Normal);
     void notify(const std::string& message, int type = Normal);
+    void notify(std::string&& message, int type = Normal);
+    void notify(const char* message, int type = Normal);
     void notify(const QString& message, int type = Normal);
 
-    //! \deprecated
-    void put(int type, const char* message);
-    //! \deprecated
+    [[deprecated("Use put(const std::string& message, int type = Normal)")]]
     void put(int type, const std::string& message);
-    //! \deprecated
+    [[deprecated("Use put(const char* message, int type = Normal)")]]
+    void put(int type, const char* message);
+    [[deprecated("Use put(const QString& message, int type = Normal)")]]
     void put(int type, const QString& message);
     
-    //! \deprecated
-    void putln(int type, const char* message);
-    //! \deprecated
+    [[deprecated("Use putln(const std::string& message, int type = Normal)")]]
     void putln(int type, const std::string& message);
-    //! \deprecated
+    [[deprecated("Use putln(const char* message, int type = Normal)")]]
+    void putln(int type, const char* message);
+    [[deprecated("Use putln(const QString& message, int type = Normal)")]]
     void putln(int type, const QString& message);
 
     int currentColumn();
         
     void flush();
+    static bool isFlushing();
+    
     void clear();
       
-    std::ostream& cout(bool doFlush = false);
+    std::ostream& cout(bool doFlush = true);
 
     void beginStdioRedirect();
     void endStdioRedirect();
 
     SignalProxy<void(const std::string& text)> sigMessage();
 
-    static bool isFlushing();
-    static SignalProxy<void()> sigFlushFinished();
+    class Impl;
 
 protected:
     virtual bool event(QEvent* e);
 
 private:
-    MessageViewImpl* impl;
+    Impl* impl;
 };
 
 #ifndef CNOID_BASE_MVOUT_DECLARED
 #define CNOID_BASE_MVOUT_DECLARED
-CNOID_EXPORT std::ostream& mvout(bool doFlush = false);
+CNOID_EXPORT std::ostream& mvout(bool doFlush = true);
 #endif
 
 CNOID_EXPORT void showMessageBox(const std::string& message);

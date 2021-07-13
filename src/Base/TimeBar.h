@@ -11,7 +11,6 @@
 namespace cnoid {
 
 class ExtensionManager;
-class TimeBarImpl;
 
 class CNOID_EXPORT TimeBar : public ToolBar
 {
@@ -66,14 +65,25 @@ public:
     void setRepeatMode(bool on);
 	
     void startPlayback();
-    void startPlaybackFromFillLevel();
+    void startPlayback(double time);
     void stopPlayback(bool isStoppedManually = false);
     bool isDoingPlayback();
 
-    int startFillLevelUpdate();
-    void updateFillLevel(int id, double time);
-    void stopFillLevelUpdate(int id);
-    void setFillLevelSync(bool on);
+    int startOngoingTimeUpdate(double time = 0.0);
+    void updateOngoingTime(int id, double time);
+    void stopOngoingTimeUpdate(int id);
+    void setOngoingTimeSyncEnabled(bool on);
+
+    [[deprecated]]
+    void startPlaybackFromFillLevel() { startPlayback(); }
+    [[deprecated]]
+    int startFillLevelUpdate(double time = 0.0) { return startOngoingTimeUpdate(time); }
+    [[deprecated]]
+    void updateFillLevel(int id, double time) { updateOngoingTime(id, time); }
+    [[deprecated]]
+    void stopFillLevelUpdate(int id) { stopOngoingTimeUpdate(id); }
+    [[deprecated]]
+    void setFillLevelSync(bool on) { setOngoingTimeSyncEnabled(on); }
 
     virtual int stretchableDefaultWidth() const;
 
@@ -84,8 +94,9 @@ protected:
         
 private:
     TimeBar();
-        
-    TimeBarImpl* impl;
+
+    class Impl;
+    Impl* impl;
     double time_;
     double frameRate_;
     bool isBeatMode_;
@@ -93,8 +104,6 @@ private:
     double tempo_;
     int beatNumerator_;
     int beatDenominator_;
-
-    friend class TimeBarImpl;
 };
 
 }

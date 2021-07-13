@@ -199,6 +199,12 @@ void YAMLWriter::setIndentWidth(int n)
 }
 
 
+int YAMLWriter::indentWidth() const
+{
+    return impl->indentWidth;
+}
+
+
 void YAMLWriter::setKeyOrderPreservationMode(bool on)
 {
     impl->isKeyOrderPreservationMode = on;
@@ -282,6 +288,9 @@ bool YAMLWriterImpl::makeValuePutReady()
         return current->isKeyPut;
     case LISTING:
         if(!current->isFlowStyle){
+            if(!current->hasValuesBeenPut){
+                newLine();
+            }
             indent();
             os() << "- ";
         }
@@ -522,11 +531,7 @@ void YAMLWriterImpl::startMappingSub(bool isFlowStyle)
     if(startValuePut()){
         int parentType = current->type;
         State& state = pushState(MAPPING, isFlowStyle);
-        if(!state.isFlowStyle){
-            if(parentType == MAPPING){
-                newLine();
-            }
-        } else {
+        if(state.isFlowStyle){
             os() << "{ ";
             isCurrentNewLine = false;
         }
@@ -542,6 +547,9 @@ template<class KeyStringType> void YAMLWriterImpl::putKey(const KeyStringType& k
                 os() << ", ";
             }
         } else {
+            if(!current->hasValuesBeenPut){
+                newLine();
+            }
             indent();
         }
 
@@ -580,6 +588,10 @@ void YAMLWriterImpl::endMapping()
     if(current->type == MAPPING){
         if(current->isFlowStyle){
             os() << " }";
+        } else {
+            if(!current->hasValuesBeenPut){
+                os() << "{ }"; // Put an empty mapping
+            }
         }
         popState();
         endValuePut();
@@ -609,11 +621,7 @@ void YAMLWriterImpl::startListingSub(bool isFlowStyle)
 {
     if(startValuePut()){
         State& state = pushState(LISTING, isFlowStyle);
-        if(!state.isFlowStyle){
-            if(!isTopLevel()){
-                newLine();
-            }
-        } else {
+        if(state.isFlowStyle){
             os() << "[ ";
             isCurrentNewLine = false;
             doInsertLineFeed = false;
@@ -627,6 +635,10 @@ void YAMLWriterImpl::endListing()
     if(current->type == LISTING){
         if(current->isFlowStyle){
             os() << " ]";
+        } else {
+            if(!current->hasValuesBeenPut){
+                os() << "[ ]"; // Put an empty listing
+            }
         }
         popState();
         endValuePut();

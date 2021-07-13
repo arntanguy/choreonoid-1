@@ -26,13 +26,13 @@ class BodyTrackingCameraTransform : public InteractiveCameraTransform
 {
   public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-    
+
     BodyItem* bodyItem;
     string targetLinkName;
-    Link* targetLink;
+    LinkPtr targetLink;
     ScopedConnection connection;
     Vector3 relativeTranslationFromBody;
-    Affine3 relativePositionFromBody;
+    Isometry3 relativePositionFromBody;
     bool isSigUpdatedEmittedBySelf;
     bool isConstantRelativeAttitudeMode_;
 
@@ -42,6 +42,8 @@ class BodyTrackingCameraTransform : public InteractiveCameraTransform
         relativePositionFromBody.setIdentity();
         isSigUpdatedEmittedBySelf = false;
         isConstantRelativeAttitudeMode_ = false;
+
+        initialize();
     }
     
     BodyTrackingCameraTransform(const BodyTrackingCameraTransform& org, CloneMap* cloneMap)
@@ -51,6 +53,20 @@ class BodyTrackingCameraTransform : public InteractiveCameraTransform
         relativePositionFromBody.setIdentity();
         isSigUpdatedEmittedBySelf = false;
         isConstantRelativeAttitudeMode_ = org.isConstantRelativeAttitudeMode_;
+
+        initialize();
+    }
+
+    void initialize()
+    {
+        sigUpdated().connect(
+            [this](const SgUpdate& update){
+                if(isSigUpdatedEmittedBySelf){
+                    isSigUpdatedEmittedBySelf = false;
+                } else {
+                    updateRelativePosition();
+                }
+            });
     }
 
     virtual Referenced* doClone(CloneMap* cloneMap) const override {
@@ -95,15 +111,6 @@ class BodyTrackingCameraTransform : public InteractiveCameraTransform
         }
     }
 
-    virtual void onUpdated(SgUpdate& update) override {
-        if(isSigUpdatedEmittedBySelf){
-            isSigUpdatedEmittedBySelf = false;
-        } else {
-            updateRelativePosition();
-        }
-        InteractiveCameraTransform::onUpdated(update);
-    }
-    
     void updateRelativePosition(){
         if(bodyItem){
             relativeTranslationFromBody = translation() - targetLink->translation();
@@ -119,6 +126,8 @@ class BodyTrackingCameraTransform : public InteractiveCameraTransform
                 setTranslation(targetLink->translation() + relativeTranslationFromBody);
             }
             isSigUpdatedEmittedBySelf = true;
+
+            // TODO: Use SgUpdate of BodyTrackingCameraItemImpl
             notifyUpdate();
         }
     }
@@ -131,17 +140,18 @@ typedef ref_ptr<BodyTrackingCameraTransform> BodyTrackingCameraTransformPtr;
 
 namespace cnoid {
 
-class BodyTrackingCameraItemImpl
+class BodyTrackingCameraItem::Impl
 {
 public:
     BodyTrackingCameraTransformPtr cameraTransform;
     SgPerspectiveCameraPtr persCamera;
     SgOrthographicCameraPtr orthoCamera;
+    SgCameraPtr currentCamera;
     SgUpdate update;
     Selection cameraType;
     
-    BodyTrackingCameraItemImpl();
-    BodyTrackingCameraItemImpl(const BodyTrackingCameraItemImpl& org);
+    Impl(BodyTrackingCameraItem* self, bool initCameraPosition);
+    Impl(BodyTrackingCameraItem* self, const Impl& org);
     void doPutProperties(PutPropertyFunction& putProperty);
     bool onKeepRelativeAttitudeChanged(bool on);
     bool setClipDistances(double nearDistance, double farDistance);
@@ -161,42 +171,48 @@ void BodyTrackingCameraItem::initializeClass(ExtensionManager* ext)
 
 
 BodyTrackingCameraItem::BodyTrackingCameraItem()
+    : Item("BodyTrackingCamera")
 {
-    impl = new BodyTrackingCameraItemImpl;
+    impl = new Impl(this, true);
 }
 
 
 BodyTrackingCameraItem::BodyTrackingCameraItem(const BodyTrackingCameraItem& org)
     : Item(org)
 {
-    impl = new BodyTrackingCameraItemImpl(*org.impl);
-    setName(org.name());
+    impl = new Impl(this, *org.impl);
 }
 
 
-BodyTrackingCameraItemImpl::BodyTrackingCameraItemImpl()
-    : cameraType(BodyTrackingCameraItem::N_CAMERA_TYPE, CNOID_GETTEXT_DOMAIN_NAME)
+BodyTrackingCameraItem::Impl::Impl(BodyTrackingCameraItem* self, bool initCameraPosition)
+    : cameraType(NumCameraTypes, CNOID_GETTEXT_DOMAIN_NAME)
 {
-    cameraType.setSymbol(BodyTrackingCameraItem::PERSPECTIVE,  N_("Perspective"));
-    cameraType.setSymbol(BodyTrackingCameraItem::ORTHOGRAPHIC, N_("Orthographic"));
-    cameraType.select(BodyTrackingCameraItem::PERSPECTIVE);
+    cameraType.setSymbol(Perspective,  N_("Perspective"));
+    cameraType.setSymbol(Orthographic, N_("Orthographic"));
+    cameraType.select(Perspective);
 
     cameraTransform = new BodyTrackingCameraTransform();
-    cameraTransform->setPosition(
-        SceneView::instance()->sceneWidget()->builtinCameraTransform()->position());
+    if(initCameraPosition){
+        cameraTransform->setPosition(
+            SceneView::instance()->sceneWidget()->builtinCameraTransform()->position());
+    }
 
     persCamera = new SgPerspectiveCamera();
+    persCamera->setName(self->name());
     cameraTransform->addChild(persCamera);
+    currentCamera = persCamera;
 
     orthoCamera = new SgOrthographicCamera();
+    orthoCamera->setName(self->name());
     //cameraTransform->addChild(orthoCamera);
 }
 
 
-BodyTrackingCameraItemImpl::BodyTrackingCameraItemImpl(const BodyTrackingCameraItemImpl& org)
-    : BodyTrackingCameraItemImpl()
+BodyTrackingCameraItem::Impl::Impl(BodyTrackingCameraItem* self, const Impl& org)
+    : Impl(self, false)
 {
     cameraType = org.cameraType;
+    cameraTransform->setPosition(org.cameraTransform->position());
     cameraTransform->targetLinkName = org.cameraTransform->targetLinkName;
 }
 
@@ -209,14 +225,12 @@ BodyTrackingCameraItem::~BodyTrackingCameraItem()
 
 bool BodyTrackingCameraItem::setName(const std::string& name)
 {
-    if(Item::setName(name)){
-        impl->persCamera->setName(name);
-        impl->persCamera->notifyUpdate(impl->update);
-        impl->orthoCamera->setName(name);
-        impl->orthoCamera->notifyUpdate(impl->update);
-        return true;
-    }
-    return false;
+    impl->persCamera->setName(name);
+    impl->orthoCamera->setName(name);
+    Item::setName(name);
+    impl->persCamera->notifyUpdate(impl->update);
+    impl->orthoCamera->notifyUpdate(impl->update);
+    return true;
 }
 
 
@@ -226,13 +240,103 @@ Item* BodyTrackingCameraItem::doDuplicate() const
 }
 
 
+void BodyTrackingCameraItem::setTargetLink(const std::string& name)
+{
+    impl->cameraTransform->setTargetLink(name);
+}
+
+
+const std::string& BodyTrackingCameraItem::targetLinkName() const
+{
+    return impl->cameraTransform->targetLinkName;
+}
+
+
+void BodyTrackingCameraItem::setRotationSyncEnabled(bool on)
+{
+    impl->cameraTransform->setConstantRelativeAttitudeMode(on);
+}
+
+
+bool BodyTrackingCameraItem::isRotationSyncEnabled() const
+{
+    return impl->cameraTransform->isConstantRelativeAttitudeMode();
+}
+
+
+void BodyTrackingCameraItem::setCameraType(CameraType type)
+{
+    impl->setCameraType(type);
+}
+
+
+/**
+   \todo Improve the scene widget so that the current camera path described in a string list
+   can be kept even if the actual camera node is changed, and simplify the following implementation.
+*/
+bool BodyTrackingCameraItem::Impl::setCameraType(int index)
+{
+    if(cameraType.selectedIndex() == index){
+        return true;
+    }
+
+    cameraType.select(index);
+
+    SgCamera* cameraToRemove;
+    if(cameraType.is(BodyTrackingCameraItem::Perspective)){
+        currentCamera = persCamera;
+        cameraToRemove = orthoCamera;
+    }else if(cameraType.is(BodyTrackingCameraItem::Orthographic)){
+        currentCamera = orthoCamera;
+        cameraToRemove = persCamera;
+    }
+
+    vector<SceneRenderer*> renderers;
+    for(auto sceneView : SceneView::instances()){
+        renderers.push_back(sceneView->sceneWidget()->renderer());
+    }
+
+    cameraTransform->addChild(currentCamera, update);
+    for(auto renderer : renderers){
+        if(renderer->currentCamera() == cameraToRemove){
+            renderer->extractPreprocessedNodes();
+            renderer->setCurrentCamera(currentCamera);
+        }
+    }
+    cameraTransform->removeChild(cameraToRemove, update);
+    for(auto renderer : renderers){
+        renderer->extractPreprocessedNodes();
+    }
+
+    return true;
+}
+
+
+BodyTrackingCameraItem::CameraType BodyTrackingCameraItem::cameraType() const
+{
+    return static_cast<CameraType>(impl->cameraType.which());
+}
+
+
+SgCamera* BodyTrackingCameraItem::currentCamera()
+{
+    return impl->currentCamera;
+}
+
+
+SgPosTransform* BodyTrackingCameraItem::cameraTransform()
+{
+    return impl->cameraTransform;
+}
+
+
 SgNode* BodyTrackingCameraItem::getScene()
 {
     return impl->cameraTransform;
 }
 
 
-void BodyTrackingCameraItem::onPositionChanged()
+void BodyTrackingCameraItem::onTreePathChanged()
 {
     impl->cameraTransform->setBodyItem(findOwnerItem<BodyItem>());
 }
@@ -244,7 +348,7 @@ void BodyTrackingCameraItem::doPutProperties(PutPropertyFunction& putProperty)
 }
 
 
-void BodyTrackingCameraItemImpl::doPutProperties(PutPropertyFunction& putProperty)
+void BodyTrackingCameraItem::Impl::doPutProperties(PutPropertyFunction& putProperty)
 {
     putProperty(_("Target link"), cameraTransform->targetLinkName,
                 [&](const string& name){ cameraTransform->setTargetLink(name); return true; });
@@ -261,14 +365,14 @@ void BodyTrackingCameraItemImpl::doPutProperties(PutPropertyFunction& putPropert
 }
 
 
-bool BodyTrackingCameraItemImpl::onKeepRelativeAttitudeChanged(bool on)
+bool BodyTrackingCameraItem::Impl::onKeepRelativeAttitudeChanged(bool on)
 {
     cameraTransform->setConstantRelativeAttitudeMode(on);
     return true;
 }
 
 
-bool BodyTrackingCameraItemImpl::setClipDistances(double nearDistance, double farDistance)
+bool BodyTrackingCameraItem::Impl::setClipDistances(double nearDistance, double farDistance)
 {
     if(persCamera->nearClipDistance() != nearDistance || persCamera->farClipDistance() != farDistance){
         persCamera->setNearClipDistance(nearDistance);
@@ -282,53 +386,10 @@ bool BodyTrackingCameraItemImpl::setClipDistances(double nearDistance, double fa
 }
 
 
-bool BodyTrackingCameraItemImpl::setFieldOfView(double fov)
+bool BodyTrackingCameraItem::Impl::setFieldOfView(double fov)
 {
     persCamera->setFieldOfView(fov);
     persCamera->notifyUpdate(update);
-    return true;
-}
-
-
-/**
-   \todo Improve the scene widget so that the current camera path described in a string list
-   can be kept even if the actual camera node is changed, and simplify the following implementation.
-*/
-bool BodyTrackingCameraItemImpl::setCameraType(int index)
-{
-    if(cameraType.selectedIndex() == index){
-        return true;
-    }
-
-    cameraType.select(index);
-
-    SgCamera* newCamera;
-    SgCamera* removeCamera;
-    if(cameraType.is(BodyTrackingCameraItem::PERSPECTIVE)){
-        newCamera = persCamera;
-        removeCamera = orthoCamera;
-    }else if(cameraType.is(BodyTrackingCameraItem::ORTHOGRAPHIC)){
-        newCamera = orthoCamera;
-        removeCamera = persCamera;
-    }
-
-    vector<SceneRenderer*> renderers;
-    for(auto sceneView : SceneView::instances()){
-        renderers.push_back(sceneView->sceneWidget()->renderer());
-    }
-
-    cameraTransform->addChild(newCamera, true);
-    for(auto renderer : renderers){
-        if(renderer->currentCamera() == removeCamera){
-            renderer->extractPreprocessedNodes();
-            renderer->setCurrentCamera(newCamera);
-        }
-    }
-    cameraTransform->removeChild(removeCamera, true);
-    for(auto renderer : renderers){
-        renderer->extractPreprocessedNodes();
-    }
-
     return true;
 }
 

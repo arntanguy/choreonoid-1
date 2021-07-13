@@ -117,6 +117,8 @@ public:
 }
 
 
+namespace {
+
 PositionListModel::PositionListModel(MprPositionListView::Impl* view)
     : QAbstractTableModel(view),
       view(view),
@@ -132,7 +134,7 @@ void PositionListModel::setProgramItem(MprProgramItemBase* programItem)
 
     this->programItem = programItem;
     if(programItem){
-        this->positionList = programItem->positionList();
+        this->positionList = programItem->program()->positionList();
     } else {
         this->positionList = nullptr;
     }
@@ -509,6 +511,8 @@ QSize CheckItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return size;
 }
 
+}
+
 
 void MprPositionListView::initializeClass(ExtensionManager* ext)
 {
@@ -524,7 +528,8 @@ MprPositionListView::MprPositionListView()
 
 
 MprPositionListView::Impl::Impl(MprPositionListView* self)
-    : self(self),
+    : QTableView(self),
+      self(self),
       targetItemPicker(self)
 {
     self->setDefaultLayoutArea(View::RIGHT);
@@ -557,7 +562,8 @@ MprPositionListView::Impl::Impl(MprPositionListView* self)
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTabKeyNavigation(true);
     setCornerButtonEnabled(true);
-    setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setItemDelegateForColumn(JointSpaceCheckColumn, new CheckItemDelegate(this));
     setEditTriggers(
         QAbstractItemView::DoubleClicked |
@@ -573,9 +579,7 @@ MprPositionListView::Impl::Impl(MprPositionListView* self)
     hheader->setSectionResizeMode(NoteColumn, QHeaderView::Stretch);
     hheader->setSectionResizeMode(PositionColumn, QHeaderView::ResizeToContents);
     hheader->setSectionResizeMode(JointSpaceCheckColumn, QHeaderView::ResizeToContents);
-    auto vheader = verticalHeader();
-    vheader->setSectionResizeMode(QHeaderView::ResizeToContents);
-    vheader->hide();
+    verticalHeader()->hide();
 
     connect(this, &QTableView::pressed,
             [this](const QModelIndex& index){
@@ -631,7 +635,7 @@ void MprPositionListView::Impl::setProgramItem(MprProgramItemBase* item)
         } else {
             targetLabel.setText(item->displayName().c_str());
         }
-        positionList = item->positionList();
+        positionList = item->program()->positionList();
         positionListModel->setProgramItem(item);
     } else {
         targetLabel.setText("---");

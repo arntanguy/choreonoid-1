@@ -68,18 +68,20 @@ struct AGXVehicleContinuousTrackDeviceDesc
     SgShapePtr nodeShape;
 };
 
-struct TrackState{
-        Vector3 boxSize;
-        Position position;
+struct TrackState
+{
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    Vector3 boxSize;
+    Isometry3 position;
 };
-typedef std::vector<TrackState> TrackStates;
+typedef std::vector<TrackState, Eigen::aligned_allocator<TrackState>> TrackStates;
 
 class AGXVehicleContinuousTrackDevice : private AGXVehicleContinuousTrackDeviceDesc, public Device
 {
 public:
     AGXVehicleContinuousTrackDevice(const AGXVehicleContinuousTrackDeviceDesc& desc);
     AGXVehicleContinuousTrackDevice(const AGXVehicleContinuousTrackDevice& org, bool copyStateOnly = false);
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const AGXVehicleContinuousTrackDevice& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -95,9 +97,9 @@ public:
     const vector<string> getIdlerNames() const;
     const vector<string> getRollerNames() const;
     void setDesc(const AGXVehicleContinuousTrackDeviceDesc& desc);
-    void getDesc(AGXVehicleContinuousTrackDeviceDesc& desc);
+    void getDesc(AGXVehicleContinuousTrackDeviceDesc& desc) const;
     void reserveTrackStateSize(const unsigned int& num );
-    void addTrackState(const Vector3& boxSize, const Position& pos);
+    void addTrackState(const Vector3& boxSize, const Isometry3& pos);
     TrackStates& getTrackStates();
     SgShape* getNodeShape();
 

@@ -6,6 +6,7 @@
 #include "View.h"
 #include <QApplication>
 #include <QLabel>
+#include <regex>
 #include "gettext.h"
 
 using namespace std;
@@ -46,8 +47,8 @@ InfoBar::InfoBar()
     
     currentIndicator = nullptr;
 
-    connect(qApp, SIGNAL(focusChanged(QWidget*, QWidget*)),
-            this, SLOT(onFocusChanged(QWidget*, QWidget*)));
+    connect(qApp, &QApplication::focusChanged,
+            [this](QWidget* old, QWidget* now){ onFocusChanged(old, now); });
 }
 
 
@@ -57,21 +58,24 @@ InfoBar::~InfoBar()
 }
 
 
-void InfoBar::notify(const char* message)
+void InfoBar::notify(const std::string& message)
 {
-    showMessage(message, 5000);
+    static regex escseqPattern("\\x1b\\[([0-9;]*)([A-z])");
+    plainTextMessage.clear();
+    regex_replace(back_inserter(plainTextMessage), message.begin(), message.end(), escseqPattern, "");
+    showMessage(QString(plainTextMessage.c_str()), 5000);
 }
 
 
-void InfoBar::notify(const std::string& message)
+void InfoBar::notify(const char* message)
 {
-    showMessage(QString(message.c_str()), 5000);
+    notify(string(message));
 }
 
 
 void InfoBar::notify(const QString& message)
 {
-    showMessage(message, 5000);
+    notify(message.toStdString());
 }
 
 
@@ -82,8 +86,9 @@ void InfoBar::setIndicator(QWidget* indicator)
         if(indicator){
             indicatorLayout->addWidget(indicator);
             indicator->show();
-            connect(indicator, SIGNAL(destroyed(QObject*)),
-                    this, SLOT(onIndicatorDestroyed(QObject*)));
+            indicatorConnection =
+                connect(indicator, &QObject::destroyed,
+                        [this](QObject* obj){ onIndicatorDestroyed(obj); });
             currentIndicator = indicator;
         }
     }
@@ -96,8 +101,8 @@ void InfoBar::removeCurrentIndicator()
         indicatorLayout->removeWidget(currentIndicator);
         currentIndicator->hide();
         currentIndicator->setParent(nullptr);
-        currentIndicator->disconnect(SIGNAL(destroyed(QObject*)), this, SLOT(onIndicatorDestroyed(QObject*)));
         currentIndicator = nullptr;
+        disconnect(indicatorConnection);
     }
 }    
 
@@ -110,7 +115,7 @@ void InfoBar::onIndicatorDestroyed(QObject* obj)
 }
 
 
-void InfoBar::onFocusChanged(QWidget* old, QWidget* now)
+void InfoBar::onFocusChanged(QWidget* /* old */, QWidget* now)
 {
     QWidget* widget = now;
     while(widget){

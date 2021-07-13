@@ -8,6 +8,7 @@
 #include "SceneCameras.h"
 #include "SceneLights.h"
 #include "SceneEffects.h"
+#include "EigenUtil.h"
 #include <cnoid/stdx/variant>
 #include <set>
 #include <unordered_map>
@@ -51,7 +52,6 @@ struct PreproNode
     }
 };
 
-
 class PreproTreeExtractor
 {
     PolymorphicSceneNodeFunctionSet functions;
@@ -82,23 +82,26 @@ SceneRenderer::PropertyKey::PropertyKey(const std::string& key)
     }
 }
 
-class SceneRendererImpl
+class SceneRenderer::Impl
 {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    
     SceneRenderer* self;
     string name;
-    bool isRendering;
-    bool doPreprocessedNodeTreeExtraction;
-    Signal<void()> sigRenderingRequest;
+    bool builtinFlagToUpdatePreprocessedNodeTree;
+    bool* pFlagToUpdatePreprocessedNodeTree;
     std::unique_ptr<PreproNode> preproTree;
 
     struct CameraInfo
     {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-        CameraInfo() : camera(0), M(Affine3::Identity()), node(0) { }
-        CameraInfo(SgCamera* camera, const Affine3& M, PreproNode* node)
-            : camera(camera), M(M), node(node) { }
+        CameraInfo() : camera(0), M(Isometry3::Identity()), node(0) { }
+        CameraInfo(SgCamera* camera, const Isometry3& M, PreproNode* node)
+            : camera(camera), M(M), node(node)
+        { }
+        
         SgCamera* camera;
 
         // I want to use 'T' here, but that causes a compile error (c2327) for VC++2010.
@@ -106,7 +109,7 @@ public:
         // and it seems that the name of a template parameter and this member conflicts.
         // So I changed the name to 'M'.
         // This behavior of VC++ seems stupid!!!
-        Affine3 M;
+        Isometry3 M;
         PreproNode* node;
     };
 
@@ -116,11 +119,16 @@ public:
     CameraInfoArray* cameras;
     CameraInfoArray* prevCameras;
 
+    Isometry3 I;
+
     bool camerasChanged;
     bool currentCameraRemoved;
+    bool isCurrentCameraAutoRestorationMode;
+    bool isPreferredCameraCurrent;
     int currentCameraIndex;
     SgCamera* currentCamera;
     vector<SgNodePath> cameraPaths;
+    vector<string> preferredCurrentCameraPathStrings;
     Signal<void()> sigCamerasChanged;
     Signal<void()> sigCurrentCameraChanged;
         
@@ -129,9 +137,9 @@ public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
         LightInfo() : light(0) { }
-        LightInfo(SgLight* light, const Affine3& M) : light(light), M(M) { } 
+        LightInfo(SgLight* light, const Isometry3& M) : light(light), M(M) { }
         SgLight* light;
-        Affine3 M;
+        Isometry3 M;
     };
     vector<LightInfo, Eigen::aligned_allocator<LightInfo>> lights;
 
@@ -148,16 +156,18 @@ public:
     typedef stdx::variant<bool, int, double> PropertyValue;
     vector<PropertyValue> properties;
     
-    SceneRendererImpl(SceneRenderer* self);
+    Impl(SceneRenderer* self);
 
     void extractPreproNodes();
     void extractPreproNodeIter(PreproNode* node, const Affine3& T);
     void updateCameraPaths();
-    void setCurrentCamera(int index, bool doRenderingRequest);
+    void setCurrentCamera(int index);
     bool setCurrentCamera(SgCamera* camera);
+    bool getSimplifiedCameraPathStrings(int cameraIndex, std::vector<std::string>& out_pathStrings);
     void onExtensionAdded(std::function<void(SceneRenderer* renderer)> func);
 
-    template<class ValueType> void setProperty(SceneRenderer::PropertyKey key, ValueType value){
+    template<class ValueType>
+    void setProperty(SceneRenderer::PropertyKey key, ValueType value){
         const int id = key.id;
         if(id >= static_cast<int>(properties.size())){
             properties.resize(id + 1);
@@ -165,7 +175,8 @@ public:
         properties[id] = value;
     }
 
-    template<class ValueType> ValueType property(SceneRenderer::PropertyKey key, int which, ValueType defaultValue){
+    template<class ValueType>
+    ValueType property(SceneRenderer::PropertyKey key, int which, ValueType defaultValue){
         const int id = key.id;
         if(id >= static_cast<int>(properties.size())){
             properties.resize(id + 1);
@@ -184,22 +195,25 @@ public:
 
 SceneRenderer::SceneRenderer()
 {
-    impl = new SceneRendererImpl(this);
+    impl = new Impl(this);
     std::lock_guard<std::mutex> guard(extensionMutex);
     renderers.insert(this);
 }
 
 
-SceneRendererImpl::SceneRendererImpl(SceneRenderer* self)
+SceneRenderer::Impl::Impl(SceneRenderer* self)
     : self(self)
 {
-    isRendering = false;
-    doPreprocessedNodeTreeExtraction = true;
+    builtinFlagToUpdatePreprocessedNodeTree = true;
+    pFlagToUpdatePreprocessedNodeTree = &builtinFlagToUpdatePreprocessedNodeTree;
 
     cameras = &cameras1;
     prevCameras = &cameras2;
+    isCurrentCameraAutoRestorationMode = false;
+    isPreferredCameraCurrent = false;
     currentCameraIndex = -1;
-    currentCamera = 0;
+    currentCamera = nullptr;
+    I.setIdentity();
 
     headLight = new SgDirectionalLight();
     headLight->setAmbientIntensity(0.0f);
@@ -231,40 +245,20 @@ const std::string& SceneRenderer::name() const
 
 void SceneRenderer::clearScene()
 {
-    scene()->clearChildren(true);
-}
-
-
-Signal<void()>& SceneRenderer::sigRenderingRequest()
-{
-    return impl->sigRenderingRequest;
-}
-
-
-void SceneRenderer::onSceneGraphUpdated(const SgUpdate& update)
-{
-    if(update.action() & (SgUpdate::ADDED | SgUpdate::REMOVED)){
-        impl->doPreprocessedNodeTreeExtraction = true;
-    }
-    if(!impl->isRendering){
-        impl->sigRenderingRequest();
-    }
+    SgTmpUpdate update;
+    scene()->clearChildren(update);
 }
 
 
 void SceneRenderer::render()
 {
-    impl->isRendering = true;
     doRender();
-    impl->isRendering = false;
 }
 
 
 bool SceneRenderer::pick(int x, int y)
 {
-    impl->isRendering = true;
     bool result = doPick(x, y);
-    impl->isRendering = false;
     return result;
 }
 
@@ -317,18 +311,25 @@ double SceneRenderer::property(PropertyKey key, double defaultValue) const
 }
 
 
+void SceneRenderer::setFlagVariableToUpdatePreprocessedNodeTree(bool& flag)
+{
+    impl->pFlagToUpdatePreprocessedNodeTree = &flag;
+}
+
+
 void SceneRenderer::extractPreprocessedNodes()
 {
     impl->extractPreproNodes();
 }
 
 
-void SceneRendererImpl::extractPreproNodes()
+void SceneRenderer::Impl::extractPreproNodes()
 {
-    if(doPreprocessedNodeTreeExtraction){
+    if(*pFlagToUpdatePreprocessedNodeTree){
         PreproTreeExtractor extractor;
         preproTree.reset(extractor.apply(self->sceneRoot()));
-        doPreprocessedNodeTreeExtraction = false;
+        *pFlagToUpdatePreprocessedNodeTree = false;
+        builtinFlagToUpdatePreprocessedNodeTree = true;
     }
 
     std::swap(cameras, prevCameras);
@@ -351,16 +352,31 @@ void SceneRendererImpl::extractPreproNodes()
     if(camerasChanged){
         if(currentCameraRemoved){
             currentCameraIndex = 0;
+            if(isPreferredCameraCurrent){
+                isPreferredCameraCurrent = false;
+            }
         }
         cameraPaths.clear();
         sigCamerasChanged();
     }
 
-    setCurrentCamera(currentCameraIndex, false);
+    bool isCurrentCameraUpdated = false;
+    if(isCurrentCameraAutoRestorationMode){
+        if(!isPreferredCameraCurrent && !preferredCurrentCameraPathStrings.empty()){
+            if(self->setCurrentCameraPath(preferredCurrentCameraPathStrings)){
+                isPreferredCameraCurrent = true;
+                isCurrentCameraUpdated = true;
+            }
+        }
+    }
+
+    if(!isCurrentCameraUpdated){
+        setCurrentCamera(currentCameraIndex);
+    }
 }
 
 
-void SceneRendererImpl::extractPreproNodeIter(PreproNode* node, const Affine3& T)
+void SceneRenderer::Impl::extractPreproNodeIter(PreproNode* node, const Affine3& T)
 {
     switch(stdx::get_variant_index(node->node)){
 
@@ -390,7 +406,7 @@ void SceneRendererImpl::extractPreproNodeIter(PreproNode* node, const Affine3& T
     {
         SgLight* light = stdx::get<SgLight*>(node->node);
         if(additionalLightsEnabled || defaultLights.find(light) != defaultLights.end()){
-            lights.push_back(LightInfo(light, T));
+            lights.push_back(LightInfo(light, convertToIsometryWithOrthonormalization(T)));
         }
         break;
     }
@@ -415,7 +431,7 @@ void SceneRendererImpl::extractPreproNodeIter(PreproNode* node, const Affine3& T
             currentCameraRemoved = false;
             currentCameraIndex = cameras->size();
         }
-        cameras->push_back(CameraInfo(camera, T, node));
+        cameras->push_back(CameraInfo(camera, convertToIsometryWithOrthonormalization(T), node));
     }
     break;
 
@@ -424,6 +440,8 @@ void SceneRendererImpl::extractPreproNodeIter(PreproNode* node, const Affine3& T
     }
 }
 
+
+namespace {
 
 PreproTreeExtractor::PreproTreeExtractor()
 {
@@ -475,7 +493,7 @@ PreproTreeExtractor::PreproTreeExtractor()
 
 PreproNode* PreproTreeExtractor::apply(SgNode* snode)
 {
-    node = 0;
+    node = nullptr;
     found = false;
     functions.dispatch(snode);
     return node;
@@ -490,7 +508,7 @@ void PreproTreeExtractor::visitGroup(SgGroup* group)
 
     for(SgGroup::const_reverse_iterator p = group->rbegin(); p != group->rend(); ++p){
         
-        node = 0;
+        node = nullptr;
         found = false;
 
         functions.dispatch(*p);
@@ -513,8 +531,10 @@ void PreproTreeExtractor::visitGroup(SgGroup* group)
         node = self;
     } else {
         delete self;
-        node = 0;
+        node = nullptr;
     }
+}
+
 }
 
 
@@ -539,7 +559,7 @@ const SgNodePath& SceneRenderer::cameraPath(int index) const
 }
 
 
-void SceneRendererImpl::updateCameraPaths()
+void SceneRenderer::Impl::updateCameraPaths()
 {
     SgNodePath tmpPath;
     const int n = cameras->size();
@@ -563,6 +583,16 @@ void SceneRendererImpl::updateCameraPaths()
 }
 
 
+const Isometry3& SceneRenderer::cameraPosition(int index) const
+{
+    if(index < static_cast<int>(impl->cameras->size())){
+        return (*(impl->cameras))[index].M;
+    } else {
+        return impl->I;
+    }
+}
+
+
 SignalProxy<void()> SceneRenderer::sigCamerasChanged() const
 {
     return impl->sigCamerasChanged;
@@ -571,23 +601,24 @@ SignalProxy<void()> SceneRenderer::sigCamerasChanged() const
 
 void SceneRenderer::setCurrentCamera(int index)
 {
-    impl->setCurrentCamera(index, true);
+    impl->setCurrentCamera(index);
 }
 
 
-void SceneRendererImpl::setCurrentCamera(int index, bool doRenderingRequest)
+void SceneRenderer::Impl::setCurrentCamera(int index)
 {
-    SgCamera* newCamera = 0;
+    SgCamera* newCamera = nullptr;
     if(index >= 0 && index < static_cast<int>(cameras->size())){
         newCamera = (*cameras)[index].camera;
     }
     if(newCamera && newCamera != currentCamera){
         currentCameraIndex = index;
         currentCamera = newCamera;
-        sigCurrentCameraChanged();
-        if(doRenderingRequest){
-            sigRenderingRequest();
+        if(isCurrentCameraAutoRestorationMode){
+            getSimplifiedCameraPathStrings(index, preferredCurrentCameraPathStrings);
+            isPreferredCameraCurrent = true;
         }
+        sigCurrentCameraChanged();
     }
 }
 
@@ -598,12 +629,12 @@ bool SceneRenderer::setCurrentCamera(SgCamera* camera)
 }
 
 
-bool SceneRendererImpl::setCurrentCamera(SgCamera* camera)
+bool SceneRenderer::Impl::setCurrentCamera(SgCamera* camera)
 {
     if(camera != currentCamera){
         for(size_t i=0; i < cameras->size(); ++i){
             if((*cameras)[i].camera == camera){
-                setCurrentCamera(i, true);
+                setCurrentCamera(i);
                 return true;
             }
         }
@@ -624,13 +655,12 @@ int SceneRenderer::currentCameraIndex() const
 }
 
 
-const Affine3& SceneRenderer::currentCameraPosition() const
+const Isometry3& SceneRenderer::currentCameraPosition() const
 {
     if(impl->currentCameraIndex >= 0){
         return (*(impl->cameras))[impl->currentCameraIndex].M;
     } else {
-        static Affine3 I = Affine3::Identity();
-        return I;
+        return impl->I;
     }
 }
 
@@ -641,12 +671,27 @@ SignalProxy<void()> SceneRenderer::sigCurrentCameraChanged()
 }
 
 
-bool SceneRenderer::getSimplifiedCameraPathStrings(int index, std::vector<std::string>& out_pathStrings)
+std::vector<std::string> SceneRenderer::simplifiedCameraPathStrings(int cameraIndex)
+{
+    std::vector<std::string> pathStrings;
+    impl->getSimplifiedCameraPathStrings(cameraIndex, pathStrings);
+    return pathStrings;
+}
+
+
+bool SceneRenderer::getSimplifiedCameraPathStrings(int cameraIndex, std::vector<std::string>& out_pathStrings)
+{
+    return impl->getSimplifiedCameraPathStrings(cameraIndex, out_pathStrings);
+}
+
+
+bool SceneRenderer::Impl::getSimplifiedCameraPathStrings(int cameraIndex, std::vector<std::string>& out_pathStrings)
 {
     out_pathStrings.clear();
-    
-    if(index < numCameras()){
-        const SgNodePath& path = cameraPath(index);
+
+    int n = cameras->size();
+    if(cameraIndex < n){
+        const SgNodePath& path = self->cameraPath(cameraIndex);
         const string& name = path.back()->name();
         if(!name.empty()){
             size_t n = path.size() - 1;
@@ -710,9 +755,21 @@ bool SceneRenderer::setCurrentCameraPath(const std::vector<std::string>& simplif
     int index = findCameraPath(simplifiedPathStrings);
     if(index >= 0){
         setCurrentCamera(index);
+        if(impl->isCurrentCameraAutoRestorationMode){
+            impl->preferredCurrentCameraPathStrings = simplifiedPathStrings;
+            impl->isPreferredCameraCurrent = true;
+        }
         return true;
     }
     return false;
+}
+
+
+void SceneRenderer::setCurrentCameraAutoRestorationMode(bool on)
+{
+    impl->isCurrentCameraAutoRestorationMode = on;
+    impl->preferredCurrentCameraPathStrings.clear();
+    impl->isPreferredCameraCurrent = false;
 }
 
 
@@ -722,14 +779,14 @@ int SceneRenderer::numLights() const
 }
 
 
-void SceneRenderer::getLightInfo(int index, SgLight*& out_light, Affine3& out_position) const
+void SceneRenderer::getLightInfo(int index, SgLight*& out_light, Isometry3& out_position) const
 {
     if(index < static_cast<int>(impl->lights.size())){
-        const SceneRendererImpl::LightInfo& info = impl->lights[index];
+        const Impl::LightInfo& info = impl->lights[index];
         out_light = info.light;
         out_position = info.M;
     } else {
-        out_light = 0;
+        out_light = nullptr;
     }
 }
 
@@ -808,7 +865,7 @@ void SceneRenderer::applyExtensions()
 }
 
 
-void SceneRendererImpl::onExtensionAdded(std::function<void(SceneRenderer* renderer)> func)
+void SceneRenderer::Impl::onExtensionAdded(std::function<void(SceneRenderer* renderer)> func)
 {
     std::lock_guard<std::mutex> guard(newExtensionMutex);
     newExtendFunctions.push_back(func);

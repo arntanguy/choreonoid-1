@@ -4,9 +4,7 @@
 #include "BodySelectionManager.h"
 #include <cnoid/Link>
 #include <cnoid/ViewManager>
-#include <cnoid/Buttons>
-#include <cnoid/ButtonGroup>
-#include <cnoid/CheckBox>
+#include <cnoid/ComboBox>
 #include <QBoxLayout>
 #include "gettext.h"
 
@@ -20,20 +18,18 @@ class LinkDeviceListView::Impl
 public:
     LinkDeviceTreeWidget treeWidget;
     ScopedConnection treeWidgetConnection;
-    CheckBox treeModeCheck;
-    ButtonGroup elementRadioGroup;
-    RadioButton allRadio;
-    RadioButton linkRadio;
-    RadioButton deviceRadio;
+    enum ElementType { ALL, LINK, JOINT, DEVICE };
+    ComboBox elementTypeCombo;
+    ComboBox listingModeCombo;
     BodySelectionManager* bodySelectionManager;
     ScopedConnection bodySelectionManagerConnection;
-    bool isTreeWidgetUpdateEnabled;
 
     Impl(LinkDeviceListView* self);
-    void onTargetElementTypeChanged(int id);
-    void onTreeModeToggled(bool on);
+    void onElementTypeChanged(int id, bool doUpdate);
+    void onListingModeChanged(int id, bool doUpdate);
     void onCurrentBodySelectionChanged(BodyItem* bodyItem, Link* link);
     void onTreeWidgetLinkSelectionChanged();
+    bool storeState(Archive& archive);
     bool restoreState(const Archive& archive);
 };
 
@@ -64,29 +60,16 @@ LinkDeviceListView::Impl::Impl(LinkDeviceListView* self)
     vbox->setSpacing(0);
 
     auto hbox = new QHBoxLayout;
-    int lmargin = self->style()->pixelMetric(QStyle::PM_LayoutLeftMargin);
-    hbox->addSpacing(lmargin / 2);
-    allRadio.setText(_("All"));
-    elementRadioGroup.addButton(&allRadio, 0);
-    hbox->addWidget(&allRadio);
-    linkRadio.setText(_("Links"));
-    linkRadio.setChecked(true);
-    elementRadioGroup.addButton(&linkRadio, 1);
-    hbox->addWidget(&linkRadio);
-    deviceRadio.setText(_("Devices"));
-    elementRadioGroup.addButton(&deviceRadio, 2);
-    hbox->addWidget(&deviceRadio);
+    elementTypeCombo.addItem(_("All"));
+    elementTypeCombo.addItem(_("Links"));
+    elementTypeCombo.addItem(_("Joints"));
+    elementTypeCombo.addItem(_("Devices"));
+    hbox->addWidget(&elementTypeCombo);
 
-    elementRadioGroup.sigButtonToggled().connect(
-        [&](int id, bool checked){
-            if(checked){ onTargetElementTypeChanged(id); }
-        });
-    
-    hbox->addStretch();
-    treeModeCheck.setText(_("Tree"));
-    treeModeCheck.sigToggled().connect(
-        [&](bool on){ onTreeModeToggled(on); });
-    hbox->addWidget(&treeModeCheck);
+    listingModeCombo.addItem(_("List"));
+    listingModeCombo.addItem(_("Tree"));
+    listingModeCombo.addItem(_("Grouped Tree"));
+    hbox->addWidget(&listingModeCombo);
     vbox->addLayout(hbox);
 
     auto hframe = new QFrame;
@@ -100,13 +83,17 @@ LinkDeviceListView::Impl::Impl(LinkDeviceListView* self)
     
     self->setLayout(vbox);
 
+    elementTypeCombo.sigCurrentIndexChanged().connect(
+        [&](int id){ onElementTypeChanged(id, true); });
+
+    listingModeCombo.sigCurrentIndexChanged().connect(
+        [&](int id){ onListingModeChanged(id, true); });
+
     treeWidgetConnection =
         treeWidget.sigLinkSelectionChanged().connect(
             [&](){ onTreeWidgetLinkSelectionChanged(); });
 
     bodySelectionManager = BodySelectionManager::instance();
-
-    isTreeWidgetUpdateEnabled = true;
 }
 
 
@@ -135,36 +122,41 @@ void LinkDeviceListView::onDeactivated()
 }
 
 
-void LinkDeviceListView::Impl::onTargetElementTypeChanged(int id)
+void LinkDeviceListView::Impl::onElementTypeChanged(int id, bool doUpdate)
 {
-    treeWidget.setLinkItemVisible(id != 2);
-    treeWidget.setDeviceItemVisible(id != 1);
-    if(isTreeWidgetUpdateEnabled){
+    if(id == DEVICE && listingModeCombo.currentIndex() != LinkDeviceTreeWidget::List){
+        listingModeCombo.blockSignals(true);
+        listingModeCombo.setCurrentIndex(LinkDeviceTreeWidget::List);
+        onListingModeChanged(LinkDeviceTreeWidget::List, false);
+        listingModeCombo.blockSignals(false);
+    }
+    
+    treeWidget.setLinkItemVisible(id == ALL || id == LINK);
+    treeWidget.setJointItemVisible(id == JOINT);
+    treeWidget.setDeviceItemVisible(id == ALL || id == DEVICE);
+
+    if(doUpdate){
         treeWidget.updateTreeItems();
     }
 }
 
 
-void LinkDeviceListView::Impl::onTreeModeToggled(bool on)
+void LinkDeviceListView::Impl::onListingModeChanged(int id, bool doUpdate)
 {
-    if(on){
-        treeWidget.setListingMode(LinkDeviceTreeWidget::Tree);
+    treeWidget.setListingMode(id);
 
-        if(deviceRadio.isChecked()){
-            elementRadioGroup.blockSignals(true);
-            allRadio.setChecked(true);
+    if(id != LinkDeviceTreeWidget::List){
+        if(elementTypeCombo.currentIndex() == DEVICE){
+            elementTypeCombo.blockSignals(true);
+            elementTypeCombo.setCurrentIndex(ALL);
             treeWidget.setLinkItemVisible(true);
             treeWidget.setDeviceItemVisible(true);
-            elementRadioGroup.blockSignals(false);
+            onElementTypeChanged(ALL, false);
+            elementTypeCombo.blockSignals(false);
         }
-        deviceRadio.setEnabled(false);
-            
-    } else {
-        treeWidget.setListingMode(LinkDeviceTreeWidget::List);
-        deviceRadio.setEnabled(true);
     }
-    
-    if(isTreeWidgetUpdateEnabled){
+
+    if(doUpdate){
         treeWidget.updateTreeItems();
     }
 }    
@@ -190,21 +182,39 @@ void LinkDeviceListView::Impl::onTreeWidgetLinkSelectionChanged()
 
 bool LinkDeviceListView::storeState(Archive& archive)
 {
-    archive.write("mode", impl->treeModeCheck.isChecked() ? "tree" : "list");
+    return impl->storeState(archive);
+}
 
+
+bool LinkDeviceListView::Impl::storeState(Archive& archive)
+{
     const char* etype = nullptr;
-    switch(impl->elementRadioGroup.checkedId()){
-    case 0: etype = "all";    break;
-    case 1: etype = "link";   break;
-    case 2: etype = "device"; break;
+    switch(elementTypeCombo.currentIndex()){
+    case ALL:    etype = "all";    break;
+    case LINK:   etype = "link";   break;
+    case JOINT:  etype = "joint";  break;
+    case DEVICE: etype = "device"; break;
     default: break;
     }
-    archive.write("element_type", etype);
+    if(etype){
+        archive.write("element_type", etype);
+    }
         
-    if(auto bodyItem = impl->treeWidget.bodyItem()){
+    const char* listingModeSymbol = nullptr;
+    switch(listingModeCombo.currentIndex()){
+    case LinkDeviceTreeWidget::List: listingModeSymbol = "list"; break;
+    case LinkDeviceTreeWidget::Tree: listingModeSymbol = "tree"; break;
+    case LinkDeviceTreeWidget::GroupedTree: listingModeSymbol = "grouped_tree"; break;
+    default: break;
+    }
+    if(listingModeSymbol){
+        archive.write("listingMode", listingModeSymbol);
+    }
+
+    if(auto bodyItem = treeWidget.bodyItem()){
         archive.writeItemId("current_body_item", bodyItem);
     }
-    return impl->treeWidget.storeState(archive);
+    return treeWidget.storeState(archive);
 }
 
 
@@ -216,27 +226,39 @@ bool LinkDeviceListView::restoreState(const Archive& archive)
 
 bool LinkDeviceListView::Impl::restoreState(const Archive& archive)
 {
-    int mode = LinkDeviceTreeWidget::List;
     string symbol;
-    if(archive.read("mode", symbol)){
-        if(symbol == "tree"){
-            mode = LinkDeviceTreeWidget::Tree;
-        }
-    }
-    int etype = 1;
+    int etype = LINK;
     if(archive.read("element_type", symbol)){
         if(symbol == "all"){
-            etype = 0;
+            etype = ALL;
+        } else if(symbol == "link"){
+            etype = LINK;
+        } else if(symbol == "joint"){
+            etype = JOINT;
         } else if(symbol == "device"){
-            etype = 2;
+            etype = DEVICE;
         }
     }
-    
-    isTreeWidgetUpdateEnabled = false;
-    treeModeCheck.setChecked(mode == LinkDeviceTreeWidget::Tree);
-    elementRadioGroup.button(etype)->setChecked(true);
-    isTreeWidgetUpdateEnabled = true;
+    elementTypeCombo.blockSignals(true);
+    elementTypeCombo.setCurrentIndex(etype);
+    elementTypeCombo.blockSignals(false);
 
+    int listingMode = LinkDeviceTreeWidget::List;
+    if(archive.read("mode", symbol)){
+        if(symbol == "list"){
+            listingMode = LinkDeviceTreeWidget::List;
+        }
+        if(symbol == "tree"){
+            listingMode = LinkDeviceTreeWidget::Tree;
+        }
+        if(symbol == "grouped_tree"){
+            listingMode = LinkDeviceTreeWidget::GroupedTree;
+        }
+    }
+    listingModeCombo.blockSignals(true);
+    listingModeCombo.setCurrentIndex(listingMode);
+    listingModeCombo.blockSignals(false);
+    
     archive.addPostProcess(
         [this, &archive](){
             if(treeWidget.restoreState(archive)){

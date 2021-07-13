@@ -10,8 +10,8 @@
 #include "../SimulationBar.h"
 #include "../BodyItem.h"
 #include "../SimpleControllerItem.h"
+#include "../ControllerLogItem.h"
 #include <cnoid/PyBase>
-#include <cnoid/PyEigenTypes>
 
 using namespace cnoid;
 namespace py = pybind11;
@@ -41,22 +41,23 @@ void exportSimulationClasses(py::module m)
         .def("setRecordingMode", &SimulatorItem::setRecordingMode)
         .def_property_readonly("recordingMode", &SimulatorItem::recordingMode)
         .def("setTimeRangeMode", &SimulatorItem::setTimeRangeMode)
-        .def("setRealtimeSyncMode", &SimulatorItem::setRealtimeSyncMode)
-        .def("setDeviceStateOutputEnabled", &SimulatorItem::setDeviceStateOutputEnabled)
+        .def("setTimeLength", &SimulatorItem::setTimeLength)
+        .def("setActiveControlTimeRangeMode", &SimulatorItem::setActiveControlTimeRangeMode)
+        .def("isActiveControlTimeRangeMode", &SimulatorItem::isActiveControlTimeRangeMode)
         .def("isRecordingEnabled", &SimulatorItem::isRecordingEnabled)
         .def("isDeviceStateOutputEnabled", &SimulatorItem::isDeviceStateOutputEnabled)
-        .def("setSpecifiedRecordingTimeLength", &SimulatorItem::setSpecifiedRecordingTimeLength)
+        .def("setRealtimeSyncMode", &SimulatorItem::setRealtimeSyncMode)
+        .def("setDeviceStateOutputEnabled", &SimulatorItem::setDeviceStateOutputEnabled)
         .def("isAllLinkPositionOutputMode", &SimulatorItem::isAllLinkPositionOutputMode)
         .def("setAllLinkPositionOutputMode", &SimulatorItem::setAllLinkPositionOutputMode)
-        .def("setExternalForce", &SimulatorItem::setExternalForce)
-        .def("setExternalForce", [](SimulatorItem& self, BodyItem* bodyItem, Link* link, const Vector3& point, const Vector3& f){
-                self.setExternalForce(bodyItem, link, point, f);
-            })
+        .def("setExternalForce", &SimulatorItem::setExternalForce,
+             py::arg("bodyItem"), py::arg("link"), py::arg("point"), py::arg("f"), py::arg("time") = 0.0)
         .def("clearExternalForces", &SimulatorItem::clearExternalForces)
         .def("setForcedPosition", &SimulatorItem::setForcedPosition)
         .def("clearForcedPositions", &SimulatorItem::clearForcedPositions)
 
         // deprecated
+        .def("setSpecifiedRecordingTimeLength", &SimulatorItem::setTimeLength)
         .def("getWorldTimeStep", &SimulatorItem::worldTimeStep)
         .def("getCurrentFrame", &SimulatorItem::currentFrame)
         .def("getCurrentTime", &SimulatorItem::currentTime)
@@ -69,22 +70,31 @@ void exportSimulationClasses(py::module m)
         ;
 
     py::enum_<SimulatorItem::RecordingMode>(simulatorItemClass, "RecordingMode")
-        .value("REC_FULL", SimulatorItem::RecordingMode::REC_FULL)
-        .value("REC_TAIL", SimulatorItem::RecordingMode::REC_TAIL)
-        .value("REC_NONE", SimulatorItem::RecordingMode::REC_NONE)
-        .value("N_RECORDING_MODES", SimulatorItem::RecordingMode::N_RECORDING_MODES)
+        .value("FullRecording", SimulatorItem::FullRecording)
+        .value("TailRecording", SimulatorItem::TailRecording)
+        .value("NoRecording", SimulatorItem::NoRecording)
+        .value("NumRecordingModes", SimulatorItem::NumRecordingModes)
+
+// deprecated
+        .value("REC_FULL", SimulatorItem::FullRecording)
+        .value("REC_TAIL", SimulatorItem::TailRecording)
+        .value("REC_NONE", SimulatorItem::NoRecording)
+        .value("N_RECORDING_MODES", SimulatorItem::NumRecordingModes)
         .export_values();
         
     py::enum_<SimulatorItem::TimeRangeMode>(simulatorItemClass, "TimeRangeMode")
-        .value("UNLIMITED", SimulatorItem::TimeRangeMode::TR_UNLIMITED)
-        .value("ACTIVE_CONTROL", SimulatorItem::TimeRangeMode::TR_ACTIVE_CONTROL)
-        .value("SPECIFIED", SimulatorItem::TimeRangeMode::TR_SPECIFIED)
-        .value("TIMEBAR", SimulatorItem::TimeRangeMode::TR_TIMEBAR)
-        .value("N_TIME_RANGE_MODES", SimulatorItem::TimeRangeMode::N_TIME_RANGE_MODES)
-        .value("TR_UNLIMITED", SimulatorItem::TR_UNLIMITED) // deprecated
-        .value("TR_ACTIVE_CONTROL", SimulatorItem::TR_ACTIVE_CONTROL) // deprecated
-        .value("TR_SPECIFIED", SimulatorItem::TR_SPECIFIED) // deprecated
-        .value("TR_TIMEBAR", SimulatorItem::TR_TIMEBAR)  // deprecated
+        .value("UnlimitedTime", SimulatorItem::UnlimitedTime)
+        .value("SpecifiedTime", SimulatorItem::SpecifiedTime)
+        .value("TimeBarTime", SimulatorItem::TimeBarTime)
+        .value("NumTimeRangeModes", SimulatorItem::NumTimeRangeModes)
+
+        // deprecated
+        .value("ActiveControlTime", SimulatorItem::ActiveControlTime)
+        .value("UNLIMITED", SimulatorItem::UnlimitedTime)
+        .value("ACTIVE_CONTROL", SimulatorItem::ActiveControlTime)
+        .value("SPECIFIED", SimulatorItem::SpecifiedTime)
+        .value("TIMEBAR", SimulatorItem::TimeBarTime)
+        .value("N_TIME_RANGE_MODES", SimulatorItem::NumTimeRangeModes)
         .export_values();
 
     PyItemList<SimulatorItem>(m, "SimulatorItemList", simulatorItemClass);
@@ -105,8 +115,7 @@ void exportSimulationClasses(py::module m)
         .def("setEpsilon", &AISTSimulatorItem::setEpsilon)
         .def("set2Dmode", &AISTSimulatorItem::set2Dmode)
         .def("setKinematicWalkingEnabled", &AISTSimulatorItem::setKinematicWalkingEnabled)
-        .def("setConstraintForceOutputEnabled", &AISTSimulatorItem::setConstraintForceOutputEnabled)
-        .def("clearExtraJoint", &AISTSimulatorItem::clearExtraJoint)
+        .def("clearExtraJoints", &AISTSimulatorItem::clearExtraJoints)
         .def("addExtraJoint", &AISTSimulatorItem::addExtraJoint)
 
         // deprecated
@@ -175,27 +184,32 @@ void exportSimulationClasses(py::module m)
 
     //PyItemList<SimulationScriptItem>("SimulationScriptItemList");
 
-    py::class_<SimulationBar, ToolBar>(m, "SimulationBar")
-        .def_property_readonly_static(
-            "instance", [](py::object){ return SimulationBar::instance(); }, py::return_value_policy::reference)
-        .def("startSimulation", (void (SimulationBar::*)(SimulatorItem*, bool)) &SimulationBar::startSimulation)
+    py::class_<SimulationBar, PyQObjectHolder<SimulationBar>, ToolBar>(m, "SimulationBar")
+        .def_property_readonly_static("instance", [](py::object){ return SimulationBar::instance(); })
         .def("startSimulation", (void (SimulationBar::*)(bool)) &SimulationBar::startSimulation)
-        .def("stopSimulation", &SimulationBar::stopSimulation)
-        .def("pauseSimulation", &SimulationBar::pauseSimulation)
-
-        // deprecated
-        .def_static("getInstance", &SimulationBar::instance, py::return_value_policy::reference)
         ;
 
     py::class_<ControllerItem, ControllerItemPtr, Item>(m, "ControllerItem")
+        .def("isActive", &ControllerItem::isActive)
         .def("isNoDelayMode", &ControllerItem::isNoDelayMode)
         .def("setNoDelayMode", &ControllerItem::setNoDelayMode)
+        .def("optionString", &ControllerItem::optionString)
+        .def("setOptions", &ControllerItem::setOptions)
+        .def("timeStep", &ControllerItem::timeStep)
         ;
     
     py::class_<SimpleControllerItem, SimpleControllerItemPtr, ControllerItem>(m, "SimpleControllerItem")
         .def(py::init<>())
         .def("setController", &SimpleControllerItem::setController)
         ;
+
+    py::class_<ControllerLogItem, ControllerLogItemPtr, ReferencedObjectSeqItem>(m, "ControllerLogItem")
+        .def(py::init<>())
+        .def_property_readonly("log", &ControllerLogItem::log)
+        .def("resetLog", &ControllerLogItem::resetLog)
+        ;
+
+    PyItemList<ControllerLogItem>(m, "ControllerLogItemList");
 }
 
 }

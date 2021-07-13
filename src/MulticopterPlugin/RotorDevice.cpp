@@ -3,13 +3,15 @@
 */
 
 #include "MulticopterPluginHeader.h"
-
+#include <cnoid/StdBodyFileUtil>
 
 using namespace std;
 using namespace cnoid;
 using namespace Multicopter;
 
-bool readRotorDevice(YAMLBodyLoader& loader, Mapping& node)
+namespace {
+
+bool readRotorDevice(StdBodyLoader* loader, const Mapping* node)
 {
     RotorDevicePtr rotorDevice= new RotorDevice;
     Eigen::Vector3d a;
@@ -29,13 +31,13 @@ bool readRotorDevice(YAMLBodyLoader& loader, Mapping& node)
         flg=false;
         UtilityImpl::printSomethingWrongAtRotor(YAML_ROTOR_DIRECTION);
     }
-    if(read(node,YAML_ROTOR_VALUE_RANGE,b)){
+    if(read(node, { YAML_ROTOR_VALUE_RANGE, YAML_ROTOR_VALUE_RANGE_OLD }, b)){
         rotorDevice->setValueRange(b[0],b[1]);
     }else{
         flg=false;
         UtilityImpl::printSomethingWrongAtRotor(YAML_ROTOR_VALUE_RANGE);
     }
-    if(read(node,YAML_ROTOR_TORQUE_RANGE,b)){
+    if(read(node, { YAML_ROTOR_TORQUE_RANGE, YAML_ROTOR_TORQUE_RANGE_OLD }, b)){
         rotorDevice->setTorqueRange(b[0],b[1]);
     }else{
         flg=false;
@@ -48,45 +50,45 @@ bool readRotorDevice(YAMLBodyLoader& loader, Mapping& node)
 #endif
 
 
-    Mapping* effectMap = UtilityImpl::mapping(&node,YAML_EFFECT_TAG);
+    auto effectMap = node->findMapping({ YAML_EFFECT_TAG, YAML_EFFECT_TAG_OLD });
 
-    if( effectMap != nullptr ){
-        if(effectMap->read(YAML_WALL_DISTANCE,v)){
+    if( effectMap->isValid() ){
+        if(effectMap->read({ YAML_WALL_DISTANCE, YAML_WALL_DISTANCE_OLD }, v)){
             rotorDevice->setWallEffectDistance(v);
         }else{
             flg=false;
             UtilityImpl::printSomethingWrongAtRotor(YAML_WALL_DISTANCE);
         }
 
-        if(effectMap->read(YAML_WALL_NORM_MIDDLE_VALUE,v)){
+        if(effectMap->read({ YAML_WALL_NORM_MIDDLE_VALUE, YAML_WALL_NORM_MIDDLE_VALUE_OLD }, v)){
             rotorDevice->setWallEffectNormMiddleValue(v);
         }else{
             flg=false;
             UtilityImpl::printSomethingWrongAtRotor(YAML_WALL_NORM_MIDDLE_VALUE);
         }
 
-        if(effectMap->read(YAML_WALL_MAX_RATE,v)){
+        if(effectMap->read({ YAML_WALL_MAX_RATE, YAML_WALL_MAX_RATE_OLD }, v)){
             rotorDevice->setWallEffectMaxRate(v);
         }else{
             flg=false;
             UtilityImpl::printSomethingWrongAtRotor(YAML_WALL_MAX_RATE);
         }
 
-        if(effectMap->read(YAML_GROUND_DISTANCE,v)){
+        if(effectMap->read({ YAML_GROUND_DISTANCE, YAML_GROUND_DISTANCE_OLD }, v)){
             rotorDevice->setGroundEffectDistance(v);
         }else{
             flg=false;
             UtilityImpl::printSomethingWrongAtRotor(YAML_GROUND_DISTANCE);
         }
 
-        if(effectMap->read(YAML_GROUND_NORM_MIDDLE_VALUE,v)){
+        if(effectMap->read({ YAML_GROUND_NORM_MIDDLE_VALUE, YAML_GROUND_NORM_MIDDLE_VALUE_OLD }, v)){
             rotorDevice->setGroundEffectNormMiddleValue(v);
         }else{
             flg=false;
             UtilityImpl::printSomethingWrongAtRotor(YAML_GROUND_NORM_MIDDLE_VALUE);
         }
 
-        if(effectMap->read(YAML_GROUND_MAX_RATE,v)){
+        if(effectMap->read({ YAML_GROUND_MAX_RATE, YAML_GROUND_MAX_RATE_OLD }, v)){
             rotorDevice->setGroundEffectMaxRate(v);
         }else{
             flg=false;
@@ -95,15 +97,45 @@ bool readRotorDevice(YAMLBodyLoader& loader, Mapping& node)
     }
 
     rotorDevice->setActive(flg);
-    return loader.readDevice(rotorDevice, node);
+    return loader->readDevice(rotorDevice, node);
 }
 
-struct TypeRegistration
+bool writeRotorDevice(StdBodyWriter* /* writer */, Mapping* node, const RotorDevice* rotor)
 {
-    TypeRegistration() {
-        YAMLBodyLoader::addNodeType(YAML_ROTOR_DEVICE_TAG, readRotorDevice);
+    write(node, YAML_ROTOR_POSITION, rotor->position());
+    write(node, YAML_ROTOR_DIRECTION, rotor->direction());
+    Vector2 r;
+    rotor->valueRange(r[0], r[1]);
+    write(node, YAML_ROTOR_VALUE_RANGE, r);
+    rotor->torqueRange(r[0], r[1]);
+    write(node, YAML_ROTOR_TORQUE_RANGE, r);
+
+    MappingPtr effect = new Mapping;
+
+    double d = rotor->wallEffectDistance();
+    if(d > 0.0){
+        effect->write(YAML_WALL_DISTANCE, d);
+        effect->write(YAML_WALL_NORM_MIDDLE_VALUE, rotor->wallEffectNormMiddleValue());
+        effect->write(YAML_WALL_MAX_RATE, rotor->wallEffectMaxRate());
     }
-} registration;
+    d = rotor->groundEffectDistance();
+    if(d > 0.0){
+        effect->write(YAML_GROUND_DISTANCE, d);
+        effect->write(YAML_GROUND_NORM_MIDDLE_VALUE, rotor->groundEffectNormMiddleValue());
+        effect->write(YAML_GROUND_MAX_RATE, rotor->groundEffectMaxRate());
+    }
+
+    if(!effect->empty()){
+        node->insert(YAML_EFFECT_TAG, effect);
+    }
+
+    return true;
+}
+
+StdBodyFileDeviceTypeRegistration<RotorDevice>
+deviceRegistration(YAML_ROTOR_DEVICE_TAG, readRotorDevice, writeRotorDevice);
+    
+}
 
 
 double
@@ -242,7 +274,7 @@ RotorDevice::RotorDevice()
 
 }
 
-const char* RotorDevice::typeName()
+const char* RotorDevice::typeName() const
 {
     return "RotorDevice";
 }

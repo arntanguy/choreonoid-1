@@ -9,6 +9,7 @@
 #include <cnoid/UTF8>
 #include <cnoid/stdx/filesystem>
 #include <map>
+#include <deque>
 #include "gettext.h"
 
 using namespace std;
@@ -22,7 +23,14 @@ typedef map<int, Item*> IdToItemMap;
 typedef map<View*, int> ViewToIdMap;
 typedef map<int, View*> IdToViewMap;
 
-typedef list<std::function<void()>> PostProcessList;
+struct FunctionInfo {
+    function<void()> func;
+    int priority;
+    FunctionInfo(function<void()> func, int priority)
+        : func(func), priority(priority) { }
+};
+
+deque<function<void()>> finalProcesses;
 
 }
 
@@ -41,12 +49,15 @@ public:
         
     Item* currentParentItem;
 
-    std::vector<std::function<void()>>* pointerToProcessesOnSubTreeRestored;
-    PostProcessList postProcesses;
+    vector<function<void()>>* pointerToProcessesOnSubTreeRestored;
+    vector<FunctionInfo> postProcesses;
+    vector<FunctionInfo> nextPostProcesses;
+    bool isDoingPostProcesses;
 
     ArchiveSharedData(){
         currentParentItem = nullptr;
         pointerToProcessesOnSubTreeRestored = nullptr;
+        isDoingPostProcesses = false;
     }
 };
 
@@ -55,7 +66,7 @@ public:
 
 Archive* Archive::invalidArchive()
 {
-    static ArchivePtr invalidArchive_ = new Archive();
+    static ArchivePtr invalidArchive_ = new Archive;
     invalidArchive_->typeBits = ValueNode::INVALID_NODE;
     return invalidArchive_;
 }
@@ -70,7 +81,7 @@ Archive::Archive()
 Archive::Archive(int line, int column)
     : Mapping(line, column)
 {
-    
+
 }
 
 
@@ -121,11 +132,10 @@ void Archive::setPointerToProcessesOnSubTreeRestored(std::vector<std::function<v
 void Archive::addPostProcess(const std::function<void()>& func, int priority) const
 {
     if(shared){
-        if(priority <= 0){
-            shared->postProcesses.push_back(func);
+        if(!shared->isDoingPostProcesses){
+            shared->postProcesses.emplace_back(func, priority);
         } else {
-            shared->postProcesses.push_back(
-                [this, func, priority](){ addPostProcess(func, priority - 1); });
+            shared->nextPostProcesses.emplace_back(func, priority);
         }
     }
 }
@@ -134,11 +144,37 @@ void Archive::addPostProcess(const std::function<void()>& func, int priority) co
 void Archive::callPostProcesses()
 {
     if(shared){
-        PostProcessList::iterator p = shared->postProcesses.begin();
-        while(p != shared->postProcesses.end()){
-            (*p)(); // call a post-process function
-            ++p;
+        shared->isDoingPostProcesses = true;
+        auto& processes = shared->postProcesses;
+        while(!processes.empty()){
+            std::sort(processes.begin(), processes.end(),
+                      [](const FunctionInfo& info1, const FunctionInfo& info2){
+                          return info1.priority < info2.priority;
+                      });
+            for(auto& process : processes){
+                process.func();
+            }
+            processes.clear();
+            if(!shared->nextPostProcesses.empty()){
+                processes.swap(shared->nextPostProcesses);
+            }
         }
+        shared->isDoingPostProcesses = false;
+    }
+}
+
+
+void Archive::addFinalProcess(const std::function<void()>& func) const
+{
+    finalProcesses.push_back(func);
+}
+
+
+void Archive::callFinalProcesses()
+{
+    while(!finalProcesses.empty()){
+        finalProcesses.front()();
+        finalProcesses.pop_front();
     }
 }
 
@@ -181,10 +217,10 @@ Archive* Archive::openSubArchive(const std::string& name)
         archive = dynamic_cast<Archive*>(mapping);
     }
     if(!archive){
-        archive = new Archive();
+        archive = new Archive;
         archive->inheritSharedInfoFrom(*this);
         if(mapping->isValid()){
-            Mapping::const_iterator p = mapping->begin();
+            auto p = mapping->begin();
             while(p != mapping->end()){
                 archive->insert(p->first, p->second);
                 ++p;
@@ -207,22 +243,10 @@ Archive* Archive::subArchive(Mapping* node)
 }
 
 
-std::string Archive::expandPathVariables(const std::string& path) const
+std::string Archive::resolveRelocatablePath(const std::string& relocatable, bool doAbsolutize) const
 {
-    auto expanded = shared->pathVariableProcessor->expand(path, false);
+    auto expanded = shared->pathVariableProcessor->expand(relocatable, doAbsolutize);
     if(expanded.empty()){
-        MessageView::instance()->putln(
-            shared->pathVariableProcessor->errorMessage(), MessageView::Warning);
-    }
-    return expanded;
-}
-
-
-std::string Archive::resolveRelocatablePath(const std::string& relocatable) const
-{
-    auto expanded = shared->pathVariableProcessor->expand(relocatable, true);
-    if(expanded.empty()){
-        expanded = relocatable; // Follow the past specification
         MessageView::instance()->putln(
             shared->pathVariableProcessor->errorMessage(), MessageView::Warning);
     }
@@ -235,7 +259,9 @@ bool Archive::readRelocatablePath(const std::string& key, std::string& out_value
     string relocatable;
     if(read(key, relocatable)){
         out_value = resolveRelocatablePath(relocatable);
-        return true;
+        if(!out_value.empty()){
+            return true;
+        }
     }
     return false;
 }
@@ -244,31 +270,29 @@ bool Archive::readRelocatablePath(const std::string& key, std::string& out_value
 std::string Archive::readItemFilePath() const
 {
     string filepath;
-    if(!readRelocatablePath("file", filepath)){
-        // for the backward compatibility
-        readRelocatablePath("filename", filepath);
+    if(read({ "file", "filename" }, filepath)){
+        filepath = resolveRelocatablePath(filepath);
     }
     return filepath;
 }
-
+        
 
 bool Archive::loadFileTo(Item* item) const
 {
-    string file, format;
-    if(readRelocatablePath("file", file)){
-        read("format", format);
-        return item->load(file, currentParentItem(), format, this);
-    }
-    // for the backward compatibility
-    else if(readRelocatablePath("filename", file)){
-        read("format", format);
-        return item->load(file, currentParentItem(), format, this);
+    string file;
+    if(read({ "file", "filename" }, file)){
+        file = resolveRelocatablePath(file);
+        if(!file.empty()){
+            string format;
+            read("format", format);
+            return item->load(file, currentParentItem(), format, this);
+        }
     }
     return false;
 }
 
 
-bool Archive::loadFileTo(const std::string& filepath, Item* item) const
+bool Archive::loadFileTo(Item* item, const std::string& filepath) const
 {
     string format;
     read("format", format);
@@ -308,8 +332,10 @@ bool Archive::writeRelocatablePath(const std::string& key, const std::string& pa
 bool Archive::writeFileInformation(Item* item)
 {
     if(writeRelocatablePath("file", item->filePath())){
-        auto& format = item->fileFormat();
-        write("format", format);
+        const auto& format = item->fileFormat();
+        if(!format.empty()){
+            write("format", format);
+        }
         if(auto fileOptions = item->fileOptions()){
             insert(fileOptions);
         }
@@ -330,25 +356,25 @@ void Archive::clearIds()
 }
         
 
-void Archive::registerItemId(Item* item, int id)
+void Archive::registerItemId(const Item* item, int id)
 {
     if(shared){
-        shared->idToItemMap[id] = item;
-        shared->itemToIdMap[item] = id;
+        shared->idToItemMap[id] = const_cast<Item*>(item);
+        shared->itemToIdMap[const_cast<Item*>(item)] = id;
     }
 }
 
 
-ValueNodePtr Archive::getItemId(Item* item) const
+ValueNodePtr Archive::getItemId(const Item* item) const
 {
     if(shared){
         int i = 0;
-        Item* mainItem = item;
+        Item* mainItem = const_cast<Item*>(item);
         while(mainItem->isSubItem()){
             ++i;
             mainItem = mainItem->parentItem();
         }
-        ItemToIdMap::const_iterator p = shared->itemToIdMap.find(mainItem);
+        auto p = shared->itemToIdMap.find(mainItem);
         if(p != shared->itemToIdMap.end()){
             const int id = p->second;
             if(i == 0){
@@ -383,7 +409,7 @@ void Archive::writeItemId(const std::string& key, Item* item)
 Item* Archive::findItem(int id) const
 {
     if(shared){
-        IdToItemMap::iterator p = shared->idToItemMap.find(id);
+        auto p = shared->idToItemMap.find(id);
         if(p != shared->idToItemMap.end()){
             return p->second;
         }
@@ -392,7 +418,7 @@ Item* Archive::findItem(int id) const
 }
 
 
-Item* Archive::findItem(const ValueNodePtr idNode) const
+Item* Archive::findItem(const ValueNode* idNode) const
 {
     Item* item = nullptr;
     if(idNode && shared){
@@ -420,11 +446,11 @@ Item* Archive::findItem(const ValueNodePtr idNode) const
 }
 
 
-void Archive::registerViewId(View* view, int id)
+void Archive::registerViewId(const View* view, int id)
 {
     if(shared){
-        shared->idToViewMap[id] = view;
-        shared->viewToIdMap[view] = id;
+        shared->idToViewMap[id] = const_cast<View*>(view);
+        shared->viewToIdMap[const_cast<View*>(view)] = id;
     }
 }
 
@@ -432,10 +458,10 @@ void Archive::registerViewId(View* view, int id)
 /**
    @return -1 if item does not belong to the archive
 */
-int Archive::getViewId(View* view) const
+int Archive::getViewId(const View* view) const
 {
     if(shared && view){
-        ViewToIdMap::const_iterator p = shared->viewToIdMap.find(view);
+        auto p = shared->viewToIdMap.find(const_cast<View*>(view));
         if(p != shared->viewToIdMap.end()){
             return p->second;
         }
@@ -447,7 +473,7 @@ int Archive::getViewId(View* view) const
 View* Archive::findView(int id) const
 {
     if(shared){
-        IdToViewMap::iterator p = shared->idToViewMap.find(id);
+        auto p = shared->idToViewMap.find(id);
         if(p != shared->idToViewMap.end()){
             return p->second;
         }
@@ -489,7 +515,3 @@ FilePathVariableProcessor* Archive::filePathVariableProcessor() const
     }
     return nullptr;
 }
-
-    
-
-

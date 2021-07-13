@@ -162,6 +162,7 @@ public:
     std::shared_ptr<RangeSensor::RangeData> tmpRangeData;
     int screenId;
     bool isDense;
+    bool flagToUpdatePreprocessedNodeTree;
 
     SensorScreenRenderer(GLVisionSimulatorItemImpl* simImpl, Device* device, Device* deviceForRendering);
     ~SensorScreenRenderer();
@@ -523,8 +524,8 @@ bool GLVisionSimulatorItemImpl::initializeSimulation(SimulatorItem* simulatorIte
                 Device* device = body->device(j);
                 if(dynamic_cast<Camera*>(device) || dynamic_cast<RangeSensor*>(device)){
                     if(sensorNameSet.empty() || sensorNameSet.find(device->name()) != sensorNameSet.end()){
-                        os << format(_("{0} detected vision sensor \"{1}\" of {2} as a target."),
-                                     self->displayName(), device->name(), simBody->body()->name()) << endl;
+                        os << format(_("{0} detected vision sensor \"{1}\" of {2} as a target.\n"),
+                                     self->displayName(), device->name(), simBody->body()->name());
                         sensorRenderers.push_back(new SensorRenderer(this, device, simBody, i));
                     }
                 }
@@ -536,7 +537,7 @@ bool GLVisionSimulatorItemImpl::initializeSimulation(SimulatorItem* simulatorIte
         os << format(_("{} has no target sensors"), self->displayName()) << endl;
         return false;
     }
-        
+
 #ifdef Q_OS_LINUX
     /**
        The following code is neccessary to avoid a crash when a view which has a widget such as
@@ -545,11 +546,16 @@ bool GLVisionSimulatorItemImpl::initializeSimulation(SimulatorItem* simulatorIte
        the nVidia proprietary X driver. If the user clicks such a view to give the focus before
        the simulation started, the crash doesn't occur, so here the focus is forced to be given
        by the following code.
+
+       \note The following code is disabled now because te problem does not seem to occur in
+       recent Choreonoid versions and environments.
     */
+    /*
     if(QWidget* textEdit = MessageView::instance()->findChild<QWidget*>("TextEdit")){
         textEdit->setFocus();
         //! todo restore the previous focus here
     }
+    */
 #endif
     
     vector<SensorRendererPtr>::iterator p = sensorRenderers.begin();
@@ -558,11 +564,12 @@ bool GLVisionSimulatorItemImpl::initializeSimulation(SimulatorItem* simulatorIte
         if(renderer->initialize(simBodies)){
             ++p;
         } else {
-            os << format(_("{0}: Target sensor \"{1}\" cannot be initialized."),
-                    self->displayName(), renderer->device->name()) << endl;
+            os << format(_("{0}: Target sensor \"{1}\" cannot be initialized.\n"),
+                    self->displayName(), renderer->device->name());
             p = sensorRenderers.erase(p);
         }
     }
+    os.flush();
 
     if(!sensorRenderers.empty()){
         simulatorItem->addPreDynamicsFunction([&](){ onPreDynamics(); });
@@ -587,6 +594,8 @@ bool GLVisionSimulatorItemImpl::initializeSimulation(SimulatorItem* simulatorIte
     return false;
 }
 
+
+namespace {
 
 SensorRenderer::SensorRenderer(GLVisionSimulatorItemImpl* simImpl, Device* device, SimulationBody* simBody, int bodyIndex)
     : simImpl(simImpl),
@@ -940,12 +949,14 @@ void SensorScreenRenderer::initializeGL(SgCamera* sceneCamera)
 
     if(!renderer){
         renderer = GLSceneRenderer::create();
+        renderer->setFlagVariableToUpdatePreprocessedNodeTree(flagToUpdatePreprocessedNodeTree);
     }
 
     renderer->setDefaultFramebufferObject(frameBuffer->handle());
     renderer->initializeGL();
     renderer->setViewport(0, 0, pixelWidth, pixelHeight);
     renderer->sceneRoot()->addChild(scene->root);
+    flagToUpdatePreprocessedNodeTree = true;
     renderer->extractPreprocessedNodes();
     renderer->setCurrentCamera(sceneCamera);
 
@@ -1052,6 +1063,8 @@ void SensorScreenRenderer::doneGLContextCurrent()
     glContext->doneCurrent();
 }
 
+}
+
 
 void GLVisionSimulatorItemImpl::onPreDynamics()
 {
@@ -1142,6 +1155,8 @@ exitRenderingQueueLoop:
     }
 }
 
+
+namespace {
 
 void SensorRenderer::updateSensorScene(bool updateSensorForRenderingThread)
 {
@@ -1278,6 +1293,8 @@ void SensorScreenRenderer::storeResultToTmpDataBuffer()
     }
 }
 
+}
+
 
 void GLVisionSimulatorItemImpl::onPostDynamics()
 {
@@ -1324,6 +1341,8 @@ void GLVisionSimulatorItemImpl::getVisionDataInThreadsForSensors()
 }
 
 
+namespace {
+
 bool SensorRenderer::waitForRenderingToFinish()
 {
     for(auto& scene : scenes){
@@ -1347,6 +1366,8 @@ bool SensorRenderer::waitForRenderingToFinish()
     }
 
     return true;
+}
+
 }
         
 
@@ -1373,6 +1394,8 @@ void GLVisionSimulatorItemImpl::getVisionDataInQueueThread()
     }
 }
 
+
+namespace {
 
 bool SensorRenderer::waitForRenderingToFinish(std::unique_lock<std::mutex>& lock)
 {
@@ -1688,6 +1711,8 @@ bool SensorScreenRenderer::getRangeSensorData(vector<double>& rangeData)
     return true;
 }
 
+}
+
 
 void GLVisionSimulatorItem::finalizeSimulation()
 {
@@ -1712,6 +1737,8 @@ void GLVisionSimulatorItemImpl::finalizeSimulation()
     sensorRenderers.clear();
 }
 
+
+namespace {
 
 SensorRenderer::~SensorRenderer()
 {
@@ -1747,6 +1774,8 @@ SensorScreenRenderer::~SensorScreenRenderer()
     if(renderer){
         delete renderer;
     }
+}
+
 }
     
 

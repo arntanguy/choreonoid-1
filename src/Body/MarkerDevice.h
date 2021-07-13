@@ -11,7 +11,7 @@
 
 namespace cnoid {
 
-class YAMLBodyLoader;
+class StdBodyLoader;
 class Mapping;
 
 class CNOID_EXPORT MarkerDevice : public Device
@@ -22,7 +22,7 @@ public:
     MarkerDevice();
     MarkerDevice(const MarkerDevice& org, bool copyStateOnly = false);
     
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyMarkerDeviceStateFrom(const MarkerDevice& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -31,7 +31,8 @@ public:
     virtual const double* readState(const double* buf) override;
     virtual double* writeState(double* out_buf) const override;
 
-    bool readDescription(YAMLBodyLoader& loader, Mapping& node);
+    bool readSpecifications(const Mapping* node);
+    bool writeSpecifications(Mapping* node) const;
 
     virtual bool on() const override;
     virtual void on(bool on) override;
@@ -56,8 +57,8 @@ public:
     float transparency() const { return transparency_; }
     void setTransparency(float t) { transparency_ = t; }
 
-    const Position& offsetPosition() const { return offsetPosition_; }
-    void setOffsetPosition(const Position& T) { offsetPosition_ = T; }
+    const Isometry3& offsetPosition() const { return offsetPosition_; }
+    void setOffsetPosition(const Isometry3& T) { offsetPosition_ = T; }
     void setOffsetTranslation(const Vector3& p) { offsetPosition_.translation() = p; }
 
 protected:
@@ -66,7 +67,7 @@ protected:
 private:
     bool on_;
     int markerType_;
-    Position offsetPosition_;
+    Isometry3 offsetPosition_;
     Vector3f color_;
     float markerSize_;
     float emission_;

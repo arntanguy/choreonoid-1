@@ -40,7 +40,7 @@ static void restoreProperties(const Archive& archive)
 
 namespace cnoid {
 
-class BodyMotionEngineImpl
+class BodyMotionEngine::Impl
 {
 public:
     BodyItemPtr bodyItem;
@@ -50,13 +50,13 @@ public:
     shared_ptr<MultiSE3Seq> positions;
     bool calcForwardKinematics;
     std::vector<TimeSyncItemEnginePtr> extraSeqEngines;
-    ConnectionSet connections;
+    ScopedConnectionSet connections;
         
-    BodyMotionEngineImpl(BodyMotionEngine* self, BodyItem* bodyItem, BodyMotionItem* motionItem){
-
-        this->bodyItem = bodyItem;
+    Impl(BodyMotionEngine* self, BodyItem* bodyItem, BodyMotionItem* motionItem)
+        : bodyItem(bodyItem),
+          motionItem(motionItem)
+    {
         body = bodyItem->body();
-        this->motionItem = motionItem;
         
         auto motion = motionItem->motion();
         qSeq = motion->jointPosSeq();
@@ -67,15 +67,15 @@ public:
         
         connections.add(
             motionItem->sigUpdated().connect(
-                std::bind(&BodyMotionEngine::notifyUpdate, self)));
+                [self](){ self->refresh(); }));
         
         connections.add(
             motionItem->sigExtraSeqItemsChanged().connect(
-                std::bind(&BodyMotionEngineImpl::updateExtraSeqEngines, this)));
+                [this](){ updateExtraSeqEngines(); }));
     }
     
-    void updateExtraSeqEngines(){
-
+    void updateExtraSeqEngines()
+    {
         extraSeqEngines.clear();
 
         const int n = motionItem->numExtraSeqItems();
@@ -90,12 +90,8 @@ public:
         }
     }
 
-    ~BodyMotionEngineImpl(){
-        connections.disconnect();
-    }
-        
-    bool onTimeChanged(double time){
-
+    bool onTimeChanged(double time)
+    {
         bool isActive = false;
         bool fkDone = false;
             
@@ -156,24 +152,25 @@ public:
 };
 
 
-TimeSyncItemEngine* createBodyMotionEngine(Item* sourceItem)
+TimeSyncItemEngine* createBodyMotionEngine(BodyMotionItem* motionItem, BodyMotionEngine* engine0)
 {
-    BodyMotionItem* motionItem = dynamic_cast<BodyMotionItem*>(sourceItem);
-    if(motionItem){
-        BodyItem* bodyItem = motionItem->findOwnerItem<BodyItem>();
-        if(bodyItem){
+    if(auto bodyItem = motionItem->findOwnerItem<BodyItem>()){
+        if(engine0 && engine0->bodyItem() == bodyItem){
+            return engine0;
+        } else {
             return new BodyMotionEngine(bodyItem, motionItem);
         }
     }
-    return 0;
+    return nullptr;
 }
 
 }
 
 
 BodyMotionEngine::BodyMotionEngine(BodyItem* bodyItem, BodyMotionItem* motionItem)
+    : TimeSyncItemEngine(motionItem)
 {
-    impl = new BodyMotionEngineImpl(this, bodyItem, motionItem);
+    impl = new Impl(this, bodyItem, motionItem);
 }
 
 
@@ -195,15 +192,28 @@ BodyMotionItem* BodyMotionEngine::motionItem()
 }
 
 
+void BodyMotionEngine::onPlaybackStarted(double time)
+{
+    impl->bodyItem->notifyKinematicStateUpdate(false);
+}
+
+
 bool BodyMotionEngine::onTimeChanged(double time)
 {
     return impl->onTimeChanged(time);
 }
 
 
+void BodyMotionEngine::onPlaybackStopped(double time, bool isStoppedManually)
+{
+    impl->bodyItem->notifyKinematicStateUpdate(false);
+}
+
+
 void BodyMotionEngine::initializeClass(ExtensionManager* ext)
 {
-    ext->timeSyncItemEngineManger().addEngineFactory(createBodyMotionEngine);
+    TimeSyncItemEngineManager::instance()
+        ->registerFactory<BodyMotionItem, BodyMotionEngine>(createBodyMotionEngine);
 
     MenuManager& mm = ext->menuManager();
     mm.setPath("/Options").setPath(N_("Body Motion Engine"));

@@ -24,6 +24,7 @@
     <file>icon/wireframe.svg</file>
     <file>icon/solidwireframe.svg</file>
     <file>icon/solidpolygon.svg</file>
+    <file>icon/highlight.svg</file>
     <file>icon/visualshape.svg</file>
     <file>icon/shapeflip.svg</file>
     <file>icon/collisionshape.svg</file>
@@ -46,10 +47,12 @@
     <file>shader/NoLighting.frag</file>
     <file>shader/SolidColor.vert</file>
     <file>shader/SolidColor.frag</file>
+    <file>shader/SolidColorEx.frag</file>
     <file>shader/SolidPoint.vert</file>
     <file>shader/SolidPoint.geom</file>
     <file>shader/SolidPoint.frag</file>
     <file>shader/ThickLine.geom</file>
+    <file>shader/Outline.vert</file>
     <file>shader/MinLighting.vert</file>
     <file>shader/MinLighting.frag</file>
     <file>shader/FullLighting.vert</file>

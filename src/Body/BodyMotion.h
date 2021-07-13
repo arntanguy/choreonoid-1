@@ -25,8 +25,8 @@ public:
 
     using AbstractSeq::operator=;
     BodyMotion& operator=(const BodyMotion& rhs);
-    virtual std::shared_ptr<AbstractSeq> cloneSeq() const;        
-
+    virtual std::shared_ptr<AbstractSeq> cloneSeq() const override;
+    
     void setDimension(int numFrames, int numJoints, int numLinks, bool clearNewArea = false);
     void setNumJoints(int numJoints, bool clearNewElements = false);
 
@@ -106,7 +106,7 @@ public:
     ConstSeqIterator extraSeqEnd() const { return extraSeqs.end(); }
         
     template <class SeqType>
-        std::shared_ptr<SeqType> extraSeq(const std::string& name) const {
+    std::shared_ptr<SeqType> extraSeq(const std::string& name) const {
         ExtraSeqMap::const_iterator p = extraSeqs.find(name);
         return ((p != extraSeqs.end()) ?
                 std::dynamic_pointer_cast<SeqType>(p->second) : std::shared_ptr<SeqType>());
@@ -115,7 +115,7 @@ public:
     void setExtraSeq(const std::string& name, std::shared_ptr<AbstractSeq> seq);
 
     template <class SeqType>
-        std::shared_ptr<SeqType> getOrCreateExtraSeq(const std::string& name) {
+    std::shared_ptr<SeqType> getOrCreateExtraSeq(const std::string& name) {
         std::shared_ptr<AbstractSeq>& base = extraSeqs[name];
         std::shared_ptr<SeqType> seq;
         if(base){

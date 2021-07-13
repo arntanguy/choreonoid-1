@@ -1,7 +1,9 @@
 #include "MprProgramItemBase.h"
 #include "MprProgram.h"
+#include "MprPosition.h"
 #include "MprPositionList.h"
 #include "MprPositionStatement.h"
+#include "MprStructuredStatement.h"
 #include <cnoid/ItemManager>
 #include <cnoid/BodyItem>
 #include <cnoid/BodySuperimposerAddon>
@@ -17,22 +19,31 @@ using namespace std;
 using namespace cnoid;
 using fmt::format;
 
+namespace {
+
+PolymorphicFunctionSet<MprStatement> referenceResolvers(MprStatementClassRegistry::instance());
+MprProgramItemBase* referenceResolver_programItem;
+bool referenceResolver_result;
+
+}
+
 namespace cnoid {
 
 class MprProgramItemBase::Impl
 {
 public:
     MprProgramItemBase* self;
-    MprProgramPtr program;
+    MprProgramPtr topLevelProgram;
     BodyItem* targetBodyItem;
     LinkKinematicsKitPtr kinematicsKit;
     bool isStartupProgram;
+    bool needToUpdateAllReferences;
 
     Impl(MprProgramItemBase* self);
     Impl(MprProgramItemBase* self, const Impl& org);
-    void setupSignalConnections();
+    void initialize();
     void setTargetBodyItem(BodyItem* bodyItem);
-    MprPosition* findPosition(MprPositionStatement* statement);
+    MprPosition* findPositionOrShowWarning(MprPositionStatement* statement);
     bool moveTo(MprPosition* position, bool doUpdateAll);
     bool superimposePosition(MprPosition* position);
     bool touchupPosition(MprPosition* position);
@@ -56,10 +67,8 @@ MprProgramItemBase::MprProgramItemBase()
 MprProgramItemBase::Impl::Impl(MprProgramItemBase* self)
     : self(self)
 {
-    program = new MprProgram;
-    setupSignalConnections();
-    targetBodyItem = nullptr;
-    isStartupProgram = false;
+    topLevelProgram = new MprProgram;
+    initialize();
 }
 
 
@@ -73,24 +82,32 @@ MprProgramItemBase::MprProgramItemBase(const MprProgramItemBase& org)
 MprProgramItemBase::Impl::Impl(MprProgramItemBase* self, const Impl& org)
     : self(self)
 {
-    program = org.program->clone();
-    setupSignalConnections();
-    targetBodyItem = nullptr;
-    isStartupProgram = false;
+    topLevelProgram = org.topLevelProgram->clone();
+    initialize();
 }
 
 
-void MprProgramItemBase::Impl::setupSignalConnections()
+void MprProgramItemBase::Impl::initialize()
 {
-    program->sigStatementInserted().connect(
-        [&](MprProgram::iterator){
+    targetBodyItem = nullptr;
+    isStartupProgram = false;
+    needToUpdateAllReferences = false;
+
+    topLevelProgram->sigStatementInserted().connect(
+        [&](MprProgram::iterator iter){
+            auto holder = (*iter)->holderProgram()->holderStatement();
+            if(!holder ||
+               holder->hasStructuredStatementAttribute(
+                   MprStructuredStatement::ArbitraryLowerLevelProgram)){
+                self->suggestFileUpdate();
+            }
+        });
+
+    topLevelProgram->sigStatementRemoved().connect(
+        [&](MprStatement*, MprProgram*){
             self->suggestFileUpdate(); });
 
-    program->sigStatementRemoved().connect(
-        [&](MprProgram*, MprStatement*){
-            self->suggestFileUpdate(); });
-
-    program->sigStatementUpdated().connect(
+    topLevelProgram->sigStatementUpdated().connect(
         [&](MprStatement*){
             self->suggestFileUpdate(); });
 }
@@ -108,23 +125,33 @@ Item* MprProgramItemBase::doDuplicate() const
 }
 
 
-bool MprProgramItemBase::setName(const std::string& name)
+bool MprProgramItemBase::setName(const std::string& name_)
 {
-    bool updated = Item::setName(name);
-    if(name != impl->program->name()){
-        impl->program->setName(name);
-        suggestFileUpdate();
+    bool updated = false;
+    if(name_ != impl->topLevelProgram->name()){
+        impl->topLevelProgram->setName(name_);
         updated = true;
     }
-    return updated;
+    if(name_ != Item::name()){
+        Item::setName(name_);
+        updated = true;
+    }
+    if(updated){
+        suggestFileUpdate();
+    }
+    return true;
 }
 
 
-void MprProgramItemBase::onPositionChanged()
+void MprProgramItemBase::onTreePathChanged()
 {
     auto ownerBodyItem = findOwnerItem<BodyItem>();
     if(ownerBodyItem != impl->targetBodyItem){
         impl->setTargetBodyItem(ownerBodyItem);
+    }
+    if(impl->needToUpdateAllReferences){
+        resolveAllReferences();
+        impl->needToUpdateAllReferences = false;
     }
     if(impl->isStartupProgram){
         if(auto controller = findOwnerItem<ControllerItem>()){
@@ -137,6 +164,12 @@ void MprProgramItemBase::onPositionChanged()
             }
         }
     }
+}
+
+
+void MprProgramItemBase::onConnectedToRoot()
+{
+    impl->needToUpdateAllReferences = true;
 }
 
 
@@ -169,25 +202,13 @@ LinkKinematicsKit* MprProgramItemBase::kinematicsKit()
 
 MprProgram* MprProgramItemBase::program()
 {
-    return impl->program;
+    return impl->topLevelProgram;
 }
 
 
 const MprProgram* MprProgramItemBase::program() const
 {
-    return impl->program;
-}
-
-
-MprPositionList* MprProgramItemBase::positionList()
-{
-    return impl->program->positionList();
-}
-
-
-const MprPositionList* MprProgramItemBase::positionList() const
-{
-    return impl->program->positionList();
+    return impl->topLevelProgram;
 }
 
 
@@ -227,12 +248,21 @@ bool MprProgramItemBase::setAsStartupProgram(bool on, bool doNotify)
 }
 
 
-
+MprPosition* MprProgramItemBase::Impl::findPositionOrShowWarning(MprPositionStatement* statement)
+{
+    MprPosition* position = statement->position();
+    if(!position){
+        showWarningDialog(
+            format(_("Position {0} is not found in {1}."),
+                   statement->positionLabel(), self->name()).c_str());
+    }
+    return position;
+}
 
 
 bool MprProgramItemBase::moveTo(MprPositionStatement* statement)
 {
-    if(auto position = impl->findPosition(statement)){
+    if(auto position = impl->findPositionOrShowWarning(statement)){
         return impl->moveTo(position, true);
     }
     return false;
@@ -242,18 +272,6 @@ bool MprProgramItemBase::moveTo(MprPositionStatement* statement)
 bool MprProgramItemBase::moveTo(MprPosition* position)
 {
     return impl->moveTo(position, true);
-}
-
-
-MprPosition* MprProgramItemBase::Impl::findPosition(MprPositionStatement* statement)
-{
-    MprPosition* position = statement->position(program->positionList());
-    if(!position){
-        showWarningDialog(
-            format(_("Position {0} is not found in {1}."),
-                   statement->positionLabel(), self->name()).c_str());
-    }
-    return position;
 }
 
 
@@ -275,7 +293,7 @@ bool MprProgramItemBase::Impl::moveTo(MprPosition* position, bool doUpdateAll)
     updated = position->apply(kinematicsKit);
     if(updated){
         if(doUpdateAll){
-            targetBodyItem->notifyKinematicStateChange();
+            targetBodyItem->notifyKinematicStateUpdate();
         }
     } else {
         if(doUpdateAll && ikPosition){
@@ -309,7 +327,7 @@ bool MprProgramItemBase::Impl::moveTo(MprPosition* position, bool doUpdateAll)
 
 bool MprProgramItemBase::superimposePosition(MprPositionStatement* statement)
 {
-    if(auto position = impl->findPosition(statement)){
+    if(auto position = impl->findPositionOrShowWarning(statement)){
         return impl->superimposePosition(position);
     }
     return false;
@@ -346,8 +364,8 @@ void MprProgramItemBase::clearSuperimposition()
 
 bool MprProgramItemBase::touchupPosition(MprPositionStatement* statement)
 {
-    auto positions = impl->program->positionList();
-    MprPositionPtr position = statement->position(positions);
+    auto positions = impl->topLevelProgram->positionList();
+    MprPositionPtr position = statement->position();
     if(!position){
         position = new MprIkPosition(statement->positionId());
     }
@@ -359,7 +377,7 @@ bool MprProgramItemBase::touchupPosition(MprPositionStatement* statement)
           \todo Remove the following code and check the signal of the position
           to update the display on the position
         */
-        impl->program->notifyStatementUpdate(statement);
+        impl->topLevelProgram->notifyStatementUpdate(statement);
     }
     return result;
 }
@@ -387,12 +405,46 @@ bool MprProgramItemBase::Impl::touchupPosition(MprPosition* position)
 }
 
 
+void MprProgramItemBase::registerReferenceResolver_
+(const std::type_info& type, const std::function<bool(MprStatement*, MprProgramItemBase*)>& resolve)
+{
+    referenceResolvers.setFunction(
+        type,
+        [resolve](MprStatement* statement){
+            referenceResolver_result = resolve(statement, referenceResolver_programItem);
+        });
+}
+
+
+bool MprProgramItemBase::resolveStatementReferences(MprStatement* statement)
+{
+    referenceResolver_result = true;
+    referenceResolver_programItem = this;
+    referenceResolvers.dispatch(statement);
+    return referenceResolver_result;
+}
+
+
+bool MprProgramItemBase::resolveAllReferences()
+{
+    bool complete = true;
+    impl->topLevelProgram->traverseStatements(
+        [this, &complete](MprStatement* statement){
+            if(!resolveStatementReferences(statement)){
+                complete = false;
+            }
+        });
+    return complete;
+}
+
+
 void MprProgramItemBase::doPutProperties(PutPropertyFunction& putProperty)
 {
+    auto program = impl->topLevelProgram;
     putProperty(_("Startup"), impl->isStartupProgram,
                 [&](bool on){ return setAsStartupProgram(on); });
-    putProperty(_("Num statements"), impl->program->numStatements());
-    putProperty(_("Num positions"), positionList()->numPositions());
+    putProperty(_("Num statements"), program->numStatements());
+    putProperty(_("Num positions"), program->positionList()->numPositions());
 }
 
 

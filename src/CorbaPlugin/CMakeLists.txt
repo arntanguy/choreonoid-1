@@ -1,13 +1,5 @@
-# @author Shin'ichiro Nakaoka
-
-#set(CMAKE_BUILD_TYPE Debug)
-
-option(BUILD_CORBA_PLUGIN "Build CORBA Plugin" OFF)
-
-if(NOT BUILD_CORBA_PLUGIN)
+if(NOT ENABLE_CORBA OR NOT ENABLE_GUI)
   return()
-elseif(NOT ENABLE_CORBA)
-  message(FATAL_ERROR "CorbaPlugin needs to ENABLE_CORBA")
 endif()
 
 choreonoid_compile_corba_idl_to_cpp(idl_cpp_files idl_h_files corba MessageView)
@@ -27,7 +19,7 @@ set(headers
 
 choreonoid_make_gettext_mo_files(${target} mofiles)
 choreonoid_add_plugin(${target} ${sources} ${mofiles} ${idl_cpp_files} HEADERS ${headers})
-target_link_libraries(${target} CnoidUtil CnoidCorba CnoidBase)
+target_link_libraries(${target} CnoidCorba)
 
 # test program
 # choreonoid_add_executable(corba-test test.cpp ${idl_cpp_files})

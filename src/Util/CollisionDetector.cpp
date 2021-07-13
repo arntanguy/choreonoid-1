@@ -66,7 +66,7 @@ public:
         return handle;
     }
 
-    virtual void setCustomObject(GeometryHandle geometry, Referenced* object) { }
+    virtual void setCustomObject(GeometryHandle geometry, Referenced* object) override { }
 
     virtual void setGeometryStatic(GeometryHandle, bool isStatic = true) override { }
 
@@ -77,10 +77,10 @@ public:
         return true;
     }
 
-    virtual void updatePosition(GeometryHandle, const Position& /* position */) override { }
+    virtual void updatePosition(GeometryHandle, const Isometry3& /* position */) override { }
 
     virtual void updatePositions(
-        std::function<void(Referenced* object, Position*& out_position)> positionQuery) override { }
+        std::function<void(Referenced* object, Isometry3*& out_position)> positionQuery) override { }
 
     virtual void detectCollisions(std::function<void(const CollisionPair& collisionPair)> /* callback */) override { }
 };

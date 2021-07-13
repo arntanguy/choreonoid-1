@@ -3,11 +3,11 @@ if(MSVC)
   # * CMAKE_CXX_STANDARD 17 is supported for MSVC since version 3.10
   # * The target_link_options command is available since version 3.13
   # * The install command can specifiy a target defined in a sub directory since version 3.13
-  cmake_minimum_required(VERSION 3.13.0)
+  cmake_minimum_required(VERSION 3.13)
 else()
-  # Cmake version installed in Ubuntu 16.04
-  # (Version 3.10.2 is installed in Ubuntu 18.04)
-  cmake_minimum_required(VERSION 3.5.0)
+  # CMake version 3.5.1 is installed in Ubuntu 16.04.
+  # (Version 3.10.2 is installed in Ubuntu 18.04.)
+  cmake_minimum_required(VERSION 3.5)
 endif()
 
 cmake_policy(SET CMP0003 NEW)
@@ -147,7 +147,7 @@ if(UNIX)
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -finline-functions")
 
   option(ENABLE_NATIVE_CPU_ARCHITECTURE "Use the -march=native option to enable instruction set supported by the native processor architecture" OFF)
-  if(ENABLE_NATIVE_ARCHITECTURE)
+  if(ENABLE_NATIVE_CPU_ARCHITECTURE)
     set(compiler_general_options "${compiler_general_options} -march=native")
   endif()
 
@@ -259,7 +259,9 @@ function(install_runtime_dlls dll_dir)
   endif()
 endfunction()
 
-set(CHOREONOID_ENABLE_INSTALL_RPATH true)
+option(ENABLE_INSTALL_RPATH "Enable RPATH for installed shared libraries" ON)
+mark_as_advanced(ENABLE_INSTALL_RPATH)
+set(CHOREONOID_ENABLE_INSTALL_RPATH ${ENABLE_INSTALL_RPATH})
 
 if(UNIX)
   option(ENABLE_NEW_DTAGS "Make LD_LIBRARY_PATH take precedence over RPATH with --enable-new-dtags" OFF)
@@ -269,6 +271,14 @@ if(UNIX)
   else()
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--disable-new-dtags")
+  endif()
+
+  option(ENABLE_GPERFTOOLS_PROFILER "Enable the CPU profiler of the Google Performance Tools")
+  if(ENABLE_GPERFTOOLS_PROFILER)
+    pkg_check_modules(GPREFTOOLS_PROFILER libprofiler)
+    if(NOT GPREFTOOLS_PROFILER_FOUND)
+      message(FATAL_ERROR "libprofiler is not found")
+    endif()
   endif()
 endif()
 
@@ -353,8 +363,10 @@ option(ENABLE_GUI "Enable GUI components" ON)
 
 # OpenGL
 if(ENABLE_GUI)
-  if(POLICY CMP0072)
-    cmake_policy(SET CMP0072 OLD)
+  if(CMAKE_VERSION VERSION_LESS 3.20.0)
+    if(POLICY CMP0072)
+      cmake_policy(SET CMP0072 OLD)
+    endif()
   endif()
   find_package(OpenGL)
   include_directories(${OPENGL_INCLUDE_DIR})
@@ -363,9 +375,13 @@ endif()
 # Python
 if(WIN32)
   option(ENABLE_PYTHON "Enable Python" OFF)
+  set(USE_BUNDLED_PYBIND11_DEFAULT ON)
 else()
   option(ENABLE_PYTHON "Enable Python" ON)
+  set(USE_BUNDLED_PYBIND11_DEFAULT OFF)
 endif()
+
+option(USE_BUNDLED_PYBIND11 "Use the Pybind11 library bundled with Choreonoid" ${USE_BUNDLED_PYBIND11_DEFAULT})
 
 option(USE_PYTHON3 "Use Python version 3 instead of version 2" ON)
 # for Config.h
@@ -376,14 +392,6 @@ else()
 endif()
 
 set(CHOREONOID_PYTHON_SUBDIR ${CHOREONOID_PLUGIN_SUBDIR}/python)
-set(CNOID_PYTHON_SUBDIR ${CHOREONOID_PYTHON_SUBDIR})
-
-if(MSVC)
-  set(USE_BUNDLED_PYBIND11_DEFAULT ON)
-else()
-  set(USE_BUNDLED_PYBIND11_DEFAULT OFF)
-endif()
-option(USE_BUNDLED_PYBIND11 "Use the Pybind11 library bundled with Choreonoid" ${USE_BUNDLED_PYBIND11_DEFAULT})
 
 if(ENABLE_PYTHON)
   # The following cache variables must be cleared to update the python version
@@ -410,13 +418,13 @@ if(ENABLE_PYTHON)
   endif()
 
   if(NOT USE_BUNDLED_PYBIND11)
-    find_package(pybind11 2.2.4 QUIET)
+    find_package(pybind11 2.6 QUIET)
   endif()
   if(pybind11_FOUND AND NOT USE_BUNDLED_PYBIND11)
     set(PYBIND11_INCLUDE_DIRS ${pybind11_INCLUDE_DIRS})
     list(APPEND CHOREONOID_SDK_INCLUDE_DIRS ${PYBIND11_INCLUDE_DIRS})
   else()
-    set(PYBIND11_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/thirdparty/pybind11-2.4.3/include)
+    set(PYBIND11_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/thirdparty/pybind11-2.6.1/include)
     if(INSTALL_SDK)
       install(DIRECTORY ${PYBIND11_INCLUDE_DIRS}/pybind11 DESTINATION ${CHOREONOID_HEADER_SUBDIR})
     else()
@@ -433,6 +441,7 @@ set(USE_PYBIND11 ${ENABLE_PYTHON})
 # Lua
 if(UNIX)
   option(ENABLE_LUA "Enable Lua" OFF)
+  mark_as_advanced(ENABLE_LUA)
 endif()
 
 if(ENABLE_LUA)
@@ -444,7 +453,9 @@ if(ENABLE_LUA)
   if(NOT LUA_FOUND)
     pkg_check_modules(LUA lua5.2)
   endif()
-  if(LUA_FOUND)
+  if(NOT LUA_FOUND)
+    message(FATAL_ERROR "lua library is not found")
+  else()
     include_directories(${LUA_INCLUDE_DIRS})
     include_directories(${LUA_SOL2_DIR})
   endif()
@@ -453,15 +464,21 @@ endif()
 
 # boost
 set(Boost_USE_STATIC_LIBS OFF)
-set(Boost_ADDITIONAL_VERSIONS "1.62" "1.63" "1.64" "1.65" "1.66" "1.67" "1.68" "1.69" "1.70")
-set(boost_packages program_options iostreams)
+set(Boost_ADDITIONAL_VERSIONS "1.62" "1.63" "1.64" "1.65" "1.66" "1.67" "1.68" "1.69" "1.70" "1.71" "1.72" "1.73" "1.74" "1.75")
+set(boost_packages program_options iostreams system)
 if(CMAKE_CXX_STANDARD LESS 17)
-  set(boost_packages ${boost_packages} system filesystem)
+  set(boost_packages ${boost_packages} filesystem)
 endif()
 if(MSVC)
   find_package(Boost 1.58.0 REQUIRED COMPONENTS ${boost_packages} OPTIONAL_COMPONENTS bzip2 zlib)
 else()
   find_package(Boost 1.58.0 REQUIRED COMPONENTS ${boost_packages})
+endif()
+
+if(CMAKE_CXX_STANDARD LESS 17)
+  set(FILESYSTEM_LIBRARY ${Boost_FILESYSTEM_LIBRARY})
+elseif(UNIX)
+  set(FILESYSTEM_LIBRARY stdc++fs)
 endif()
 
 include_directories(${Boost_INCLUDE_DIRS})
@@ -525,10 +542,12 @@ if(ENABLE_GUI)
       general icuin54 general icuuc54 general icudt54
       general icuin55 general icuuc55 general icudt55
       )
+    # It may be better to use the windeployqt command for the following process.
+    # See the Qt manual on the Windows deployment.
     install_runtime_dlls(${_qt5Core_install_prefix}/bin ${QT_INST_LIBRARIES})
     install(DIRECTORY ${_qt5Core_install_prefix}/plugins/platforms DESTINATION bin FILES_MATCHING PATTERN "qwindows*.dll")
     install(DIRECTORY ${_qt5Core_install_prefix}/plugins/imageformats DESTINATION bin FILES_MATCHING PATTERN "*.dll")
-
+    install(DIRECTORY ${_qt5Core_install_prefix}/plugins/styles DESTINATION bin FILES_MATCHING PATTERN "*.dll")
   endif()
 endif()
 
@@ -565,6 +584,7 @@ endif()
 
 # CORBA, omniORB
 option(ENABLE_CORBA "Enable CORBA related modules / plugins" OFF)
+mark_as_advanced(ENABLE_CORBA)
 
 if(ENABLE_CORBA)
   # Note that the OMNIORB_XXX varialbes cannot be used because
@@ -647,12 +667,6 @@ if(ENABLE_CORBA)
 
 endif(ENABLE_CORBA)
 
-# Simulation profiling
-option(ENABLE_SIMULATION_PROFILING "Enable simulation plofiling" OFF)
-if(ENABLE_SIMULATION_PROFILING)
-    add_definitions(-DENABLE_SIMULATION_PROFILING)
-endif()
-
 # Document installaiton
 install(FILES NEWS DESTINATION ${CHOREONOID_DOC_SUBDIR})
 install(FILES LICENSE DESTINATION ${CHOREONOID_DOC_SUBDIR})
@@ -692,7 +706,7 @@ else()
 endif()
 option(USE_BUNDLED_LIBYAML "Use the yaml library bundled with Choreonoid" ${USE_BUNDLED_LIBYAML_DEFAULT})
 if(NOT USE_BUNDLED_LIBYAML)
-  pkg_check_modules(LIBYAML yaml-0.1 QUIET)
+  pkg_check_modules(LIBYAML yaml-0.1)
 endif()
 if((NOT LIBYAML_FOUND) OR USE_BUNDLED_LIBYAML)
   add_subdirectory(thirdparty/yaml-0.1.7)
@@ -750,15 +764,20 @@ if(NOT USE_BUNDLED_FMTLIB)
   find_package(fmt QUIET)
 endif()
 if((NOT fmt_FOUND) OR USE_BUNDLED_FMTLIB)
-  add_subdirectory(thirdparty/fmt-5.3.0)
+  add_subdirectory(thirdparty/fmt-7.1.3)
   if(INSTALL_SDK)
-    install(DIRECTORY ${PROJECT_SOURCE_DIR}/thirdparty/fmt-5.3.0/include/fmt DESTINATION ${CHOREONOID_HEADER_SUBDIR})
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/thirdparty/fmt-7.1.3/include/fmt DESTINATION ${CHOREONOID_HEADER_SUBDIR})
     if(NOT CMAKE_VERSION VERSION_LESS 3.13.0)
       install(TARGETS fmt LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
     elseif(UNIX)
       install(FILES ${PROJECT_BINARY_DIR}/lib/libfmt.a DESTINATION lib)
     endif()
   endif()
+endif()
+
+# uuid
+if(UNIX)
+  pkg_check_modules(LIBUUID uuid REQUIRED)
 endif()
 
 add_subdirectory(src)

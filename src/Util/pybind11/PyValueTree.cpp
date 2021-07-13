@@ -2,7 +2,7 @@
   @author Shin'ichiro Nakaoka
 */
 
-#include "PyReferenced.h"
+#include "PyUtil.h"
 #include "../ValueTree.h"
 
 using namespace std;
@@ -115,12 +115,12 @@ void exportPyValueTree(py::module& m)
         .def("clear", &Mapping::clear)
         .def("setFlowStyle", &Mapping::setFlowStyle)
         .def("isFlowStyle", &Mapping::isFlowStyle)
-        .def("setFloatFormat", &Mapping::setDoubleFormat)
-        .def_property_readonly("floatFormat", &Mapping::doubleFormat)
+        .def("setFloatingNumberFormat", &Mapping::setFloatingNumberFormat)
+        .def_property_readonly("floatingNumberFormat", &Mapping::floatingNumberFormat)
         .def("setKeyQuoteStyle", &Mapping::setKeyQuoteStyle)
-        .def("find", &Mapping::find)
-        .def("findMapping", &Mapping::findMapping)
-        .def("findListing", &Mapping::findListing)
+        .def("find", (ValueNode*(Mapping::*)(const std::string&)const) &Mapping::find)
+        .def("findMapping", (Mapping*(Mapping::*)(const std::string&)const) &Mapping::findMapping)
+        .def("findListing", (Listing*(Mapping::*)(const std::string&)const) &Mapping::findListing)
         .def("__getitem__", &Mapping::operator[])
         .def("insert", (void(Mapping::*)(const string&, ValueNode*)) &Mapping::insert)
         .def("openMapping", &Mapping::openMapping)
@@ -144,7 +144,6 @@ void exportPyValueTree(py::module& m)
         // deprecated
         .def("isEmpty", &Mapping::empty)
         .def("getSize", &Mapping::size)
-        .def("getFloatFormat", &Mapping::doubleFormat)
         ;
 
     py::class_<Listing, ListingPtr, ValueNode>(m, "Listing")
@@ -156,8 +155,8 @@ void exportPyValueTree(py::module& m)
         .def("reserve", &Listing::reserve)
         .def("setFlowStyle", &Listing::setFlowStyle)
         .def("isFlowStyle", &Listing::isFlowStyle)
-        .def("setFloatFormat", &Listing::setDoubleFormat)
-        .def_property_readonly("floatFormat", &Listing::doubleFormat)
+        .def("setFloatingNumberFormat", &Listing::setFloatingNumberFormat)
+        .def_property_readonly("floatingNumberFormat", &Listing::floatingNumberFormat)
         .def_property_readonly("front", &Listing::front)
         .def_property_readonly("back", &Listing::back)
         .def("at", &Listing::at)
@@ -176,7 +175,6 @@ void exportPyValueTree(py::module& m)
         // deprecated
         .def("isEmpty", &Listing::empty)
         .def("getSize", &Listing::size)
-        .def("getFloatFormat", &Listing::doubleFormat)
         .def("getFront", &Listing::front)
         .def("getBack", &Listing::back)
         ;

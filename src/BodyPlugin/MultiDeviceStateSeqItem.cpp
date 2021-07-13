@@ -36,8 +36,11 @@ class MultiDeviceStateSeqEngine : public TimeSyncItemEngine
 public:
         
     MultiDeviceStateSeqEngine(MultiDeviceStateSeqItem* seqItem, BodyItem* bodyItem)
-        : seq(seqItem->seq()), body(bodyItem->body()) {
-        seqItem->sigUpdated().connect(std::bind(&TimeSyncItemEngine::notifyUpdate, this));
+        : TimeSyncItemEngine(seqItem),
+          seq(seqItem->seq()),
+          body(bodyItem->body())
+    {
+        seqItem->sigUpdated().connect([this](){ refresh(); });
     }
 
     virtual bool onTimeChanged(double time){

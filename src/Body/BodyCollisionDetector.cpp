@@ -7,8 +7,10 @@
 #include "Body.h"
 #include "Link.h"
 #include <cnoid/SceneGraph>
+#include <cnoid/IdPair>
 #include <cnoid/ValueTree>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace std;
@@ -22,23 +24,29 @@ typedef CollisionDetector::GeometryHandle GeometryHandle;
 
 namespace cnoid {
 
-class BodyCollisionDetectorImpl
+class BodyCollisionDetector::Impl
 {
 public:
     CollisionDetectorPtr collisionDetector;
     unordered_map<LinkPtr, GeometryHandle> linkToGeometryHandleMap;
-    std::function<Referenced*(Link* link, CollisionDetector::GeometryHandle geometry)> funcToGetObjectAssociatedWithLink;
+    std::function<Referenced*(Link* link, CollisionDetector::GeometryHandle geometry)>
+    funcToGetObjectAssociatedWithLink;
+    vector<GeometryHandle> linkIndexToGeometryHandleMap;
+    vector<bool> linkExclusionFlags;
+    unordered_set<IdPair<int>> ignoredLinkPairs;
     bool hasCustomObjectsAssociatedWithLinks;
     bool isGeometryHandleMapEnabled;
 
-    BodyCollisionDetectorImpl();
+    Impl();
     bool addBody(Body* body, bool isSelfCollisionEnabled);
-    bool addLinkRecursively(
-        Link* link, vector<GeometryHandle>& linkIndexToGeometryIdSetMap, vector<bool>& exclusions, bool isParentStatic);
-    void ignoreLinkPair(int link1Index, int link2Index, vector<GeometryHandle>& linkIndexToGeometryIdSetMap);
-    void ignoreLinkPairs(
-        Body* body, vector<GeometryHandle>& linkIndexToGeometryIdSetMap,
-        int excludeTreeDepth, vector<bool>& exclusions, vector<vector<int>>& excludeLinkGroups);
+    void ignoreLinkPair(int linkIndex1, int linkIndex2);
+    void checkCollisionDetectionTargets(
+        Body* body, Listing* rules, bool isSelfCollisionDetectionEnabled);
+    void checkCollisionDetectionTargets_OldFormat(
+        Body* body, Mapping* info, bool isSelfCollisionDetectionEnabled);
+    void setIgnoredLinkPairsWithinLinkChainLevel(Body* body, int distance);
+    void setIgnoredLinkPairsWithinLinkChainLevelIter(Link* link, Link* currentLink, Link* prevLink, int distance);
+    bool addLinkRecursively(Link* link, bool isParentStatic);
     double findClosestPoints(Link* link1, Link* link2, Vector3& out_point1, Vector3& out_point2);    
 };
 
@@ -47,11 +55,11 @@ public:
 
 BodyCollisionDetector::BodyCollisionDetector()
 {
-    impl = new BodyCollisionDetectorImpl;
+    impl = new Impl;
 }
 
 
-BodyCollisionDetectorImpl::BodyCollisionDetectorImpl()
+BodyCollisionDetector::Impl::Impl()
 {
     hasCustomObjectsAssociatedWithLinks = false;
     isGeometryHandleMapEnabled = false;
@@ -114,62 +122,45 @@ void BodyCollisionDetector::addBody
 }
 
 
-bool BodyCollisionDetectorImpl::addBody(Body* body, bool isSelfCollisionDetectionEnabled)
+bool BodyCollisionDetector::Impl::addBody(Body* body, bool isSelfCollisionDetectionEnabled)
 {
     const int numLinks = body->numLinks();
+    linkIndexToGeometryHandleMap.clear();
+    linkIndexToGeometryHandleMap.resize(numLinks, 0);
+    linkExclusionFlags.clear();
+    linkExclusionFlags.resize(numLinks, false);
+    ignoredLinkPairs.clear();
 
-    // Self-collision detection does not apply to pairs of adjacent links by default
-    int excludeTreeDepth = 1;
-    
-    vector<bool> exclusions(numLinks);
-    vector<vector<int>> excludeLinkGroups;
-    
-    auto cdInfo = body->info()->findMapping("collisionDetection");
-    if(cdInfo->isValid()){
-        excludeTreeDepth = cdInfo->get("excludeTreeDepth", excludeTreeDepth);
-        const Listing& excludeLinks = *cdInfo->findListing("excludeLinks");
-        for(size_t i=0; i < excludeLinks.size(); ++i){
-            Link* link = body->link(excludeLinks[i].toString());
-            if(link){
-                exclusions[link->index()] = true;
-            }
-        }
-        auto& excludeLinkGroupList = *cdInfo->findListing("excludeLinkGroups");
-        excludeLinkGroups.reserve(excludeLinkGroupList.size());
-        for(int i=0; i < excludeLinkGroupList.size(); ++i){
-            auto groupInfo = excludeLinkGroupList[i].toMapping();
-            if(groupInfo->isValid()){
-                vector<int> excludeLinkGroup;
-                //string groupName;
-                //groupInfo->read("name",groupName);
-                auto& excludeLinks = *groupInfo->findListing("links");
-                for(size_t j=0; j < excludeLinks.size(); ++j){
-                    Link* link = body->link(excludeLinks[j].toString());
-                    if(link){
-                        excludeLinkGroup.push_back(link->index());
-                    }
-                }
-                if(!excludeLinkGroup.empty()){
-                    excludeLinkGroups.push_back(excludeLinkGroup);
-                }
+    ListingPtr rules = body->info()->findListing("collision_detection_rules");
+    if(rules->isValid()){
+        checkCollisionDetectionTargets(body, rules, isSelfCollisionDetectionEnabled);
+    } else {
+        MappingPtr info = body->info()->findMapping("collisionDetection");
+        if(info->isValid()){
+            checkCollisionDetectionTargets_OldFormat(body, info, isSelfCollisionDetectionEnabled);
+        } else {
+            if(isSelfCollisionDetectionEnabled){
+                // Self-collision detection does not apply to pairs of adjacent links by default
+                setIgnoredLinkPairsWithinLinkChainLevel(body, 1);
             }
         }
     }
 
-    vector<GeometryHandle> linkIndexToGeometryHandleMap(numLinks);
-
-    bool added = addLinkRecursively(body->rootLink(), linkIndexToGeometryHandleMap, exclusions, true);
+    bool added = addLinkRecursively(body->rootLink(), true);
 
     if(isSelfCollisionDetectionEnabled){
-        ignoreLinkPairs(
-            body, linkIndexToGeometryHandleMap, excludeTreeDepth, exclusions, excludeLinkGroups);
+        for(auto& pair : ignoredLinkPairs){
+            if(!linkExclusionFlags[pair[0]] && !linkExclusionFlags[pair[1]]){
+                ignoreLinkPair(pair[0], pair[1]);
+            }
+        }
     } else {
         // exclude all the self link pairs
-        for(int i=0; i < numLinks; ++i){
-            if(!exclusions[i]){
-                for(int j=i+1; j < numLinks; ++j){
-                    if(!exclusions[j]){
-                        ignoreLinkPair(i, j, linkIndexToGeometryHandleMap);
+        for(int i = 0; i < numLinks; ++i){
+            if(!linkExclusionFlags[i]){
+                for(int j = i + 1; j < numLinks; ++j){
+                    if(!linkExclusionFlags[j]){
+                        ignoreLinkPair(i, j);
                     }
                 }
             }
@@ -180,15 +171,180 @@ bool BodyCollisionDetectorImpl::addBody(Body* body, bool isSelfCollisionDetectio
 }
 
 
-bool BodyCollisionDetectorImpl::addLinkRecursively
-(Link* link, vector<GeometryHandle>& linkIndexToGeometryHandleMap, vector<bool>& exclusions, bool isParentStatic)
+void BodyCollisionDetector::Impl::ignoreLinkPair(int linkIndex1, int linkIndex2)
 {
+    GeometryHandle geometry1 = linkIndexToGeometryHandleMap[linkIndex1];
+    GeometryHandle geometry2 = linkIndexToGeometryHandleMap[linkIndex2];
+    if(geometry1 && geometry2){
+        collisionDetector->ignoreGeometryPair(geometry1, geometry2);
+    }
+}
+
+
+//! \todo Implement all the rules
+void BodyCollisionDetector::Impl::checkCollisionDetectionTargets
+(Body* body, Listing* rules, bool isSelfCollisionDetectionEnabled)
+{
+    const int numLinks = body->numLinks();
+    
+    for(auto& node : *rules){
+        for(auto& kv : *node->toMapping()){
+            auto& rule = kv.first;
+            auto& value = kv.second;
+            if(rule == "disabled_link_chain_level"){
+                if(isSelfCollisionDetectionEnabled){
+                    setIgnoredLinkPairsWithinLinkChainLevel(body, value->toInt());
+                }
+            } else if(rule == "enabled_links"){
+                for(auto& node : *value->toListing()){
+                    if(auto link = body->link(node->toString())){
+                        int index = link->index();
+                        linkExclusionFlags[index] = false;
+                        auto p = ignoredLinkPairs.begin();
+                        while(p != ignoredLinkPairs.end()){
+                            auto& indexPair = *p;
+                            if(indexPair[0] == index || indexPair[1] == index){
+                                p = ignoredLinkPairs.erase(p);
+                            } else {
+                                ++p;
+                            }
+                        }
+                    }
+                }
+            } else if(rule == "enabled_link_group"){
+                auto& enabledLinks = *value->toListing();
+                if(isSelfCollisionDetectionEnabled){
+                    for(int i=0; i < enabledLinks.size(); ++i){
+                        for(int j = i + 1; j < enabledLinks.size(); ++j){
+                            auto link1 = body->link(enabledLinks[i].toString());
+                            auto link2 = body->link(enabledLinks[j].toString());
+                            ignoredLinkPairs.erase(IdPair<int>(link1->index(), link2->index()));
+                        }
+                    }
+                }
+            } else if(rule == "disabled_links"){
+                if(value->isString() && value->toString() == "all"){
+                    for(int i = 0; i < numLinks; ++i){
+                        linkExclusionFlags[i] = true;
+                        for(int j = i + 1; j < numLinks; ++j){
+                            ignoredLinkPairs.emplace(i, j);
+                        }
+                    }
+                } else if(value->isListing()){
+                    for(auto& node : *value->toListing()){
+                        if(auto link = body->link(node->toString())){
+                            int index = link->index();
+                            linkExclusionFlags[index] = true;
+                            for(int i = 0; i < numLinks; ++i){
+                                if(i != index){
+                                    ignoredLinkPairs.emplace(index, i);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if(rule == "disabled_link_group"){
+                auto& disabledLinks = *value->toListing();
+                if(isSelfCollisionDetectionEnabled){
+                    for(int i=0; i < disabledLinks.size(); ++i){
+                        for(int j = i + 1; j < disabledLinks.size(); ++j){
+                            auto link1 = body->link(disabledLinks[i].toString());
+                            auto link2 = body->link(disabledLinks[j].toString());
+                            if(link1 && link2){
+                                ignoredLinkPairs.emplace(link1->index(), link2->index());
+                            }
+                        }
+                    }
+                }
+
+            } else {
+                // put warning
+            }
+        }
+    }
+}
+
+
+void BodyCollisionDetector::Impl::checkCollisionDetectionTargets_OldFormat
+(Body* body, Mapping* info, bool isSelfCollisionDetectionEnabled)
+{
+    if(isSelfCollisionDetectionEnabled){
+        int excludeTreeDepth = 1;
+        info->read("excludeTreeDepth", excludeTreeDepth);
+        setIgnoredLinkPairsWithinLinkChainLevel(body, excludeTreeDepth);
+    }
+
+    const Listing& excludeLinks = *info->findListing("excludeLinks");
+    for(int i=0; i < excludeLinks.size(); ++i){
+        if(auto link = body->link(excludeLinks[i].toString())){
+            linkExclusionFlags[link->index()] = true;
+        }
+    }
+
+    if(isSelfCollisionDetectionEnabled){
+        auto& excludeLinkGroupList = *info->findListing("excludeLinkGroups");
+        for(int i=0; i < excludeLinkGroupList.size(); ++i){
+            auto groupInfo = excludeLinkGroupList[i].toMapping();
+            if(groupInfo->isValid()){
+                auto& excludeLinks = *groupInfo->findListing("links");
+                for(int j=0; j < excludeLinks.size(); ++j){
+                    for(int k = j + 1; k < excludeLinks.size(); ++k){
+                        auto link0 = body->link(excludeLinks[j].toString());
+                        auto link1 = body->link(excludeLinks[k].toString());
+                        if(link0 && link1){
+                            ignoredLinkPairs.emplace(link0->index(), link1->index());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+void BodyCollisionDetector::Impl::setIgnoredLinkPairsWithinLinkChainLevel
+(Body* body, int distance)
+{
+    if(distance > 0){
+        for(auto& link : body->links()){
+            setIgnoredLinkPairsWithinLinkChainLevelIter(
+                link, link, nullptr, distance);
+        }
+    }
+}
+
+
+void BodyCollisionDetector::Impl::setIgnoredLinkPairsWithinLinkChainLevelIter
+(Link* link, Link* currentLink, Link* prevLink, int distance)
+{
+    auto parent = currentLink->parent();
+    if(parent && parent != prevLink){
+        ignoredLinkPairs.emplace(link->index(), parent->index());
+        if(distance >= 2){
+            setIgnoredLinkPairsWithinLinkChainLevelIter(
+                link, parent, currentLink, distance - 1);
+        }
+    }
+    for(auto child = currentLink->child(); child; child = child->sibling()){
+        if(child != prevLink){
+            ignoredLinkPairs.emplace(link->index(), child->index());
+            if(distance >= 2){
+                setIgnoredLinkPairsWithinLinkChainLevelIter(
+                    link, child, currentLink, distance - 1);
+            }
+        }
+    }
+}
+
+
+bool BodyCollisionDetector::Impl::addLinkRecursively(Link* link, bool isParentStatic)
+{
+    int linkIndex = link->index();
     bool added = false;
     bool isStatic = isParentStatic && link->isFixedJoint();
 
-    if(!exclusions[link->index()]){
-        auto handle = collisionDetector->addGeometry(link->collisionShape());
-        if(handle){
+    if(!linkExclusionFlags[linkIndex]){
+        if(auto handle = collisionDetector->addGeometry(link->collisionShape())){
             Referenced* object;
             if(funcToGetObjectAssociatedWithLink){
                 object = funcToGetObjectAssociatedWithLink(link, *handle);
@@ -199,7 +355,7 @@ bool BodyCollisionDetectorImpl::addLinkRecursively
             if(isStatic){
                 collisionDetector->setGeometryStatic(*handle, object);
             }
-            linkIndexToGeometryHandleMap[link->index()] = *handle;
+            linkIndexToGeometryHandleMap[linkIndex] = *handle;
             if(isGeometryHandleMapEnabled){
                 linkToGeometryHandleMap[link] = *handle;
             }
@@ -207,70 +363,10 @@ bool BodyCollisionDetectorImpl::addLinkRecursively
         }
     }    
     for(Link* child = link->child(); child; child = child->sibling()){
-        added |= addLinkRecursively(child, linkIndexToGeometryHandleMap, exclusions, isStatic);
+        added |= addLinkRecursively(child, isStatic);
     }
 
     return added;
-}
-
-
-void BodyCollisionDetectorImpl::ignoreLinkPair
-(int link1Index, int link2Index, vector<GeometryHandle>& linkIndexToGeometryHandleMap)
-{
-    GeometryHandle geometry1 = linkIndexToGeometryHandleMap[link1Index];
-    GeometryHandle geometry2 = linkIndexToGeometryHandleMap[link2Index];
-    collisionDetector->ignoreGeometryPair(geometry1, geometry2);
-}
-
-
-void BodyCollisionDetectorImpl::ignoreLinkPairs
-(Body* body, vector<GeometryHandle>& linkIndexToGeometryHandleMap,
- int excludeTreeDepth, vector<bool>& exclusions, vector<vector<int>>& excludeLinkGroups)
-{
-    const int numLinks = body->numLinks();
-    
-    // exclude the link pairs whose distance in the tree is less than excludeTreeDepth
-    if(excludeTreeDepth > 0){
-        for(int i=0; i < numLinks; ++i){
-            if(!exclusions[i]){
-                Link* link1 = body->link(i);
-                for(int j=i+1; j < numLinks; ++j){
-                    if(!exclusions[j]){
-                        Link* link2 = body->link(j);
-                        Link* parent1 = link1;
-                        Link* parent2 = link2;
-                        for(int k=0; k < excludeTreeDepth; ++k){
-                            if(parent1){
-                                parent1 = parent1->parent();
-                            }
-                            if(parent2){
-                                parent2 = parent2->parent();
-                            }
-                            if(!parent1 && !parent2){
-                                break;
-                            }
-                            if(parent1 == link2 || parent2 == link1){
-                                ignoreLinkPair(i, j, linkIndexToGeometryHandleMap);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for(int i=0; i < excludeLinkGroups.size(); ++i){
-        const vector<int>& excludeLinkGroup = excludeLinkGroups[i];
-        for(int j=0; j < excludeLinkGroup.size(); ++j){
-            int index1 = excludeLinkGroup[j];
-            for(int k = j + 1; k < excludeLinkGroup.size(); ++k){
-                int index2 = excludeLinkGroup[k];
-                if(!exclusions[index1] && !exclusions[index2]){
-                    ignoreLinkPair(index1, index2, linkIndexToGeometryHandleMap);
-                }
-            }
-        }
-    }
 }
 
 
@@ -294,14 +390,14 @@ void BodyCollisionDetector::updatePositions()
 {
     if(!impl->hasCustomObjectsAssociatedWithLinks){
         impl->collisionDetector->updatePositions(
-            [](Referenced* object, Position*& out_position){
+            [](Referenced* object, Isometry3*& out_position){
                 out_position = &(static_cast<Link*>(object)->position()); });
     }
 }
 
 
 void BodyCollisionDetector::updatePositions
-(std::function<void(Referenced* object, Position*& out_position)> positionQuery)
+(std::function<void(Referenced* object, Isometry3*& out_position)> positionQuery)
 {
     impl->collisionDetector->updatePositions(positionQuery);
 }

@@ -27,20 +27,16 @@ public:
     void setEnableAMOR(bool bOn);
     
 protected:
-    virtual Item* doDuplicate() const;
-    void doPutProperties(PutPropertyFunction& putProperty);
-    virtual bool store(Archive& archive);
-    virtual bool restore(const Archive& archive);
-    virtual SimulationBody* createSimulationBody(Body* orgBody);
-    virtual bool initializeSimulation(const std::vector<SimulationBody*>& simBodies);
-//    virtual void initializeSimulationThread();
-//    virtual void finalizeSimulationThread();
+    virtual Item* doDuplicate() const override;
+    virtual void doPutProperties(PutPropertyFunction& putProperty) override;
+    virtual bool store(Archive& archive) override;
+    virtual bool restore(const Archive& archive) override;
+    virtual SimulationBody* createSimulationBody(Body* orgBody) override;
+    virtual bool initializeSimulation(const std::vector<SimulationBody*>& simBodies) override;
+    //virtual void initializeSimulationThread();
+    //virtual void finalizeSimulationThread();
     //virtual bool startSimulation(bool doReset = true);
-    virtual bool stepSimulation(const std::vector<SimulationBody*>& activeSimBodies);
-    virtual void stopSimulation();
-    virtual void pauseSimulation();
-    virtual void restartSimulation();
-
+    virtual bool stepSimulation(const std::vector<SimulationBody*>& activeSimBodies) override;
 
 private:
     AGXSimulatorItemImplPtr impl;

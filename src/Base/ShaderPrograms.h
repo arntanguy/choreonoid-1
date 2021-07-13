@@ -40,7 +40,7 @@ public:
        @param L The transform corresponding to the local vertex transform matrix
        @note L is used when the vertex positions are expressed as normalized ([-1.0, 1.0]) integer value
     */
-    virtual void setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L = nullptr);
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L = nullptr);
 
     virtual void setMaterial(const SgMaterial* material);
     virtual void setVertexColorEnabled(bool on);
@@ -55,12 +55,14 @@ public:
     bool hasCapability(int capability) const { return capabilities_ & capability; }
 
 protected:
+    ShaderProgram() = default;
+
     struct ShaderSource {
         const char* filename;
         int shaderType;
     };
-    
     ShaderProgram(std::initializer_list<ShaderSource> sources);
+    
     void setCapability(int capability) { capabilities_ |= capability; }
 
 private:
@@ -80,7 +82,7 @@ public:
     NolightingProgram();
     ~NolightingProgram();
     virtual void initialize() override;
-    virtual void setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L) override;
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L) override;
 
 protected:
     NolightingProgram(std::initializer_list<ShaderSource> sources);
@@ -101,16 +103,59 @@ public:
 
     virtual void initialize() override;
     virtual void activate() override;
+    virtual void setColor(const Vector3f& color);
     virtual void setMaterial(const SgMaterial* material) override;
-    virtual void setVertexColorEnabled(bool on) override;
+    virtual void setPointSize(float s);
     
-    void setColor(const Vector3f& color);
     void setColorChangable(bool on);
     bool isColorChangable() const;
-    void setPointSize(float s);
+    void resetColor(const Vector3f& color);
 
 protected:
     SolidColorProgram(std::initializer_list<ShaderSource> sources);
+
+private:
+    class Impl;
+    Impl* impl;
+};
+
+
+class CNOID_EXPORT SolidColorExProgram : public SolidColorProgram
+{
+    SolidColorExProgram(const SolidColorExProgram&) = delete;
+
+public:
+    SolidColorExProgram();
+    ~SolidColorExProgram();
+        
+    virtual void initialize() override;
+    virtual void activate() override;
+    virtual void setColor(const Vector3f& color) override;
+    virtual void setMaterial(const SgMaterial* material) override;
+    virtual void setVertexColorEnabled(bool on) override;
+
+protected:
+    SolidColorExProgram(std::initializer_list<ShaderSource> sources);
+
+private:
+    class Impl;
+    Impl* impl;
+};
+
+
+class CNOID_EXPORT ThickLineProgram : public SolidColorExProgram
+{
+    ThickLineProgram(const ThickLineProgram&) = delete;
+
+public:
+    ThickLineProgram();
+    ~ThickLineProgram();
+    
+    virtual void initialize() override;
+    virtual void activate() override;
+
+    void setViewportSize(int width, int height);
+    void setLineWidth(float width);
 
 private:
     class Impl;
@@ -129,7 +174,7 @@ public:
     virtual void initialize() override;
     virtual void activate() override;
     virtual void deactivate() override;
-    virtual void setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L) override;
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L) override;
 
     void setProjectionMatrix(const Matrix4& P);    
     void setViewportSize(int width, int height);
@@ -140,23 +185,21 @@ private:
 };
 
 
-class CNOID_EXPORT  ThickLineProgram : public SolidColorProgram
+/**
+   Experimental implementaion for rendering outlines
+*/
+class CNOID_EXPORT OutlineProgram : public SolidColorProgram
 {
-    ThickLineProgram(const ThickLineProgram&) = delete;
-
-public:
-    ThickLineProgram();
-    ~ThickLineProgram();
+    OutlineProgram(const OutlineProgram&) = delete;
     
+public:
+    OutlineProgram();
     virtual void initialize() override;
-    virtual void activate();
-
-    void setViewportSize(int width, int height);
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L) override;
     void setLineWidth(float width);
 
 private:
-    class Impl;
-    Impl* impl;
+    GLint normalMatrixLocation;
 };
 
 
@@ -168,7 +211,7 @@ class CNOID_EXPORT LightingProgram : public ShaderProgram
 public:
     virtual int maxNumLights() const = 0;
     virtual bool setLight(
-        int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting) = 0;
+        int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting) = 0;
     virtual void setNumLights(int n) = 0;
     virtual void setFog(const SgFog* fog);
 
@@ -187,10 +230,10 @@ public:
 
     virtual void initialize() override;
     virtual void activate() override;
-    virtual void setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L) override;
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L) override;
     virtual int maxNumLights() const override;
     virtual bool setLight(
-        int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting) override;
+        int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting) override;
     virtual void setNumLights(int n) override;
     virtual void setMaterial(const SgMaterial* material) override;
 
@@ -208,7 +251,7 @@ public:
     virtual void initialize() override;
     virtual int maxNumLights() const override;
     virtual bool setLight(
-        int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting) override;
+        int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting) override;
     virtual void setNumLights(int n) override;
     virtual void setFog(const SgFog* fog) override;
 
@@ -265,10 +308,11 @@ public:
     virtual void release() override;
     virtual void activate() override;
     virtual bool setLight(
-        int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting) override;
-    virtual void setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L) override;
+        int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting) override;
+    virtual void setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L) override;
 
-    void setWireframeEnabled(bool on);
+    void enableWireframe(const Vector4f& color, float width);
+    void disableWireframe();
     bool isWireframeEnabled() const;
     
     void activateShadowMapGenerationPass(int shadowIndex);
@@ -277,9 +321,9 @@ public:
     void setShadowMapTextureTopIndex(int textureIndex);
     int maxNumShadows() const;
     void setNumShadows(int n);
-    ShadowMapProgram& shadowMapProgram();
+    ShadowMapProgram* shadowMapProgram();
     void getShadowMapSize(int& width, int& height) const;
-    SgCamera* getShadowMapCamera(SgLight* light, Affine3& io_T);
+    SgCamera* getShadowMapCamera(SgLight* light, Isometry3& io_T);
     void setShadowMapViewProjection(const Matrix4& PV);
     void setShadowAntiAliasingEnabled(bool on);
     bool isShadowAntiAliasingEnabled() const;

@@ -4,11 +4,10 @@
 
 #include "../Body.h"
 #include "../BodyMotion.h"
+#include "PyDeviceList.h"
 #include <cnoid/ValueTree>
-#include <cnoid/PyReferenced>
-#include <cnoid/PyEigenTypes>
+#include <cnoid/PyUtil>
 #include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 using namespace std;
 using namespace cnoid;
@@ -20,34 +19,50 @@ void exportPyBody(py::module& m)
 {
     py::class_<Body, BodyPtr, Referenced> body(m, "Body");
     body
+        .def(py::init<>())
+        .def(py::init<const std::string&>())
+        .def("__repr__", [](const Link &self) { return "<cnoid.Body.Body named '" + self.name() + "'>"; })
         .def("clone", (Body*(Body::*)()const) &Body::clone)
-        .def("createLink", &Body::createLink)
-        .def("createLink", [](Body& self){ return self.createLink(); })
+        .def("createLink", &Body::createLink, py::arg("org") = nullptr)
         .def_property("name", &Body::name, &Body::setName)
         .def("setName", &Body::setName)
         .def_property("modelName", &Body::modelName, &Body::setModelName)
         .def("setModelName", &Body::setModelName)
         .def("setRootLink", &Body::setRootLink)
         .def("updateLinkTree", &Body::updateLinkTree)
+        .def("initializePosition", &Body::initializePosition)
         .def("initializeState", &Body::initializeState)
-        .def_property_readonly("numJoints", &Body::numJoints)
-        .def_property_readonly("numVirtualJoints", &Body::numVirtualJoints)
-        .def_property_readonly("numAllJoints", &Body::numAllJoints)
-        .def("joint", &Body::joint)
-        .def_property_readonly("joints",[](Body& self){
-                                            auto joints = self.allJoints();
-                                            joints.resize(self.numJoints());
-                                            return joints; })
-        .def_property_readonly("allJoints", &Body::allJoints)
+        .def_property_readonly("parentBody", &Body::parentBody)
+        .def_property_readonly("parentBodyLink", &Body::parentBodyLink)
+        .def("setParent", &Body::setParent)
+        .def("resetParent", &Body::resetParent)
+        .def("syncPositionWithParentBody",
+             &Body::syncPositionWithParentBody, py::arg("doForwardKinematics") = true)
         .def_property_readonly("numLinks", &Body::numLinks)
         .def("link", (Link*(Body::*)(int)const)&Body::link)
         .def("link", (Link*(Body::*)(const string&)const)&Body::link)
+        .def("linkTraverse", &Body::linkTraverse)
         .def_property_readonly("links", &Body::links)
         .def_property_readonly("rootLink", &Body::rootLink)
+        .def("findUniqueEndLink", &Body::findUniqueEndLink)
+        .def_property_readonly("lastSerialLink", &Body::lastSerialLink)
+        .def_property_readonly("numJoints", &Body::numJoints)
+        .def_property_readonly("numVirtualJoints", &Body::numVirtualJoints)
+        .def_property_readonly("numAllJoints", &Body::numAllJoints)
+        .def("joint", (Link*(Body::*)(int)const)&Body::joint)
+        .def("joint", (Link*(Body::*)(const string&)const)&Body::joint)
+        .def_property_readonly("joints",[](Body& self){
+             auto joints = self.allJoints();
+             joints.resize(self.numJoints());
+             return joints; })
+        .def_property_readonly("allJoints", &Body::allJoints)
         .def_property_readonly("numDevices", &Body::numDevices)
+        .def_property_readonly("devices", [](Body& self) { return getPyDeviceList(self.devices()); })
         .def("device", &Body::device)
+        .def("findDevice", [](Body& self, const string& name){ return self.findDevice(name); })
         .def("addDevice", (void(Body::*)(Device*, Link*)) &Body::addDevice)
         .def("initializeDeviceStates", &Body::initializeDeviceStates)
+        .def("removeDevice", &Body::removeDevice)
         .def("clearDevices", &Body::clearDevices)
         .def("isStaticModel", &Body::isStaticModel)
         .def("isFixedRootModel", &Body::isFixedRootModel)
@@ -61,10 +76,8 @@ void exportPyBody(py::module& m)
             self.calcTotalMomentum(P, L);
             return py::make_tuple(P, L);
             })
-        .def("calcForwardKinematics", [](Body& self){ self.calcForwardKinematics(); })
-        .def("calcForwardKinematics", [](Body& self, bool calcVelocity){ self.calcForwardKinematics(calcVelocity); })
-        .def("calcForwardKinematics", [](Body& self, bool calcVelocity, bool calcAcceleration)
-             { self.calcForwardKinematics(calcVelocity, calcAcceleration); })
+        .def("calcForwardKinematics",
+             &Body::calcForwardKinematics, py::arg("calcVelocity") = false, py::arg("calcAcceleration") = false)
         .def("clearExternalForces", &Body::clearExternalForces)
         .def_property_readonly("numExtraJoints", &Body::numExtraJoints)
         .def("clearExtraJoints", &Body::clearExtraJoints)
@@ -79,7 +92,7 @@ void exportPyBody(py::module& m)
         .def("getNumJoints", &Body::numJoints)
         .def("getNumVirtualJoints", &Body::numVirtualJoints)
         .def("getNumAllJoints", &Body::numAllJoints)
-        .def("getJoint", &Body::joint)
+        .def("getJoint", (Link*(Body::*)(int)const)&Body::joint)
         .def("getNumLinks", &Body::numLinks)
         .def("getLink", (Link*(Body::*)(int)const)&Body::link)
         .def("getLink", (Link*(Body::*)(const string&)const)&Body::link)

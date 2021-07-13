@@ -29,11 +29,22 @@ public:
     const Vector3f& emissiveColor() const { return emissiveColor_; }
     template<typename Derived> void setEmissiveColor(const Eigen::MatrixBase<Derived>& c) {
         emissiveColor_ = c.template cast<Vector3f::Scalar>(); }
-    float shininess() const { return shininess_; }
-    void setShininess(float s) { shininess_ = s; }
+
     const Vector3f& specularColor() const { return specularColor_; }
     template<typename Derived> void setSpecularColor(const Eigen::MatrixBase<Derived>& c) {
         specularColor_ = c.template cast<Vector3f::Scalar>(); }
+
+    float specularExponent() const { return specularExponent_; }
+    void setSpecularExponent(float e) { specularExponent_ = e; }
+    
+    // The specification of this value comforms to the shininess of VRML97
+    [[deprecated("Use specularExponent")]]
+    float shininess() const;
+
+    // The specification of this value comforms to the shininess of VRML97
+    [[deprecated("Use setSpecularExponent")]]
+    void setShininess(float s);
+    
     float transparency() const { return transparency_; }
     void setTransparency(float t) { transparency_ = t; }
 
@@ -46,7 +57,7 @@ private:
     Vector3f specularColor_;
     float ambientIntensity_;
     float transparency_;
-    float shininess_;
+    float specularExponent_;
 };
 
 typedef ref_ptr<SgMaterial> SgMaterialPtr;
@@ -142,6 +153,7 @@ public:
     SgTextureTransform* textureTransform() { return textureTransform_; }
     const SgTextureTransform* textureTransform() const { return textureTransform_; }
     SgTextureTransform* setTextureTransform(SgTextureTransform* textureTransform);
+    SgTextureTransform* getOrCreateTextureTransform();
 
 protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
@@ -281,6 +293,9 @@ public:
     SgTexCoordArray* setTexCoords(SgTexCoordArray* texCoords);
     SgTexCoordArray* getOrCreateTexCoords();
 
+    bool hasFaceVertexIndices() const { return !faceVertexIndices_.empty(); }
+    const SgIndexArray& faceVertexIndices() const { return faceVertexIndices_; }
+    SgIndexArray& faceVertexIndices() { return faceVertexIndices_; }
     /**
        Normals are assinged for vertices in triangles.
     */
@@ -304,9 +319,8 @@ public:
 
 protected:
     BoundingBox bbox;
-    
-private:
     SgVertexArrayPtr vertices_;
+    SgIndexArray faceVertexIndices_;
     SgNormalArrayPtr normals_;
     SgIndexArray normalIndices_;
     SgColorArrayPtr colors_;
@@ -331,88 +345,100 @@ public:
     /**
        Triangle indices (triangles variable) should be CCW.
     */
-    const SgIndexArray& triangleVertices() const { return triangleVertices_; }
-    SgIndexArray& triangleVertices() { return triangleVertices_; }
+    const SgIndexArray& triangleVertices() const { return faceVertexIndices_; }
+    SgIndexArray& triangleVertices() { return faceVertexIndices_; }
 
-    int numTriangles() const { return static_cast<int>(triangleVertices_.size()) / 3; }
-    void setNumTriangles(int n) { triangleVertices_.resize(n * 3); }
-    void reserveNumTriangles(int n) { triangleVertices_.reserve(n * 3); }
+    bool hasTriangles() const { return !faceVertexIndices_.empty(); }
+    int numTriangles() const { return static_cast<int>(faceVertexIndices_.size()) / 3; }
+    void setNumTriangles(int n) { faceVertexIndices_.resize(n * 3); }
+    void reserveNumTriangles(int n) { faceVertexIndices_.reserve(n * 3); }
 
     typedef Eigen::Map<Array3i> TriangleRef;
     TriangleRef triangle(int index){
-        return TriangleRef(&triangleVertices_[index * 3]);
+        return TriangleRef(&faceVertexIndices_[index * 3]);
     }
 
     typedef Eigen::Map<const Array3i> ConstTriangleRef;
     ConstTriangleRef triangle(int index) const {
-        return ConstTriangleRef(&triangleVertices_[index * 3]);
+        return ConstTriangleRef(&faceVertexIndices_[index * 3]);
     }
 
     void setTriangle(int index, int v0, int v1, int v2){
         const int i = index * 3;
-        triangleVertices_[i+0] = v0;
-        triangleVertices_[i+1] = v1;
-        triangleVertices_[i+2] = v2;
+        faceVertexIndices_[i+0] = v0;
+        faceVertexIndices_[i+1] = v1;
+        faceVertexIndices_[i+2] = v2;
     }
 
     TriangleRef newTriangle(){
-        const size_t s = triangleVertices_.size();
-        triangleVertices_.resize(s + 3);
-        return TriangleRef(&triangleVertices_[s]);
+        const size_t s = faceVertexIndices_.size();
+        faceVertexIndices_.resize(s + 3);
+        return TriangleRef(&faceVertexIndices_[s]);
     }
 
     // deprecated
     TriangleRef addTriangle(){ return newTriangle(); }
 
     void addTriangles(std::initializer_list<Array3i> il){
-        triangleVertices_.reserve(triangleVertices_.size() + il.size() * 3);
+        faceVertexIndices_.reserve(faceVertexIndices_.size() + il.size() * 3);
         for(auto& v : il){
             for(int i=0; i < 3; ++i){
-                triangleVertices_.push_back(v[i]);
+                faceVertexIndices_.push_back(v[i]);
             }
         }
     }
 
     void addTriangle(int v0, int v1, int v2){
-        triangleVertices_.push_back(v0);
-        triangleVertices_.push_back(v1);
-        triangleVertices_.push_back(v2);
+        faceVertexIndices_.push_back(v0);
+        faceVertexIndices_.push_back(v1);
+        faceVertexIndices_.push_back(v2);
     }
         
     enum PrimitiveType {
-        MESH = 0, BOX, SPHERE, CYLINDER, CONE, CAPSULE,
-        MesyType = MESH, BoxType = BOX, SphereType = SPHERE,
-        CylinderType = CYLINDER, ConeType = CONE, CapsuleType = CAPSULE
+        MeshType,
+        BoxType,
+        SphereType,
+        CylinderType,
+        ConeType,
+        CapsuleType,
+
+        // deprecated
+        MESH = MeshType,
+        BOX = BoxType,
+        SPHERE = SphereType,
+        CYLINDER = CylinderType,
+        CONE = ConeType,
+        CAPSULE = CapsuleType
     };
 
     class Mesh { }; // defined for no primitive information
 
     class Box {
     public:
-        Box() { }
+        Box() : Box(Vector3(1.0, 1.0, 1.0)) { }
         Box(Vector3 size) : size(size) { }
         Vector3 size;
     };
     class Sphere {
     public:
-        Sphere() { }
+        Sphere() : Sphere(1.0) { }
         Sphere(double radius) : radius(radius) { }
         double radius;
     };
     class Cylinder {
     public:
-        Cylinder() { }
+        Cylinder() : Cylinder(1.0, 1.0) { }
         Cylinder(double radius, double height) :
-            radius(radius), height(height), bottom(true), side(true), top(true) { }
+            radius(radius), height(height), top(true), bottom(true), side(true) { }
         double radius;
         double height;
+        bool top;
         bool bottom;
         bool side;
-        bool top;
     };
     class Cone {
     public:
-        Cone() { }
+        Cone() : Cone(1.0, 1.0) { }
         Cone(double radius, double height) :
             radius(radius), height(height), bottom(true), side(true) { }
         double radius;
@@ -421,20 +447,42 @@ public:
         bool side;
     };
     class Capsule {
-        public:
-            Capsule() { }
-            Capsule(double radius, double height) :
-                radius(radius), height(height) { }
-            double radius;
-            double height;
-        };
+    public:
+        Capsule() : Capsule(1.0, 1.0) { }
+        Capsule(double radius, double height) :
+            radius(radius), height(height) { }
+        double radius;
+        double height;
+    };
 
     typedef stdx::variant<Mesh, Box, Sphere, Cylinder, Cone, Capsule> Primitive;
 
+    SgMesh(Primitive primitive);
+
     const int primitiveType() const { return stdx::get_variant_index(primitive_); }
     template<class TPrimitive> const TPrimitive& primitive() const { return stdx::get<TPrimitive>(primitive_); }
-    template<class TPrimitive> void setPrimitive(const TPrimitive& prim) { primitive_ = prim; }
+    void setPrimitive(Primitive prim) { primitive_ = prim; }
 
+    //! The value is -1 when the division number is not explicitly specified.
+    int divisionNumber() const { return divisionNumber_; }
+    void setDivisionNumber(int n) { divisionNumber_ = n; }
+
+    //! The value is -1 when the extra division number is not explicitly specified.
+    int extraDivisionNumber() const { return extraDivisionNumber_; }
+    void setExtraDivisionNumber(int n) { extraDivisionNumber_ = n; }
+
+    //! This mode is only valid for the box primitive
+    enum ExtraDivisionMode {
+        ExtraDivisionPreferred = 0,
+        ExtraDivisionX = 1,
+        ExtraDivisionY = 2,
+        ExtraDivisionZ = 4,
+        ExtraDivisionAll = ExtraDivisionX | ExtraDivisionY | ExtraDivisionZ
+    };
+    int extraDivisionMode() const { return extraDivisionMode_; }
+    void setExtraDivisionMode(int mode) { extraDivisionMode_ = mode; }
+
+    void transform(const Affine3& T);
     void transform(const Affine3f& T);
     void translate(const Vector3f& translation);
     void rotate(const Matrix3f& R);
@@ -443,8 +491,10 @@ protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
 
 private:
-    SgIndexArray triangleVertices_;
     Primitive primitive_;
+    short divisionNumber_;
+    short extraDivisionNumber_;
+    short extraDivisionMode_;
 };
 
 typedef ref_ptr<SgMesh> SgMeshPtr;
@@ -465,14 +515,13 @@ public:
        the other index arrays defined in the SgMesh class also have to contain
        indices in the same way.
     */
-    SgIndexArray& polygonVertices() { return polygonVertices_; }
-    const SgIndexArray& polygonVertices() const { return polygonVertices_; }
+    [[deprecated("Use faceVertexIndices")]]
+    SgIndexArray& polygonVertices() { return faceVertexIndices_; }
+    [[deprecated("Use faceVertexIndices")]]
+    const SgIndexArray& polygonVertices() const { return faceVertexIndices_; }
 
 protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
-
-private:
-    SgIndexArray polygonVertices_;
 };
 
 typedef ref_ptr<SgPolygonMesh> SgPolygonMeshPtr;
@@ -488,6 +537,7 @@ public:
     virtual int numChildObjects() const override;
     virtual SgObject* childObject(int index) override;
     virtual const BoundingBox& boundingBox() const override;
+    virtual const BoundingBox& untransformedBoundingBox() const override;
         
     SgMesh* mesh() { return mesh_; }
     const SgMesh* mesh() const { return mesh_; }
@@ -530,6 +580,7 @@ public:
     virtual SgObject* childObject(int index) override;
 
     virtual const BoundingBox& boundingBox() const override;
+    virtual const BoundingBox& untransformedBoundingBox() const override;
     void updateBoundingBox();
 
     void clear();
@@ -545,15 +596,6 @@ public:
     SgMaterial* setMaterial(SgMaterial* material);
     SgMaterial* getOrCreateMaterial();
         
-    bool hasNormals() const { return (normals_ && !normals_->empty()); }
-    SgNormalArray* normals() { return normals_; }
-    const SgNormalArray* normals() const { return normals_; }
-    SgNormalArray* setNormals(SgNormalArray* normals);
-    SgVertexArray* getOrCreateNormals();
-        
-    const SgIndexArray& normalIndices() const { return normalIndices_; }
-    SgIndexArray& normalIndices() { return normalIndices_; }
-
     bool hasColors() const { return (colors_ && !colors_->empty()); }
     SgColorArray* colors() { return colors_; }
     const SgColorArray* colors() const { return colors_; }
@@ -563,14 +605,29 @@ public:
     const SgIndexArray& colorIndices() const { return colorIndices_; }
     SgIndexArray& colorIndices() { return colorIndices_; }
 
+    /**
+       The following normal data is usually not used for rendering lines or points,
+       but it is sometimes useful if the normal data can be contained in this object.
+       For example, there may be a file format that has normal data and you may want to
+       keep them, or there may be a library to estimate surface normals from point
+       cloud data.
+    */
+    bool hasNormals() const { return (normals_ && !normals_->empty()); }
+    SgNormalArray* normals() { return normals_; }
+    const SgNormalArray* normals() const { return normals_; }
+    SgNormalArray* setNormals(SgNormalArray* normals);
+    SgVertexArray* getOrCreateNormals();
+    const SgIndexArray& normalIndices() const { return normalIndices_; }
+    SgIndexArray& normalIndices() { return normalIndices_; }
+
 private:
     BoundingBox bbox;
     SgVertexArrayPtr vertices_;
-    SgNormalArrayPtr normals_;
-    SgIndexArray normalIndices_;
+    SgMaterialPtr material_;
     SgColorArrayPtr colors_;
     SgIndexArray colorIndices_;
-    SgMaterialPtr material_;
+    SgNormalArrayPtr normals_;
+    SgIndexArray normalIndices_;
 };
 
 typedef ref_ptr<SgPlot> SgPlotPtr;
@@ -606,39 +663,47 @@ public:
     SgLineSet();
     SgLineSet(const SgLineSet& org, CloneMap* cloneMap = nullptr);
 
-    const SgIndexArray& lineVertices() const { return lineVertices_; }
-    SgIndexArray& lineVertices() { return lineVertices_; }
+    const SgIndexArray& lineVertexIndices() const { return lineVertexIndices_; }
+    SgIndexArray& lineVertexIndices() { return lineVertexIndices_; }
 
-    int numLines() const { return static_cast<int>(lineVertices_.size()) / 2; }
-    void setNumLines(int n) { lineVertices_.resize(n * 2); }
-    void reserveNumLines(int n) { lineVertices_.reserve(n * 2); }
-    void clearLines() { lineVertices_.clear(); }
+    //! \deprecated Use lineVertexIndices()
+    [[deprecated("Use lineVertexIndices()")]]
+    const SgIndexArray& lineVertices() const { return lineVertexIndices_; }
+
+    [[deprecated("Use lineVertexIndices()")]]
+    //! \deprecated Use lineVertexIndices()
+    SgIndexArray& lineVertices() { return lineVertexIndices_; }
+
+    int numLines() const { return static_cast<int>(lineVertexIndices_.size()) / 2; }
+    void setNumLines(int n) { lineVertexIndices_.resize(n * 2); }
+    void reserveNumLines(int n) { lineVertexIndices_.reserve(n * 2); }
+    void clearLines() { lineVertexIndices_.clear(); }
 
     typedef Eigen::Map<Array2i> LineRef;
     LineRef line(int index){
-        return LineRef(&lineVertices_[index * 2]);
+        return LineRef(&lineVertexIndices_[index * 2]);
     }
 
     typedef Eigen::Map<const Array2i> ConstLineRef;
     ConstLineRef line(int index) const {
-        return ConstLineRef(&lineVertices_[index * 2]);
+        return ConstLineRef(&lineVertexIndices_[index * 2]);
     }
 
     void setLine(int index, int v0, int v1){
         const int i = index * 2;
-        lineVertices_[i+0] = v0;
-        lineVertices_[i+1] = v1;
+        lineVertexIndices_[i+0] = v0;
+        lineVertexIndices_[i+1] = v1;
     }
 
     LineRef addLine(){
-        const size_t s = lineVertices_.size();
-        lineVertices_.resize(s + 2);
-        return LineRef(&lineVertices_[s]);
+        const size_t s = lineVertexIndices_.size();
+        lineVertexIndices_.resize(s + 2);
+        return LineRef(&lineVertexIndices_[s]);
     }
 
     void addLine(int v0, int v1){
-        lineVertices_.push_back(v0);
-        lineVertices_.push_back(v1);
+        lineVertexIndices_.push_back(v0);
+        lineVertexIndices_.push_back(v1);
     }
 
     void resizeColorIndicesForNumLines(int n) {
@@ -662,7 +727,7 @@ protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
 
 private:
-    SgIndexArray lineVertices_;
+    SgIndexArray lineVertexIndices_;
     float lineWidth_;
 };
 

@@ -42,7 +42,7 @@ BodyOverwriteAddon* BodyElementOverwriteItem::bodyOverwrite()
 }
 
 
-bool BodyElementOverwriteItem::onNewPositionCheck(bool isManualOperation, std::function<void()>&)
+bool BodyElementOverwriteItem::onNewTreePositionCheck(bool isManualOperation, std::function<void()>&)
 {
     newBodyItem_ = findOwnerItem<BodyItem>();
     isNewBodyItemValid = true;
@@ -59,7 +59,7 @@ bool BodyElementOverwriteItem::onCheckNewOverwritePosition(bool isManualOperatio
 }
 
 
-void BodyElementOverwriteItem::onPositionChanged()
+void BodyElementOverwriteItem::onTreePathChanged()
 {
     if(bodyItem_){
         if(!parentItem()){

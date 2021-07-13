@@ -7,6 +7,7 @@
 
 #include "SceneParticles.h"
 #include <cnoid/ShaderPrograms>
+#include <random>
 
 namespace cnoid {
 
@@ -22,9 +23,10 @@ public:
     void setTime(float time){
         glUniform1f(timeLocation, time);
     }
-    static float frandom(float max = 1.0f) {
-        return ((float)rand() / RAND_MAX) * max;
+    void setRandomSeed(std::uint_fast32_t seed = 0){
+        randomNumberGenerator.seed(seed);
     }
+    float frandom(float max = 1.0f);
 
 protected:
     virtual bool initializeRendering(SceneParticles* particles) = 0;
@@ -43,6 +45,9 @@ private:
     GLint particleTexLocation;
     GLuint textureId;
     Matrix3f globalAttitude_;
+    std::mt19937 randomNumberGenerator;
+    typedef std::uniform_real_distribution<float> FloatDistribution;
+    FloatDistribution floatDistribution;
 
     void render(SceneParticles* particles, const Affine3& position, const std::function<void()>& renderingFunction);
 };

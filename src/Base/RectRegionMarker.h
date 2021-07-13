@@ -5,7 +5,7 @@
 #ifndef CNOID_BASE_RECT_REGION_MARKER_H
 #define CNOID_BASE_RECT_REGION_MARKER_H
 
-#include "SceneWidgetEditable.h"
+#include "SceneWidgetEventHandler.h"
 #include <cnoid/SceneDrawables>
 #include <QCursor>
 #include "exportdecl.h"
@@ -15,7 +15,7 @@ namespace cnoid {
 class PolyhedralRegion;
 class RectRegionMarkerImpl;
 
-class CNOID_EXPORT RectRegionMarker : public SgViewportOverlay, public SceneWidgetEditable
+class CNOID_EXPORT RectRegionMarker : public SgViewportOverlay, public SceneWidgetEventHandler
 {
 public:
     RectRegionMarker();
@@ -33,13 +33,13 @@ public:
     SignalProxy<void(const PolyhedralRegion& region)> sigRegionFixed();
 
     virtual void calcViewVolume(double viewportWidth, double viewportHeight, ViewVolume& io_volume) override;
-    virtual void onSceneModeChanged(const SceneWidgetEvent& event) override;
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onButtonReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual bool onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager) override;
+    virtual void onSceneModeChanged(SceneWidgetEvent* event) override;
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onButtonReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual bool onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager) override;
 
-    SignalProxy<void(const SceneWidgetEvent& event, MenuManager& menuManager)> sigContextMenuRequest();
+    SignalProxy<void(SceneWidgetEvent* event, MenuManager* menuManager)> sigContextMenuRequest();
 
 private:
     RectRegionMarkerImpl* impl;

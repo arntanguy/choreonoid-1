@@ -2,10 +2,13 @@
 #define CNOID_MANIPULATOR_PLUGIN_MPR_BASIC_STATEMENTS_H
 
 #include "MprStatement.h"
+#include "MprStructuredStatement.h"
 #include <cnoid/GeneralId>
 #include "exportdecl.h"
 
 namespace cnoid {
+
+class MprPositionList;
 
 class CNOID_EXPORT MprEmptyStatement : public MprStatement
 {
@@ -61,25 +64,27 @@ private:
 typedef ref_ptr<MprCommentStatement> MprCommentStatementPtr;
 
 
-class CNOID_EXPORT MprStructuredStatement : public MprStatement
+class CNOID_EXPORT MprGroupStatement : public MprStructuredStatement
 {
 public:
-    MprProgram* lowerLevelProgram() { return program_; }
-    const MprProgram* lowerLevelProgram() const { return program_; }
-    virtual MprProgram* getLowerLevelProgram() override;
+    MprGroupStatement();
+    virtual std::string label(int index) const override;
 
+    const std::string& groupName() const { return groupName_; }
+    void setGroupName(const std::string& name) { groupName_ = name; }
+    
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
-    MprStructuredStatement();
-    MprStructuredStatement(const MprStructuredStatement& org, CloneMap* cloneMap);
+    MprGroupStatement(const MprGroupStatement& org, CloneMap* cloneMap);
+    virtual Referenced* doClone(CloneMap* cloneMap) const override;
 
 private:
-    MprProgramPtr program_;
+    std::string groupName_;
 };
 
-typedef ref_ptr<MprStructuredStatement> MprStructuredStatementPtr;
+typedef ref_ptr<MprGroupStatement> MprGroupStatementPtr;
 
 
 class CNOID_EXPORT MprConditionStatement : public MprStructuredStatement
@@ -89,7 +94,7 @@ public:
     void setCondition(const std::string& condition) { condition_ = condition; }
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprConditionStatement();
@@ -109,7 +114,7 @@ public:
     virtual std::string label(int index) const override;
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprIfStatement(const MprIfStatement& org, CloneMap* cloneMap);
@@ -126,7 +131,7 @@ public:
     virtual std::string label(int index) const override;
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprElseStatement(const MprElseStatement& org, CloneMap* cloneMap);
@@ -143,7 +148,7 @@ public:
     virtual std::string label(int index) const override;
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprWhileStatement(const MprWhileStatement& org, CloneMap* cloneMap);
@@ -163,13 +168,28 @@ public:
     void setProgramName(const std::string& name) { programName_ = name; }
     
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprCallStatement(const MprCallStatement& org);
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
 
 private:
+    /**
+       \note It may be better to define the reference to the actual program instance specified by
+       the program name as
+
+       MprProgramPtr program_;
+
+       in addition to the following program name variable.
+       
+       In that case, the reference is resolved by a custom resolver function registered with
+       MprProgramItemBase::registerReferenceResolver. By this modification, you can easily access
+       to the program instance, and the modification will also simplify the detection of sub
+       programs referenced by the call statements, which is implemented in MprProgramItemBase.
+       Refer to the MprTagTraceStatement implementation for an example of the use of the resolver
+       registration.
+    */
     std::string programName_;
 };
 
@@ -193,7 +213,7 @@ public:
     void setValueExpression(const std::string& expression) { valueExpression_ = expression; }
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
     
 protected:
     MprAssignStatement(const MprAssignStatement& org);
@@ -220,7 +240,7 @@ public:
     void on(bool on){ on_ = on; }
     
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprSignalStatement(const MprSignalStatement& org);
@@ -252,7 +272,7 @@ public:
     void setSignalStateCondition(bool state) { signalStateCondition_ = state; }
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
     
 protected:
    MprWaitStatement(const MprWaitStatement& org);
@@ -278,7 +298,7 @@ public:
     void setTime(double t){ time_ = t; }
 
     virtual bool read(MprProgram* program, const Mapping& archive) override;
-    virtual bool write(Mapping& archive) const;
+    virtual bool write(Mapping& archive) const override;
 
 protected:
     MprDelayStatement(const MprDelayStatement& org);

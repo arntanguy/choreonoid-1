@@ -4,7 +4,8 @@
 */
 
 #include <cnoid/Device>
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
+#include <cnoid/StdBodyWriter>
 #include <cnoid/YAMLReader>
 #include <cnoid/AGXBodyExtension>
 #include <cnoid/AGXBody>
@@ -24,10 +25,10 @@ struct AGXBreakableJointDeviceDesc
 class AGXBreakableJointDevice : private AGXBreakableJointDeviceDesc, public Device
 {
 public:
-    static bool createAGXBreakableJointDevice(YAMLBodyLoader& loader, Mapping& node);
+    static bool createAGXBreakableJointDevice(StdBodyLoader* loader, const Mapping* node);
     AGXBreakableJointDevice(const AGXBreakableJointDeviceDesc& desc, Mapping* info);
     AGXBreakableJointDevice(const AGXBreakableJointDevice& org, bool copyStateOnly = false);
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const AGXBreakableJointDevice& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -53,13 +54,13 @@ private:
 };
 typedef ref_ptr<AGXBreakableJointDevice> AGXBreakableJointDevicePtr;
 
-bool AGXBreakableJointDevice::createAGXBreakableJointDevice(YAMLBodyLoader&loader, Mapping&node)
+bool AGXBreakableJointDevice::createAGXBreakableJointDevice(StdBodyLoader* loader, const Mapping* node)
 {
-    MappingPtr info = node.cloneMapping();
+    MappingPtr info = node->cloneMapping();
     AGXBreakableJointDeviceDesc desc;
     AGXBreakableJointDevicePtr jointDevice = new AGXBreakableJointDevice(desc, info);
     //node.clear();
-    return loader.readDevice(jointDevice, node);
+    return loader->readDevice(jointDevice, node);
 }
 
 AGXBreakableJointDevice::AGXBreakableJointDevice(const AGXBreakableJointDeviceDesc& desc, Mapping* info) :
@@ -76,7 +77,7 @@ AGXBreakableJointDevice::AGXBreakableJointDevice(const AGXBreakableJointDevice& 
     on_ = org.on_;
 }
 
-const char*AGXBreakableJointDevice::typeName()
+const char*AGXBreakableJointDevice::typeName() const
 {
     return "AGXBreakableJointDevice";
 }
@@ -426,6 +427,12 @@ AGXBreakableJoint::AGXBreakableJoint(AGXBreakableJointDevice* device, AGXBody* a
     sim->add(new JointBreaker(jp.getJointBreakerDesc(), device));
 }
 
+static bool writeAGXBreakableJointDevice
+(StdBodyWriter* writer, Mapping* info, const AGXBreakableJointDevice* device)
+{
+    return true;
+}
+
 } // cnoid
 
 namespace{
@@ -437,7 +444,10 @@ struct AGXBreakableJointDeviceRegistration
 {
     AGXBreakableJointDeviceRegistration()
     {
-        YAMLBodyLoader::addNodeType("AGXBreakableJointDevice", AGXBreakableJointDevice::createAGXBreakableJointDevice);
+        StdBodyLoader::registerNodeType(
+            "AGXBreakableJointDevice", AGXBreakableJointDevice::createAGXBreakableJointDevice);
+        StdBodyWriter::registerDeviceWriter<AGXBreakableJointDevice>(
+            "AGXBreakableJointDevice", writeAGXBreakableJointDevice);
     }
 }registrationAGXBreakableJointDevice;
 

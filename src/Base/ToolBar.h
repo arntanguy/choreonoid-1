@@ -24,7 +24,7 @@ class CNOID_EXPORT ToolBar : public QWidget
     Q_OBJECT
 public:
 
-    ToolBar(const QString& title);
+    ToolBar(const QString& name);
     virtual ~ToolBar();
 
     ToolButton* addButton(const QString& text, const QString& tooltip = QString());
@@ -47,16 +47,19 @@ public:
     QLabel* addLabel(const QString& text);
     QLabel* addImage(const QString& filename);
     QWidget* addSeparator();
-    void addSpacing();
+    void addSpacing(int spacing = -1);
 
     ToolBar& setInsertionPosition(int index);
 
-    void setVisibleByDefault(bool on);
+    void setVisibleByDefault(bool on = true) { isVisibleByDefault_ = on; }
     bool isVisibleByDefault() const { return isVisibleByDefault_; }
-
-    void setStretchable(bool on);
+    void placeOnNewRowByDefault(bool on = true) { isPlacedOnNewRowByDefault_ = on; }
+    bool isPlacedOnNewRowByDefault() const { return isPlacedOnNewRowByDefault_; }
+    void setStretchable(bool on) { isStretchable_ = on; }
     bool isStretchable() const { return isStretchable_; }
     virtual int stretchableDefaultWidth() const;
+    void setAutoRaiseByDefault(bool on = true) { isAutoRaiseByDefault_ = on; }
+    bool isAutoRaiseByDefault() const { return isAutoRaiseByDefault_; }
             
     ToolBarArea* toolBarArea() { return toolBarArea_; }
 
@@ -75,7 +78,6 @@ public Q_SLOTS:
     void changeIconSize(const QSize& iconSize);
 
 private:
-
     QHBoxLayout* hbox;
     int insertionPosition;
     QWidget* handle;
@@ -83,9 +85,9 @@ private:
     bool isNewRadioGroupRequested;
     MainWindow* mainWindow;
     ToolBarArea* toolBarArea_;
-
     bool isVisibleByDefault_;
-    int defaultOrderIndex;
+    bool isPlacedOnNewRowByDefault_;
+    bool isAutoRaiseByDefault_;
     
     // used for layouting tool bars on a ToolBarArea
     bool isStretchable_;
@@ -93,10 +95,9 @@ private:
     int layoutPriority;
 
     void setRadioButton(ToolButton* button);
-
-    friend class ToolBarAreaImpl;
-
     void changeIconSizeSub(QLayout* layout, const QSize& iconSize);
+
+    friend class ToolBarArea;
 };
 
 }

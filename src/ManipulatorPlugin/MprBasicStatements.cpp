@@ -1,6 +1,5 @@
 #include "MprBasicStatements.h"
 #include "MprStatementRegistration.h"
-#include "MprProgram.h"
 #include <cnoid/CloneMap>
 #include <cnoid/ValueTree>
 #include <fmt/format.h>
@@ -126,47 +125,61 @@ bool MprCommentStatement::write(Mapping& archive) const
 }
 
 
-MprStructuredStatement::MprStructuredStatement()
+MprGroupStatement::MprGroupStatement()
 {
-    program_ = new MprProgram;
-    program_->setHolderStatement(this);
+    setStructuredStatementAttribute(ArbitraryLowerLevelProgram);
 }
 
 
-MprStructuredStatement::MprStructuredStatement(const MprStructuredStatement& org, CloneMap* cloneMap)
-    : MprStatement(org)
+MprGroupStatement::MprGroupStatement(const MprGroupStatement& org, CloneMap* cloneMap)
+    : MprStructuredStatement(org, cloneMap),
+      groupName_(org.groupName_)
 {
-    if(cloneMap){
-        program_ = cloneMap->getClone(org.program_);
-    } else {
-        program_ = org.program_->clone();
+
+}
+
+
+Referenced* MprGroupStatement::doClone(CloneMap* cloneMap) const
+{
+    return new MprGroupStatement(*this);
+}
+
+
+std::string MprGroupStatement::label(int index) const
+{
+    if(index == 0){
+        return "Group";
+    } else if(index == 1){
+        if(groupName_.empty()){
+            return "---";
+        } else {
+            return groupName_;
+        }
     }
-
-    program_->setHolderStatement(this);
+    return string();
 }
 
 
-MprProgram* MprStructuredStatement::getLowerLevelProgram()
+bool MprGroupStatement::read(MprProgram* program, const Mapping& archive)
 {
-    return lowerLevelProgram();
+    if(MprStructuredStatement::read(program, archive)){
+        archive.read("group_name", groupName_);
+        return true;
+    }
+    return false;
 }
 
 
-bool MprStructuredStatement::read(MprProgram* program, const Mapping& archive)
+bool MprGroupStatement::write(Mapping& archive) const
 {
-    return program_->read(archive);
-}
-
-
-bool MprStructuredStatement::write(Mapping& archive) const
-{
-    return program_->write(archive);
+    archive.write("group_name", groupName_, DOUBLE_QUOTED);
+    return MprStructuredStatement::write(archive);    
 }
 
 
 MprConditionStatement::MprConditionStatement()
 {
-
+    setStructuredStatementAttribute(ArbitraryLowerLevelProgram);
 }
 
 
@@ -242,7 +255,7 @@ bool MprIfStatement::write(Mapping& archive) const
 
 MprElseStatement::MprElseStatement()
 {
-
+    setStructuredStatementAttribute(ArbitraryLowerLevelProgram);
 }
 
 
@@ -615,7 +628,7 @@ struct StatementTypeRegistration {
             .registerType<MprEmptyStatement, MprStatement>("Empty")
             .registerType<MprDummyStatement, MprEmptyStatement>("Dummy")
             .registerType<MprCommentStatement, MprStatement>("Comment")
-            .registerAbstractType<MprStructuredStatement, MprStatement>()
+            .registerType<MprGroupStatement, MprStructuredStatement>("Group")
             .registerAbstractType<MprConditionStatement, MprStructuredStatement>()
             .registerType<MprIfStatement, MprConditionStatement>("If")
             .registerType<MprElseStatement, MprStructuredStatement>("Else")

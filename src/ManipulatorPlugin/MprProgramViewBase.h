@@ -23,6 +23,7 @@ public:
     MprProgramViewBase();
     virtual ~MprProgramViewBase();
 
+    virtual void onActivated() override;
     virtual void onDeactivated() override;
 
     MprProgramItemBase* currentProgramItem();
@@ -30,6 +31,9 @@ public:
 
     MprStatement* currentStatement();
     SignalProxy<void(MprStatement* statement)> sigCurrentStatementChanged();
+
+    const std::vector<MprStatementPtr>& selectedStatements();
+    SignalProxy<void(std::vector<MprStatementPtr>& statements)> sigSelectedStatementsChanged();
 
     void updateStatementTree();
 
@@ -39,6 +43,7 @@ public:
         StatementDelegate();
         ~StatementDelegate();
         static constexpr int SpanToLast = -1;
+        virtual void activateStatement(MprStatement* statement) const;
         virtual int labelSpan(MprStatement* statement, int column) const;
         virtual QVariant dataOfEditRole(MprStatement* statement, int column) const;
         virtual void setDataOfEditRole(MprStatement* statement, int column, const QVariant& value) const;

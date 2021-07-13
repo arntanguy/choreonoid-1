@@ -4,9 +4,10 @@
 */
 
 #include "MarkerDevice.h"
+#include "StdBodyFileUtil.h"
 #include <cnoid/SceneDevice>
 #include <cnoid/SceneMarkers>
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
 #include <cnoid/EigenArchive>
 #include <fmt/format.h>
 #include "gettext.h"
@@ -15,15 +16,6 @@ using namespace std;
 using namespace cnoid;
 
 namespace {
-
-YAMLBodyLoader::NodeTypeRegistration
-registerMarkerDevice(
-    "MarkerDevice",
-    [](YAMLBodyLoader& loader, Mapping& node){
-        MarkerDevicePtr device = new MarkerDevice;
-        return device->readDescription(loader, node);
-    });
-        
 
 int getSceneMarkerType(int type)
 {
@@ -121,7 +113,7 @@ MarkerDevice::MarkerDevice(const MarkerDevice& org, bool copyStateOnly)
 }
 
 
-const char* MarkerDevice::typeName()
+const char* MarkerDevice::typeName() const
 {
     return "MarkerDevice";
 }
@@ -196,7 +188,7 @@ const double* MarkerDevice::readState(const double* buf)
     transparency_ = buf[i++];
     offsetPosition_.translation() << buf[i], buf[i+1], buf[i+2];
     i += 3;
-    offsetPosition_.linear() = Quat(buf[i], buf[i+1], buf[i+2], buf[i+3]).toRotationMatrix();
+    offsetPosition_.linear() = Quaternion(buf[i], buf[i+1], buf[i+2], buf[i+3]).toRotationMatrix();
     i += 4;
     return buf + i;
 }
@@ -220,7 +212,7 @@ double* MarkerDevice::writeState(double* out_buf) const
     out_buf[i++] = p.y();
     out_buf[i++] = p.z();
 
-    Quat q(offsetPosition_.linear());
+    Quaternion q(offsetPosition_.linear());
     out_buf[i++] = q.w();
     out_buf[i++] = q.x();
     out_buf[i++] = q.y();
@@ -230,10 +222,10 @@ double* MarkerDevice::writeState(double* out_buf) const
 }
 
 
-bool MarkerDevice::readDescription(YAMLBodyLoader& loader, Mapping& node)
+bool MarkerDevice::readSpecifications(const Mapping* info)
 {
     string type;
-    if(node.read("markerType", type)){
+    if(info->read({ "marker_type", "markerType" }, type)){
         if(type == "cross"){
             setMarkerType(MarkerDevice::CROSS_MARKER);
         } else if(type == "sphere"){
@@ -241,28 +233,78 @@ bool MarkerDevice::readDescription(YAMLBodyLoader& loader, Mapping& node)
         } else if(type == "axes"){
             setMarkerType(MarkerDevice::AXES_MARKER);
         } else {
-            node.throwException(
+            info->throwException(
                 fmt::format(_("Unknown marker type '{}'"), type));
         }
     }
 
-    setMarkerSize(node.get("size", markerSize()));
-    setEmission(node.get("emission", emission()));
-    setTransparency(node.get("transparency", transparency()));
+    setMarkerSize(info->get("size", markerSize()));
+    setEmission(info->get("emission", emission()));
+    setTransparency(info->get("transparency", transparency()));
 
     Vector3f c;
-    if(read(node, "color", c)) setColor(c);
+    if(read(info, "color", c)) setColor(c);
 
-    Position T = Affine3::Identity();
+    Isometry3 T = Isometry3::Identity();
     Vector3 p;
-    if(read(node, "offsetTranslation", p)){
+    if(read(info, { "offset_translation", "offsetTranslation" }, p)){
         T.translation() = p;
     }
-    Matrix3 R;
-    if(loader.readRotation(node, "offsetRotation", R)){
-        T.linear() = R;
+    AngleAxis aa;
+    if(readAngleAxis(info, { "offset_rotation", "offsetRotation" }, aa)){
+        T.linear() = aa.toRotationMatrix();
     }
     setOffsetPosition(T);
 
-    return loader.readDevice(this, node);
+    return true;
 }
+
+
+bool MarkerDevice::writeSpecifications(Mapping* info) const
+{
+    const char* type;
+    switch(markerType()){
+    case MarkerDevice::CROSS_MARKER:  type = "cross";  break;
+    case MarkerDevice::SPHERE_MARKER: type = "sphere"; break;
+    case MarkerDevice::AXES_MARKER:   type = "axes";   break;
+    default: return false;
+    }
+    info->write("marker_type", type);
+
+    info->write("size", markerSize());
+    info->write("emission", emission());
+    info->write("transparency", transparency());
+    write(info, "color", color());
+
+    auto& T = offsetPosition();
+    auto p = T.translation();
+    if(!p.isZero()){
+        write(info, "offset_translation", p);
+    }
+    auto aa = AngleAxis(T.linear());
+    if(aa.angle() != 0.0){
+        writeDegreeAngleAxis(info, "offset_rotation", aa);
+    }
+    
+    return true;
+}
+
+
+namespace {
+
+StdBodyFileDeviceTypeRegistration<MarkerDevice>
+registerMarkerDevice(
+    "MarkerDevice",
+    [](StdBodyLoader* loader, const Mapping* info){
+        MarkerDevicePtr device = new MarkerDevice;
+        if(device->readSpecifications(info)){
+            return loader->readDevice(device, info);
+        }
+        return false;
+    },
+    [](StdBodyWriter* /* writer */, Mapping* info, const MarkerDevice* marker){
+        return marker->writeSpecifications(info);
+    });
+}
+
+

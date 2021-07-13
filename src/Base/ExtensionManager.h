@@ -17,11 +17,8 @@ class ToolBar;
 class Archive;
 class ItemManager;
 class ViewManager;
-class TimeSyncItemEngineManager;
 class MenuManager;
 class OptionManager;
-
-class ExtensionManagerImpl;
 
 class CNOID_EXPORT ExtensionManager
 {
@@ -35,7 +32,6 @@ public:
     const std::string& textDomain() const;
 
     ItemManager& itemManager();
-    TimeSyncItemEngineManager& timeSyncItemEngineManger();
     ViewManager& viewManager();
     MenuManager& menuManager();
     OptionManager& optionManager();
@@ -65,6 +61,17 @@ private:
 public:
 
     void addToolBar(ToolBar* toolBar);
+
+    /**
+       This function is similar to the addToolBar function, but it always shows the tool bar
+       and replaces an existing tool bar if the tool bar has the same name with the new tool bar.
+       The function is mainly provided for the script use. A script may be executed repeatedly
+       without restarting Choreonoid, especially during its development. Even in such a situation,
+       the script can easily introduce a tool bar just by using this function without coding the
+       operation to show the tool bar and remove the tool bar instance that has been added by the
+       script.
+    */
+    void mountToolBar(ToolBar* toolBar);
 
     template <class PointerType> PointerType manage(PointerType pointer) {
         manageSub(new PtrHolder<PointerType>(pointer));
@@ -102,9 +109,8 @@ public:
 private:
     ExtensionManager(const ExtensionManager& org);
         
-    ExtensionManagerImpl* impl;
-
-    friend class ExtensionManagerImpl;
+    class Impl;
+    Impl* impl;
 };
 
 }

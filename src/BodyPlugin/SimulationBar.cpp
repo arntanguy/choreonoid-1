@@ -8,6 +8,7 @@
 #include <cnoid/TimeBar>
 #include <cnoid/RootItem>
 #include <cnoid/MessageView>
+#include <cnoid/UnifiedEditHistory>
 #include <cnoid/OptionManager>
 #include <cnoid/LazyCaller>
 #include <fmt/format.h>
@@ -51,8 +52,6 @@ SimulationBar* SimulationBar::instance()
 SimulationBar::SimulationBar()
     : ToolBar(N_("SimulationBar"))
 {
-    setVisibleByDefault(true);    
-    
     addButton(QIcon(":/Body/icon/store-world-initial.svg"),
               _("Store body positions to the initial world state"))->
         sigClicked().connect([&](){ onStoreInitialClicked(); });
@@ -74,7 +73,6 @@ SimulationBar::SimulationBar()
 
     addButton(QIcon(":/Body/icon/stop-simulation.svg"), _("Stop simulation"))->
         sigClicked().connect([&](){ onStopSimulationClicked(); });
-
 }
 
 
@@ -117,8 +115,13 @@ void SimulationBar::onStoreInitialClicked()
 
 void SimulationBar::onRestoreInitialClicked()
 {
+    auto history = UnifiedEditHistory::instance();
+    history->beginEditGroup(_("Restore body initial positions"));
+    
     forEachTargetBodyItem(
         [](BodyItem* bodyItem){ bodyItem->restoreInitialState(true); });
+    
+    history->endEditGroup();
 }
 
 
@@ -126,9 +129,10 @@ void SimulationBar::forEachSimulator(std::function<void(SimulatorItem* simulator
 {
     auto mv = MessageView::instance();
 
-    auto simulators =  RootItem::instance()->selectedItems<SimulatorItem>();
+    auto rootItem = RootItem::instance();
+    auto simulators =  rootItem->selectedItems<SimulatorItem>();
     if(simulators.empty()){
-        if(auto simulator = RootItem::instance()->findItem<SimulatorItem>()){
+        if(auto simulator = rootItem->findItem<SimulatorItem>()){
             simulator->setSelected(doSelect);
             simulators.push_back(simulator);
         } else {
@@ -136,38 +140,32 @@ void SimulationBar::forEachSimulator(std::function<void(SimulatorItem* simulator
         }
     }
 
-    typedef map<WorldItem*, SimulatorItem*> WorldToSimulatorMap;
-    WorldToSimulatorMap worldToSimulator;
+    map<WorldItem*, SimulatorItem*> worldToSimulatorMap;
 
-    for(size_t i=0; i < simulators.size(); ++i){
-        SimulatorItem* simulator = simulators.get(i);
-        WorldItem* world = simulator->findOwnerItem<WorldItem>();
-        if(world){
-            WorldToSimulatorMap::iterator p = worldToSimulator.find(world);
-            if(p == worldToSimulator.end()){
-                worldToSimulator[world] = simulator;
+    for(auto& simulator : simulators){
+        if(auto world = simulator->findOwnerItem<WorldItem>()){
+            auto p = worldToSimulatorMap.find(world);
+            if(p == worldToSimulatorMap.end()){
+                worldToSimulatorMap[world] = simulator;
             } else {
                 p->second = nullptr; // skip if multiple simulators are selected
             }
         }
     }
 
-    for(size_t i=0; i < simulators.size(); ++i){
-        SimulatorItem* simulator = simulators.get(i);
-        WorldItem* world = simulator->findOwnerItem<WorldItem>();
+    for(auto& simulator : simulators){
+        auto world = simulator->findOwnerItem<WorldItem>();
         if(!world){
             mv->notify(format(_("{} cannot be processed because it is not related with a world."),
                               simulator->displayName()));
         } else {
-            WorldToSimulatorMap::iterator p = worldToSimulator.find(world);
-            if(p != worldToSimulator.end()){
-                if(!p->second){
-                    mv->notify(format(_("{} cannot be processed because another simulator"
-                                        "in the same world is also selected."),
-                                      simulator->displayName()));
-                } else {
-                    callback(simulator);
-                }
+            if(auto simulator2 = worldToSimulatorMap[world]){
+                callback(simulator);
+            } else {
+                mv->notify(
+                    format(_("{} cannot be processed because another simulator in the same world is also selected."),
+                           simulator->displayName()),
+                    MessageView::Warning);
             }
         }
     }
@@ -190,7 +188,7 @@ void SimulationBar::startSimulation(SimulatorItem* simulator, bool doReset)
             pauseToggle->setChecked(false);
     	}
         //simulator->selectMotionItems();
-        TimeBar::instance()->startPlaybackFromFillLevel();
+        TimeBar::instance()->startPlayback();
         
     } else {
         sigSimulationAboutToStart_(simulator);
@@ -203,19 +201,13 @@ void SimulationBar::startSimulation(SimulatorItem* simulator, bool doReset)
 void SimulationBar::onStopSimulationClicked()
 {
     forEachSimulator(
-        [&](SimulatorItem* simulator){ stopSimulation(simulator); });
+        [&](SimulatorItem* simulator){ simulator->stopSimulation(true); });
 
     TimeBar* timeBar = TimeBar::instance();
     if(timeBar->isDoingPlayback()){
         timeBar->stopPlayback();
     }
     pauseToggle->setChecked(false);
-}
-
-
-void SimulationBar::stopSimulation(SimulatorItem* simulator)
-{
-    simulator->stopSimulation();
 }
 
 
@@ -228,16 +220,19 @@ void SimulationBar::onPauseSimulationClicked()
 
 void SimulationBar::pauseSimulation(SimulatorItem* simulator)
 {
+    auto timeBar = TimeBar::instance();
+    
     if(pauseToggle->isChecked()){
-        if(simulator->isRunning())
+        if(simulator->isRunning()){
             simulator->pauseSimulation();
-        TimeBar* timeBar = TimeBar::instance();
+        }
         if(timeBar->isDoingPlayback()){
             timeBar->stopPlayback();
         }
     } else {
-        if(simulator->isRunning())
+        if(simulator->isRunning()){
             simulator->restartSimulation();
-        TimeBar::instance()->startPlaybackFromFillLevel();
+        }
+        timeBar->startPlayback();
     }
 }

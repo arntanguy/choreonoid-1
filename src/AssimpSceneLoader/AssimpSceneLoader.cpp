@@ -82,7 +82,7 @@ public:
 void AssimpSceneLoader::initializeClass()
 {
     SceneLoader::registerLoader(
-        "dae;blend;x;obj;dxf",
+        "dae;blend;x;dxf",
         []() -> shared_ptr<AbstractSceneLoader> { return std::make_shared<AssimpSceneLoader>(); });
 }
     
@@ -211,7 +211,7 @@ SgGroup* AssimpSceneLoaderImpl::convertAiNode(aiNode* node)
         group = new SgGroup;
 
     } else if(T.linear().isUnitary(1.0e-6)){
-        group = new SgPosTransform(T);
+        group = new SgPosTransform(Isometry3(T.matrix()));
 
     } else {
         if(USE_AFFINE_TRANSFORM){
@@ -228,7 +228,7 @@ SgGroup* AssimpSceneLoaderImpl::convertAiNode(aiNode* node)
             if(T.isApprox(Affine3::Identity())){
                 group = scaleTransform;
             } else {
-                group = new SgPosTransform(T);
+                group = new SgPosTransform(Isometry3(T.matrix()));
                 group->addChild(scaleTransform);
                 groupToAddChildren = scaleTransform;
             }
@@ -406,10 +406,17 @@ SgNode* AssimpSceneLoaderImpl::convertAiMeshFaces(aiMesh* srcMesh)
             shape->setTexture(texture);
         }
 
+        // The following operation takes much time to execute for a large mesh.
+        // Texture coordinates must be modified in the following operation.
+        /*
         meshFilter.removeRedundantVertices(mesh);
         if(normals){
             meshFilter.removeRedundantNormals(mesh);
         } else {
+            meshFilter.generateNormals(mesh);
+        }
+        */
+        if(!normals){
             meshFilter.generateNormals(mesh);
         }
 
@@ -459,8 +466,7 @@ SgMaterial* AssimpSceneLoaderImpl::convertAiMaterial(unsigned int index)
     }
     float s;
     if(AI_SUCCESS == srcMaterial->Get(AI_MATKEY_SHININESS, s)){
-        s = std::min(128.0f, s);
-        material->setShininess(s / 128.0f);
+        material->setSpecularExponent(s);
     }
     if(AI_SUCCESS == srcMaterial->Get(AI_MATKEY_COLOR_AMBIENT, color)){
         float c = (diffuse == 0.0f ? 0.0f : (color.r + color.g + color.b) / diffuse);
@@ -510,13 +516,12 @@ SgTexture* AssimpSceneLoaderImpl::convertAiTexture(unsigned int index)
             if(p != imagePathToSgImageMap.end()){
                 image = p->second;
             } else {
-                try {
-                    image = new SgImage;
-                    imageIO.load(image->image(), textureFile);
+                image = new SgImage;
+                if(imageIO.load(image->image(), textureFile, os())){
+                    image->setUri(path.data, textureFile);
                     imagePathToSgImageMap[textureFile] = image;
-                } catch(const exception_base& ex){
-                    os() << *boost::get_error_info<error_info_message>(ex) << endl;
-                    image = nullptr;
+                } else {
+                    image.reset();
                 }
             }
             if(image){

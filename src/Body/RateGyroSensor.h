@@ -12,13 +12,15 @@
 
 namespace cnoid {
 
+class Mapping;
+
 class CNOID_EXPORT RateGyroSensor : public Device
 {
 public:
     RateGyroSensor();
     RateGyroSensor(const RateGyroSensor& org, bool copyStateOnly = false);
         
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const RateGyroSensor& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -33,6 +35,9 @@ public:
 
     const Vector3& w_max() const { return spec->w_max; }
     Vector3& w_max() { return spec->w_max; }
+
+    bool readSpecifications(const Mapping* info);
+    bool writeSpecifications(Mapping* info) const;
 
 protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;

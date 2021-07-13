@@ -143,6 +143,7 @@ public:
     void setCurrentProgramPositionToLog(MprControllerLog* log);
     void clear();
     bool interpretCommentStatement(MprCommentStatement* statement);
+    bool interpretGroupStatement(MprGroupStatement* statement);
     bool interpretIfStatement(MprIfStatement* statement);
     bool interpretWhileStatement(MprWhileStatement* statement);
     bool interpretCallStatement(MprCallStatement* statement);
@@ -208,6 +209,10 @@ void MprControllerItemBase::registerBaseStatementInterpreters()
     registerStatementInterpreter<MprCommentStatement>(
         [impl_](MprCommentStatement* statement){
             return impl_->interpretCommentStatement(statement); });
+
+    registerStatementInterpreter<MprGroupStatement>(
+        [impl_](MprGroupStatement* statement){
+            return impl_->interpretGroupStatement(statement); });
 
     registerStatementInterpreter<MprIfStatement>(
         [impl_](MprIfStatement* statement){
@@ -289,14 +294,17 @@ bool MprControllerItemBase::Impl::initialize(ControllerIO* io)
     
     startupProgramItem.reset();
     for(auto& programItem : programItems){
+        if(!programItem->resolveAllReferences()){
+            mv->putln(format(_("Program \"{0}\" is incomplete due to unresolved references."),
+                             programItem->displayName()), MessageView::Warning);
+        }
         if(programItem->isStartupProgram()){
             startupProgramItem = programItem;
-            break;
         }
     }
     if(!startupProgramItem){
         mv->putln(format(_("The startup program for {0} is not specified."),
-                         self->displayName()), MessageView::Warning);
+                         self->displayName()), MessageView::Error);
         return false;
     }
     startupProgram = cloneMap.getClone(startupProgramItem->program());
@@ -803,6 +811,14 @@ bool MprControllerItemBase::Impl::interpretCommentStatement(MprCommentStatement*
 }
 
 
+bool MprControllerItemBase::Impl::interpretGroupStatement(MprGroupStatement* statement)
+{
+    auto program = statement->lowerLevelProgram();
+    self->setCurrent(program, program->begin(), ++self->getCurrentIterator());
+    return true;
+}
+
+
 bool MprControllerItemBase::Impl::interpretIfStatement(MprIfStatement* statement)
 {
     auto condition = evalConditionalExpression(statement->condition());
@@ -816,7 +832,8 @@ bool MprControllerItemBase::Impl::interpretIfStatement(MprIfStatement* statement
                            
     MprElseStatement* nextElseStatement = nullptr;
     if(next != currentProgram->end()){
-        if(nextElseStatement = dynamic_cast<MprElseStatement*>(next->get())){
+        nextElseStatement = dynamic_cast<MprElseStatement*>(next->get());
+        if(nextElseStatement){
             ++next;
         }
     }
@@ -910,15 +927,15 @@ stdx::optional<bool> MprControllerItemBase::Impl::evalConditionalExpression(cons
     auto end = expression.cend();
 
     bool isExpressionValid = false;
-    stdx::optional<MprVariable::Value> pLhs;
     stdx::optional<string> pCmpOp;
     stdx::optional<MprVariable::Value> pRhs;
-    if(pLhs = getTermValue(pos, end)){
+    stdx::optional<MprVariable::Value> pLhs = getTermValue(pos, end);
+    if(pLhs){
         if(pos == end){
             isExpressionValid = true;
-        } else if(pCmpOp = getComparisonOperator(pos, end)){
+        } else if((pCmpOp = getComparisonOperator(pos, end))){
             if(pos != end){
-                if(pRhs = getTermValue(pos, end)){
+                if((pRhs = getTermValue(pos, end))){
                     if(pos == end){
                         isExpressionValid = true;
                     }

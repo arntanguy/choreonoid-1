@@ -20,13 +20,17 @@ public:
     void setOptionMenuTo(MenuManager& menuManager);
     void setEditable(bool on);
     void setUserInputValuePriorityMode(bool on);
-    void setPositionCallback(std::function<bool(const Position& T)> callback);
+    void setCallbacks(
+        std::function<bool(const Isometry3& T)> callbackOnPositionInput,
+        std::function<void()> callbackOnPositionInputFinished);
+    [[deprecated("Use setCallbacks")]]
+    void setPositionCallback(std::function<bool(const Isometry3& T)> callback);
     void clearPosition();
     void refreshPosition();
     void applyPositionInput();
     Vector3 getRpyInput() const;
     void setReferenceRpy(const Vector3& rpy);
-    void setPosition(const Position& T);
+    void setPosition(const Isometry3& T);
     void setErrorHighlight(bool on);
     void storeState(Archive& archive);
     void restoreState(const Archive& archive);

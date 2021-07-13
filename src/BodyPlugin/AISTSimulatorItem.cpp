@@ -71,22 +71,21 @@ public:
 
 namespace cnoid {
   
-class AISTSimulatorItemImpl
+class AISTSimulatorItem::Impl
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
     AISTSimulatorItem* self;
 
-    World<ConstraintForceSolver> world;
-
-    vector<shared_ptr<ForwardDynamicsCBM>> highGainDynamicsList;
+    DyWorld<ConstraintForceSolver> world;
+    vector<DyLink*> internalStateUpdateLinks;
         
     Selection dynamicsMode;
     Selection integrationMode;
     Vector3 gravity;
-    double staticFriction;
-    double dynamicFriction;
+    double minFrictionCoefficient;
+    double maxFrictionCoefficient;
     FloatingNumberString contactCullingDistance;
     FloatingNumberString contactCullingDepth;
     FloatingNumberString errorCriterion;
@@ -97,28 +96,24 @@ public:
     bool is2Dmode;
     bool isKinematicWalkingEnabled;
     bool isOldAccelSensorMode;
-
-    typedef std::map<Body*, int> BodyIndexMap;
-    BodyIndexMap bodyIndexMap;
+    bool hasNonRootFreeJoints;
 
     stdx::optional<int> forcedBodyPositionFunctionId;
     std::mutex forcedBodyPositionMutex;
     DyBody* forcedPositionBody;
-    Position forcedBodyPosition;
+    Isometry3 forcedBodyPosition;
 
     MessageView* mv;
 
-    AISTSimulatorItemImpl(AISTSimulatorItem* self);
-    AISTSimulatorItemImpl(AISTSimulatorItem* self, const AISTSimulatorItemImpl& org);
+    Impl(AISTSimulatorItem* self);
+    Impl(AISTSimulatorItem* self, const Impl& org);
     bool initializeSimulation(const std::vector<SimulationBody*>& simBodies);
     void addBody(AISTSimBody* simBody);
     void clearExternalForces();
     void stepKinematicsSimulation(const std::vector<SimulationBody*>& activeSimBodies);
-    void setForcedPosition(BodyItem* bodyItem, const Position& T);
+    void setForcedPosition(BodyItem* bodyItem, const Isometry3& T);
     void doSetForcedPosition();
     void doPutProperties(PutPropertyFunction& putProperty);
-    void addExtraJoint(ExtraJoint& extrajoint);
-    void clearExtraJoint();
     bool store(Archive& archive);
     bool restore(const Archive& archive);
 
@@ -137,14 +132,14 @@ void AISTSimulatorItem::initializeClass(ExtensionManager* ext)
 
 
 AISTSimulatorItem::AISTSimulatorItem()
+    : SimulatorItem("AISTSimulator")
 {
-    impl = new AISTSimulatorItemImpl(this);
-    setName("AISTSimulator");
+    impl = new Impl(this);
     setAllLinkPositionOutputMode(false);
 }
 
 
-AISTSimulatorItemImpl::AISTSimulatorItemImpl(AISTSimulatorItem* self)
+AISTSimulatorItem::Impl::Impl(AISTSimulatorItem* self)
     : self(self),
       dynamicsMode(AISTSimulatorItem::N_DYNAMICS_MODES, CNOID_GETTEXT_DOMAIN_NAME),
       integrationMode(AISTSimulatorItem::N_INTEGRATION_MODES, CNOID_GETTEXT_DOMAIN_NAME)
@@ -159,8 +154,8 @@ AISTSimulatorItemImpl::AISTSimulatorItemImpl(AISTSimulatorItem* self)
     gravity << 0.0, 0.0, -DEFAULT_GRAVITY_ACCELERATION;
 
     ConstraintForceSolver& cfs = world.constraintForceSolver;
-    staticFriction = cfs.staticFriction();
-    dynamicFriction = cfs.slipFriction();
+    minFrictionCoefficient = cfs.minFrictionCoefficient();
+    maxFrictionCoefficient = cfs.maxFrictionCoefficient();
     contactCullingDistance = cfs.contactCullingDistance();
     contactCullingDepth = cfs.contactCullingDepth();
     epsilon = cfs.coefficientOfRestitution();
@@ -173,6 +168,7 @@ AISTSimulatorItemImpl::AISTSimulatorItemImpl(AISTSimulatorItem* self)
     isKinematicWalkingEnabled = false;
     is2Dmode = false;
     isOldAccelSensorMode = false;
+    hasNonRootFreeJoints = false;
 
     mv = MessageView::instance();
 }
@@ -180,20 +176,20 @@ AISTSimulatorItemImpl::AISTSimulatorItemImpl(AISTSimulatorItem* self)
 
 AISTSimulatorItem::AISTSimulatorItem(const AISTSimulatorItem& org)
     : SimulatorItem(org),
-      impl(new AISTSimulatorItemImpl(this, *org.impl))
+      impl(new Impl(this, *org.impl))
 {
 
 }
 
 
-AISTSimulatorItemImpl::AISTSimulatorItemImpl(AISTSimulatorItem* self, const AISTSimulatorItemImpl& org)
+AISTSimulatorItem::Impl::Impl(AISTSimulatorItem* self, const Impl& org)
     : self(self),
       dynamicsMode(org.dynamicsMode),
       integrationMode(org.integrationMode)
 {
     gravity = org.gravity;
-    staticFriction = org.staticFriction;
-    dynamicFriction = org.dynamicFriction;
+    minFrictionCoefficient = org.minFrictionCoefficient;
+    maxFrictionCoefficient = org.maxFrictionCoefficient;
     contactCullingDistance = org.contactCullingDistance;
     contactCullingDepth = org.contactCullingDepth;
     errorCriterion = org.errorCriterion;
@@ -239,22 +235,22 @@ const Vector3& AISTSimulatorItem::gravity() const
 }
 
 
-void AISTSimulatorItem::setFriction(double staticFriction, double dynamicFriction)
+void AISTSimulatorItem::setFrictionCoefficientRange(double minFriction, double maxFriction)
 {
-    impl->staticFriction = staticFriction;
-    impl->dynamicFriction = dynamicFriction;
+    impl->minFrictionCoefficient = minFriction;
+    impl->maxFrictionCoefficient = maxFriction;
 }
 
 
-double AISTSimulatorItem::staticFriction() const
+double AISTSimulatorItem::minFrictionCoefficient() const
 {
-    return impl->staticFriction;
+    return impl->minFrictionCoefficient;
 }
 
 
-double AISTSimulatorItem::dynamicFriction() const
+double AISTSimulatorItem::maxFrictionCoefficient() const
 {
-    return impl->dynamicFriction;
+    return impl->maxFrictionCoefficient;
 }
 
 
@@ -334,21 +330,15 @@ void AISTSimulatorItem::setKinematicWalkingEnabled(bool on)
 }
 
 
-void AISTSimulatorItem::setConstraintForceOutputEnabled(bool on)
+void AISTSimulatorItem::setConstraintForceOutputEnabled(bool /* on */)
 {
-    impl->world.constraintForceSolver.enableConstraintForceOutput(on);
+
 }
 
 
 Item* AISTSimulatorItem::doDuplicate() const
 {
     return new AISTSimulatorItem(*this);
-}
-
-
-bool AISTSimulatorItem::startSimulation(bool doReset)
-{
-    return SimulatorItem::startSimulation(doReset);
 }
 
 
@@ -375,17 +365,6 @@ SimulationBody* AISTSimulatorItem::createSimulationBody(Body* orgBody, CloneMap&
     cloneMap.setClone(orgBody, body);
     body->copyFrom(orgBody, &cloneMap);
 
-    const int n = orgBody->numLinks();
-    for(int i=0; i < n; ++i){
-        auto link = body->link(i);
-        if(link->isFreeJoint() && !link->isBodyRoot()){
-            static const char* message =
-                _("The joint {0} of {1} is a free joint. AISTSimulator does not allow for a free joint except for the root link.");
-            impl->mv->putln(format(message, link->name(), body->name()), MessageView::Warning);
-            link->setJointType(Link::FIXED_JOINT);
-        }
-    }
-    
     if(impl->dynamicsMode.is(KINEMATICS) && impl->isKinematicWalkingEnabled){
         LeggedBodyHelper* legged = getLeggedBodyHelper(body);
         if(legged->isValid()){
@@ -406,7 +385,7 @@ bool AISTSimulatorItem::initializeSimulation(const std::vector<SimulationBody*>&
 }
 
 
-bool AISTSimulatorItemImpl::initializeSimulation(const std::vector<SimulationBody*>& simBodies)
+bool AISTSimulatorItem::Impl::initializeSimulation(const std::vector<SimulationBody*>& simBodies)
 {
     if(ENABLE_DEBUG_OUTPUT){
         static int ntest = 0;
@@ -434,19 +413,30 @@ bool AISTSimulatorItemImpl::initializeSimulation(const std::vector<SimulationBod
     self->addPostDynamicsFunction([&](){ clearExternalForces(); });
 
     world.clearBodies();
-    bodyIndexMap.clear();
-    highGainDynamicsList.clear();
+    internalStateUpdateLinks.clear();
 
+    hasNonRootFreeJoints = false;
     for(size_t i=0; i < simBodies.size(); ++i){
         addBody(static_cast<AISTSimBody*>(simBodies[i]));
     }
-
-    if(!highGainDynamicsList.empty()){
-        mvout() << format(_("{} uses the ForwardDynamicsCBM module to perform the high-gain control."),
-                          self->displayName()) << endl;
+    if(hasNonRootFreeJoints && !self->isAllLinkPositionOutputMode()){
+        bool confirmed = showConfirmDialog(
+            _("Confirmation of all link position recording mode"),
+            format(_("{0}: There is a model that has free-type joints other than the root link "
+                     "and all the link positions should be recorded in this case. "
+                     "Do you enable the mode to do it?"), self->displayName()));
+        if(confirmed){
+            self->setAllLinkPositionOutputMode(true);
+            self->notifyUpdate();
+        }
     }
 
-    cfs.setFriction(staticFriction, dynamicFriction);
+    if(world.hasHighGainDynamics()){
+        mv->putln(format(_("{} uses the ForwardDynamicsCBM module to perform the high-gain control."),
+                         self->displayName()));
+    }
+
+    cfs.setFrictionCoefficientRange(minFrictionCoefficient, maxFrictionCoefficient);
     cfs.setContactCullingDistance(contactCullingDistance.value());
     cfs.setContactCullingDepth(contactCullingDepth.value());
     cfs.setCoefficientOfRestitution(epsilon);
@@ -456,41 +446,69 @@ bool AISTSimulatorItemImpl::initializeSimulation(const std::vector<SimulationBod
         cfs.set2Dmode(true);
     }
 
-    world.initialize();
-
     return true;
 }
 
 
-void AISTSimulatorItemImpl::addBody(AISTSimBody* simBody)
+void AISTSimulatorItem::Impl::addBody(AISTSimBody* simBody)
 {
     DyBody* body = static_cast<DyBody*>(simBody->body());
 
-    bool hasHighgainJoints = false;
+    //! \todo Move the following process to DySubBody's constructor
     for(auto& link : body->links()){
-        if(link->actuationMode() == Link::JOINT_DISPLACEMENT ||
-           link->actuationMode() == Link::JOINT_VELOCITY ||
-           link->actuationMode() == Link::LINK_POSITION){
-            hasHighgainJoints = true;
+        if(link->isFreeJoint() && !link->isRoot()){
+            hasNonRootFreeJoints = true;
+        }
+        int mode = link->actuationMode() & ~Link::LinkExtWrench;
+        if(mode){
+            if(mode == Link::JointEffort){
+                continue;
+            }
+            if(link->jointType() == Link::PseudoContinuousTrackJoint){
+                if(mode == Link::JointVelocity || mode == Link::DeprecatedJointSurfaceVelocity){
+                    continue;
+                } else {
+                    mv->putln(
+                        format(_("{0}: Actuation mode \"{1}\" cannot be used for the pseudo continuous track link {2} of {3}"),
+                               self->displayName(), Link::getStateModeString(mode), link->name(), body->name()),
+                        MessageView::Warning);
+                }
+            }
+            if(mode == Link::JointDisplacement || mode == Link::JointVelocity || mode == Link::LinkPosition){
+                continue;
+
+            } else if(link->actuationMode() == Link::AllStateHighGainActuationMode){
+                internalStateUpdateLinks.push_back(link);
+
+            } else if(mode == Link::DeprecatedJointSurfaceVelocity){
+                if(link->isFixedJoint()){
+                    link->setJointType(Link::PseudoContinuousTrackJoint);
+                }
+            } else {
+                mv->putln(
+                    format(_("{0}: Actuation mode \"{1}\" specified for the {2} link of {3} is not supported."),
+                           self->displayName(), Link::getStateModeString(mode), link->name(), body->name()),
+                    MessageView::Warning);
+            }
         }
     }
 
-    int bodyIndex;
-    if(hasHighgainJoints){
-        auto dynamics = make_shared_aligned<ForwardDynamicsCBM>(body);
-        highGainDynamicsList.push_back(dynamics);
-        bodyIndex = world.addBody(body, dynamics);
-    } else {
-        bodyIndex = world.addBody(body);
-    }
-    bodyIndexMap[body] = bodyIndex;
+    int bodyIndex = world.addBody(body);
 
-    world.constraintForceSolver.setSelfCollisionDetectionEnabled(
-        bodyIndex, simBody->bodyItem()->isSelfCollisionDetectionEnabled());
+    auto bodyItem = simBody->bodyItem();
+    world.constraintForceSolver.setBodyCollisionDetectionMode(
+        bodyIndex, bodyItem->isCollisionDetectionEnabled(), bodyItem->isSelfCollisionDetectionEnabled());
 }
 
 
-void AISTSimulatorItemImpl::clearExternalForces()
+bool AISTSimulatorItem::completeInitializationOfSimulation()
+{
+    impl->world.initialize();
+    return true;
+}
+
+
+void AISTSimulatorItem::Impl::clearExternalForces()
 {
     world.constraintForceSolver.clearExternalForces();
 }
@@ -499,12 +517,27 @@ void AISTSimulatorItemImpl::clearExternalForces()
 bool AISTSimulatorItem::stepSimulation(const std::vector<SimulationBody*>& activeSimBodies)
 {
     switch(impl->dynamicsMode.which()){
-    case FORWARD_DYNAMICS:
-        for(auto&& dynamics : impl->highGainDynamicsList){
-            dynamics->complementHighGainModeCommandValues();
+
+    case FORWARD_DYNAMICS: {
+        // Update the internal states for a special actuation mode
+        bool doRefresh = false;
+        for(auto& dyLink : impl->internalStateUpdateLinks){
+            if(dyLink->actuationMode() == Link::AllStateHighGainActuationMode){
+                if(dyLink->hasJoint()){
+                    dyLink->q() = dyLink->q_target();
+                    dyLink->dq() = dyLink->dq_target();
+                }
+                dyLink->vo() = dyLink->v() - dyLink->w().cross(dyLink->p());
+                doRefresh = true;
+            }
+        }
+        if(doRefresh){
+            impl->world.refreshState();
         }
         impl->world.calcNextState();
         break;
+    }
+        
     case KINEMATICS:
         impl->stepKinematicsSimulation(activeSimBodies);
         break;
@@ -513,7 +546,7 @@ bool AISTSimulatorItem::stepSimulation(const std::vector<SimulationBody*>& activ
 }
 
 
-void AISTSimulatorItemImpl::stepKinematicsSimulation(const std::vector<SimulationBody*>& activeSimBodies)
+void AISTSimulatorItem::Impl::stepKinematicsSimulation(const std::vector<SimulationBody*>& activeSimBodies)
 {
     for(size_t i=0; i < activeSimBodies.size(); ++i){
         SimulationBody* simBody = activeSimBodies[i];
@@ -586,13 +619,13 @@ Vector3 AISTSimulatorItem::getGravity() const
 }
 
 
-void AISTSimulatorItem::setForcedPosition(BodyItem* bodyItem, const Position& T)
+void AISTSimulatorItem::setForcedPosition(BodyItem* bodyItem, const Isometry3& T)
 {
     impl->setForcedPosition(bodyItem, T);
 }
 
 
-void AISTSimulatorItemImpl::setForcedPosition(BodyItem* bodyItem, const Position& T)
+void AISTSimulatorItem::Impl::setForcedPosition(BodyItem* bodyItem, const Isometry3& T)
 {
     if(SimulationBody* simBody = self->findSimulationBody(bodyItem)){
         {
@@ -633,7 +666,7 @@ void AISTSimulatorItem::clearForcedPositions()
 }
     
 
-void AISTSimulatorItemImpl::doSetForcedPosition()
+void AISTSimulatorItem::Impl::doSetForcedPosition()
 {
     std::lock_guard<std::mutex> lock(forcedBodyPositionMutex);
     DyLink* rootLink = forcedPositionBody->rootLink();
@@ -652,40 +685,28 @@ void AISTSimulatorItem::doPutProperties(PutPropertyFunction& putProperty)
 }
 
 
-void AISTSimulatorItem::clearExtraJoint()
+void AISTSimulatorItem::clearExtraJoints()
 {
-    impl->clearExtraJoint();
+    impl->world.clearExtraJoints();
 }
 
 
-void AISTSimulatorItem::addExtraJoint(ExtraJoint& extrajoint)
+void AISTSimulatorItem::addExtraJoint(ExtraJoint& extraJoint)
 {
-    impl->addExtraJoint(extrajoint);
+    impl->world.addExtraJoint(extraJoint);
 }
 
 
-void AISTSimulatorItemImpl::clearExtraJoint()
-{
-    world.extrajoints.clear();
-}
-
-
-void AISTSimulatorItemImpl::addExtraJoint(ExtraJoint& extrajoint)
-{
-    world.extrajoints.push_back(extrajoint);
-}
-
-
-void AISTSimulatorItemImpl::doPutProperties(PutPropertyFunction& putProperty)
+void AISTSimulatorItem::Impl::doPutProperties(PutPropertyFunction& putProperty)
 {
     putProperty(_("Dynamics mode"), dynamicsMode,
                 [&](int index){ return dynamicsMode.selectIndex(index); });
     putProperty(_("Integration mode"), integrationMode,
                 [&](int index){ return integrationMode.selectIndex(index); });
     putProperty(_("Gravity"), str(gravity), [&](const string& v){ return toVector3(v, gravity); });
-    putProperty.decimals(3).min(0.0);
-    putProperty(_("Static friction"), staticFriction, changeProperty(staticFriction));
-    putProperty(_("Slip friction"), dynamicFriction, changeProperty(dynamicFriction));
+    putProperty.decimals(1).min(0.0);
+    putProperty(_("Min friction coefficient"), minFrictionCoefficient, changeProperty(minFrictionCoefficient));
+    putProperty(_("Max friction coefficient"), maxFrictionCoefficient, changeProperty(maxFrictionCoefficient));
     putProperty(_("Contact culling distance"), contactCullingDistance,
                 [&](const string& v){ return contactCullingDistance.setNonNegativeValue(v); });
     putProperty(_("Contact culling depth"), contactCullingDepth,
@@ -711,13 +732,13 @@ bool AISTSimulatorItem::store(Archive& archive)
 }
 
 
-bool AISTSimulatorItemImpl::store(Archive& archive)
+bool AISTSimulatorItem::Impl::store(Archive& archive)
 {
     archive.write("dynamicsMode", dynamicsMode.selectedSymbol(), DOUBLE_QUOTED);
     archive.write("integrationMode", integrationMode.selectedSymbol(), DOUBLE_QUOTED);
     write(archive, "gravity", gravity);
-    archive.write("staticFriction", staticFriction);
-    archive.write("dynamicFriction", dynamicFriction);
+    archive.write("min_friction_coefficient", minFrictionCoefficient);
+    archive.write("max_friction_coefficient", maxFrictionCoefficient);
     archive.write("cullingThresh", contactCullingDistance);
     archive.write("contactCullingDepth", contactCullingDepth);
     archive.write("errorCriterion", errorCriterion);
@@ -738,7 +759,7 @@ bool AISTSimulatorItem::restore(const Archive& archive)
 }
 
 
-bool AISTSimulatorItemImpl::restore(const Archive& archive)
+bool AISTSimulatorItem::Impl::restore(const Archive& archive)
 {
     string symbol;
     if(archive.read("dynamicsMode", symbol)){
@@ -748,10 +769,8 @@ bool AISTSimulatorItemImpl::restore(const Archive& archive)
         integrationMode.select(symbol);
     }
     read(archive, "gravity", gravity);
-    archive.read("staticFriction", staticFriction);
-    if(!archive.read("dynamicFriction", dynamicFriction)){
-        archive.read("slipFriction", dynamicFriction);
-    }
+    archive.read("min_friction_coefficient", minFrictionCoefficient);
+    archive.read("max_friction_coefficient", maxFrictionCoefficient);
     contactCullingDistance = archive.get("cullingThresh", contactCullingDistance.string());
     contactCullingDepth = archive.get("contactCullingDepth", contactCullingDepth.string());
     errorCriterion = archive.get("errorCriterion", errorCriterion.string());

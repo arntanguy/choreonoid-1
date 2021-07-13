@@ -6,21 +6,12 @@
 #define CNOID_UTIL_EIGEN_UTIL_H
 
 #include "EigenTypes.h"
+#include "MathUtil.h"
 #include <memory>
 #include "exportdecl.h"
 
 namespace cnoid {
 
-constexpr double PI = 3.141592653589793238462643383279502884;
-constexpr double PI_2 = 1.570796326794896619231321691639751442;
-constexpr double TO_DEGREE = 180.0 / PI;
-constexpr double TO_RADIAN = PI / 180.0;
-
-inline double degree(double rad) { return TO_DEGREE * rad; }
-inline double radian(double deg) { return TO_RADIAN * deg; }
-inline float degree(float rad) { return (float)TO_DEGREE * rad; }
-inline float radian(float deg) { return (float)TO_RADIAN * deg; }
-inline double radian(int deg) { return TO_RADIAN * deg; }
 inline Vector3 degree(const Vector3& v){ return Vector3(degree(v.x()), degree(v.y()), degree(v.z())); }
 inline Vector3 radian(const Vector3& v){ return Vector3(radian(v.x()), radian(v.y()), radian(v.z())); }
 
@@ -51,10 +42,21 @@ CNOID_EXPORT bool toVector3(const std::string& s, Vector3& out_v);
 CNOID_EXPORT bool toVector3(const std::string& s, Vector3f& out_v);
 CNOID_EXPORT bool toVector6(const std::string& s, Vector6& out_v);
 
-
 CNOID_EXPORT void normalizeRotation(Matrix3& R);
-CNOID_EXPORT void normalizeRotation(Position& T);
 CNOID_EXPORT void normalizeRotation(Affine3& T);
+CNOID_EXPORT void normalizeRotation(Isometry3& T);
+
+inline Isometry3 convertToIsometryWithOrthonormalization(const Affine3& A)
+{
+    Isometry3 M;
+    auto S = A.linear();
+    auto R = M.linear();
+    R.col(2) = S.col(2).normalized(); // Z
+    R.col(1) = R.col(2).cross(S.col(0).normalized()).normalized(); // Y
+    R.col(0) = R.col(1).cross(R.col(2)); // X
+    M.translation() = A.translation();
+    return M;
+}
 
 template<class T, typename... Args>
 std::shared_ptr<T> make_shared_aligned(Args&&... args)

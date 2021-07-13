@@ -7,7 +7,6 @@
 #define CNOID_BODY_BODY_H
 
 #include "LinkTraverse.h"
-#include "Link.h"
 #include "ExtraJoint.h"
 #include "DeviceList.h"
 #include "exportdecl.h"
@@ -15,8 +14,8 @@
 namespace cnoid {
 
 class Body;
-class BodyImpl;
 class BodyHandler;
+class Link;
 class Mapping;
 class CloneMap;
 
@@ -26,18 +25,20 @@ typedef void* BodyCustomizerHandle;
 
 typedef ref_ptr<Body> BodyPtr;
 
-class CNOID_EXPORT Body : public CloneableReferenced
+class CNOID_EXPORT Body : public ClonableReferenced
 {
 public:
     Body();
+    Body(const std::string& name);
     Body(const Body& org) = delete;
     virtual ~Body();
 
+    // This function can only be used just after the construction of a new instance
     void copyFrom(const Body* org, CloneMap* cloneMap = nullptr);
     Body* clone() const { return static_cast<Body*>(doClone(nullptr)); }
     Body* clone(CloneMap& cloneMap) const { return static_cast<Body*>(doClone(&cloneMap)); }
 
-    virtual Link* createLink(const Link* org = 0) const;
+    virtual Link* createLink(const Link* org = nullptr) const;
 
     const std::string& name() const;
     void setName(const std::string& name);
@@ -57,12 +58,8 @@ public:
     void initializePosition();
     virtual void initializeState();
 
-    Body* parentBody() const {
-        return rootLink_->parent() ? rootLink_->parent()->body() : nullptr;
-    }
-    Link* parentBodyLink() const {
-        return rootLink_->parent() ? rootLink_->parent() : nullptr;
-    }
+    Body* parentBody() const { return parentBodyLink_ ? parentBodyLink_->body() : nullptr; }
+    Link* parentBodyLink() const { return parentBodyLink_; }
     void setParent(Link* parentBodyLink);
     void resetParent();
     void syncPositionWithParentBody(bool doForwardKinematics = true);
@@ -76,13 +73,19 @@ public:
     }
 
     /**
-       This function returns the link of a given index in the whole link sequence.
+       This function returns the link object of a given index in the whole link sequence.
        The order of the sequence corresponds to a link-tree traverse from the root link.
        The size of the sequence can be obtained by numLinks().
     */
     Link* link(int index) const {
         return linkTraverse_.link(index);
     }
+
+    /**
+       This function returns the link object whose name matches a given name.
+       A nullptr is returned when the corresponding link is not found.
+    */
+    Link* link(const std::string& name) const;
 
     /**
        LinkTraverse object that traverses all the links from the root link
@@ -95,12 +98,6 @@ public:
         return linkTraverse_.links();
     }
     
-    /**
-       This function returns a link object whose name of Joint node matches a given name.
-       Null is returned when the body has no joint of the given name.
-    */
-    Link* link(const std::string& name) const;
-
     /**
        The root link of the body
     */
@@ -141,15 +138,19 @@ public:
     }
 
     /**
-       This function returns a link that has a given joint ID.
-       If there is no link that has a given joint ID,
-       the function returns a dummy link object whose ID is minus one.
-       If the body has virtual joints, this function returns them by giving the ids
-       over the last one.
+       This function returns the link object that has a given joint ID.
+       If there is no corresponding link, the function returns a dummy link object whose ID is minus one.
+       If the body has virtual joints, this function returns them by giving the ids over the last one.
     */
     Link* joint(int id) const {
         return jointIdToLinkArray[id];
     }
+
+    /**
+       This function returns a link object whose joint name matches a given name.
+       A nullptr is returned when the corresponding link is not found.
+    */
+    Link* joint(const std::string& name) const;
 
     template<class Container> class ContainerWrapper {
     public:
@@ -205,10 +206,12 @@ public:
     }
     
     void addDevice(Device* device, Link* link);
-    void addDevice(Device* device); //! \deprecated
-    void initializeDeviceStates();
+    [[deprecated("Use addDevice(Device* device, Link* link)")]]
+    void addDevice(Device* device);
     void removeDevice(Device* device);
     void clearDevices();
+    void sortDevicesByLinkOrder();
+    void initializeDeviceStates();
 
     /**
        This function returns true when the whole body is a static, fixed object like a floor.
@@ -220,8 +223,8 @@ public:
         return rootLink_->isFixedJoint();
     }
 
-    void resetDefaultPosition(const Position& T);
-    const Position& defaultPosition() const { return rootLink_->Tb(); }
+    void resetDefaultPosition(const Isometry3& T);
+    const Isometry3& defaultPosition() const { return rootLink_->Tb(); }
 
     double mass() const;
 
@@ -287,6 +290,9 @@ public:
         return dynamic_cast<BodyHandlerType*>(
             findHandler([](BodyHandler* handler)->bool{ return dynamic_cast<BodyHandlerType*>(handler); }));
     }
+
+    int numHandlers() const;
+    BodyHandler* handler(int index);
     
     // The following functions for the body customizer are deprecated
     BodyCustomizerHandle customizerHandle() const;
@@ -298,6 +304,10 @@ public:
     static void addCustomizerDirectory(const std::string& path);
     static BodyInterface* bodyInterface();
 
+    void resetLinkName(Link* link, const std::string& name);
+    void resetJointSpecificName(Link* link);
+    void resetJointSpecificName(Link* link, const std::string& name);
+
 protected:
     Body(Link* rootLink);
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
@@ -305,16 +315,17 @@ protected:
 private:
     LinkTraverse linkTraverse_;
     LinkPtr rootLink_;
+    LinkPtr parentBodyLink_;
     bool isStaticModel_;
     std::vector<LinkPtr> jointIdToLinkArray;
     int numActualJoints;
     DeviceList<> devices_;
     std::vector<ExtraJoint> extraJoints_;
     std::function<double()> currentTimeFunction;
-    BodyImpl* impl;
 
-    void initialize();
-    void resetLinkName(Link* link, const std::string& name);
+    class Impl;
+    Impl* impl;
+
     Link* cloneLinkTree(const Link* orgLink, CloneMap* cloneMap);
     Link* createEmptyJoint(int jointId);
     Device* findDeviceSub(const std::string& name) const;
@@ -322,9 +333,6 @@ private:
     const Referenced* findCacheSub(const std::string& name) const;
     void insertCache(const std::string& name, Referenced* cache);
     BodyHandler* findHandler(std::function<bool(BodyHandler*)> isTargetHandlerType);
-    void setVirtualJointForcesSub(); // deprecated
-
-    friend class Link;
 };
 
 template<> CNOID_EXPORT double Body::info(const std::string& key) const;

@@ -9,14 +9,18 @@ set(sources
   WorldItem.cpp
   BodySelectionManager.cpp
   BodyItem.cpp
+  BodyItemFileIO.cpp
   EditableSceneBody.cpp
   LinkKinematicsKitManager.cpp
   LinkOffsetFrameListItem.cpp
+  MaterialTableItem.cpp
   SimulatorItem.cpp
   SubSimulatorItem.cpp
   ControllerItem.cpp
   SimpleControllerItem.cpp
   BodyMotionControllerItem.cpp
+  ControllerLogItem.cpp
+  BodyContactPointLoggerItem.cpp
   SimulationScriptItem.cpp
   AISTSimulatorItem.cpp
   KinematicSimulatorItem.cpp
@@ -66,13 +70,17 @@ set(headers
   WorldItem.h
   BodySelectionManager.h
   BodyItem.h
+  BodyItemFileIO.h
   EditableSceneBody.h
   LinkKinematicsKitManager.h
   LinkOffsetFrameListItem.h
+  MaterialTableItem.h
   SimulatorItem.h
   SubSimulatorItem.h
   ControllerItem.h
   SimpleControllerItem.h
+  ControllerLogItem.h
+  BodyContactPointLoggerItem.h
   SimulationScriptItem.h
   AISTSimulatorItem.h
   KinematicSimulatorItem.h
@@ -121,7 +129,7 @@ if(MSVC)
   set(boost_libraries ${boost_libraries} ${Boost_BZIP2_LIBRARY} ${Boost_ZLIB_LIBRARY})
 endif()
 
-target_link_libraries(${target} CnoidBase CnoidBody ${boost_libraries})
+target_link_libraries(${target} CnoidBody ${boost_libraries})
 
 if(ENABLE_PYTHON)
   add_subdirectory(pybind11)

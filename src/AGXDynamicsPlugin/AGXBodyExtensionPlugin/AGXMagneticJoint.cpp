@@ -4,7 +4,8 @@
 */
 
 #include <cnoid/Device>
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
+#include <cnoid/StdBodyWriter>
 #include <cnoid/YAMLReader>
 #include <cnoid/AGXBodyExtension>
 #include <cnoid/AGXBody>
@@ -24,10 +25,10 @@ struct AGXMagneticJointDeviceDesc
 class AGXMagneticJointDevice : private AGXMagneticJointDeviceDesc, public Device
 {
 public:
-    static bool createAGXMagneticJointDevice(YAMLBodyLoader& loader, Mapping& node);
+    static bool createAGXMagneticJointDevice(StdBodyLoader* loader, const Mapping* node);
     AGXMagneticJointDevice(const AGXMagneticJointDeviceDesc& desc, Mapping* info);
     AGXMagneticJointDevice(const AGXMagneticJointDevice& org, bool copyStateOnly = false);
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const AGXMagneticJointDevice& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -50,13 +51,13 @@ private:
 };
 typedef ref_ptr<AGXMagneticJointDevice> AGXMagneticJointDevicePtr;
 
-bool AGXMagneticJointDevice::createAGXMagneticJointDevice(YAMLBodyLoader&loader, Mapping&node)
+bool AGXMagneticJointDevice::createAGXMagneticJointDevice(StdBodyLoader* loader, const Mapping* node)
 {
-    MappingPtr info = node.cloneMapping();
+    MappingPtr info = node->cloneMapping();
     AGXMagneticJointDeviceDesc desc;
     AGXMagneticJointDevicePtr jointDevice = new AGXMagneticJointDevice(desc, info);
     //node.clear();
-    return loader.readDevice(jointDevice, node);
+    return loader->readDevice(jointDevice, node);
 }
 
 AGXMagneticJointDevice::AGXMagneticJointDevice(const AGXMagneticJointDeviceDesc& desc, Mapping* info) :
@@ -71,7 +72,7 @@ AGXMagneticJointDevice::AGXMagneticJointDevice(const AGXMagneticJointDevice& org
     copyStateFrom(org);
 }
 
-const char*AGXMagneticJointDevice::typeName()
+const char*AGXMagneticJointDevice::typeName() const
 {
     return "AGXMagneticJointDevice";
 }
@@ -315,6 +316,12 @@ AGXMagneticJoint::AGXMagneticJoint(AGXMagneticJointDevice* device, AGXBody* agxB
         ->add(new JointMagnetizer(joint, jp.validDistance, jp.validAngle));
 }
 
+static bool writeAGXMagneticJointDevice
+(StdBodyWriter* writer, Mapping* info, const AGXMagneticJointDevice* device)
+{
+    return true;
+}
+
 } // cnoid
 
 namespace{
@@ -326,7 +333,10 @@ struct AGXMagneticJointDeviceRegistration
 {
     AGXMagneticJointDeviceRegistration()
     {
-        YAMLBodyLoader::addNodeType("AGXMagneticJointDevice", AGXMagneticJointDevice::createAGXMagneticJointDevice);
+        StdBodyLoader::registerNodeType(
+            "AGXMagneticJointDevice", AGXMagneticJointDevice::createAGXMagneticJointDevice);
+        StdBodyWriter::registerDeviceWriter<AGXMagneticJointDevice>(
+            "AGXMagneticJointDevice", writeAGXMagneticJointDevice);
     }
 }registrationAGXMagneticJointDevice;
 

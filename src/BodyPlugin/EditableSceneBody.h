@@ -5,7 +5,7 @@
 #ifndef CNOID_BODY_PLUGIN_EDITABLE_SCENE_BODY_H
 #define CNOID_BODY_PLUGIN_EDITABLE_SCENE_BODY_H
 
-#include <cnoid/SceneWidgetEditable>
+#include <cnoid/SceneWidgetEventHandler>
 #include <cnoid/SceneBody>
 #include <vector>
 #include "exportdecl.h"
@@ -13,19 +13,21 @@
 namespace cnoid {
 
 class ExtensionManager;
-
 class BodyItem;
+class EditableSceneBody;
 
 class CNOID_EXPORT EditableSceneLink : public SceneLink
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
-    EditableSceneLink(Link* link);
+    EditableSceneLink(EditableSceneBody* sceneBody, Link* link);
     ~EditableSceneLink();
 
     void showOrigin(bool on);
     bool isOriginShown() const;
+    void enableHighlight(bool on);
+    [[deprecated("Use enableHighlight")]]
     void showOutline(bool on);
     void showMarker(const Vector3f& color, float transparency);
     void hideMarker();
@@ -40,7 +42,7 @@ private:
 typedef ref_ptr<EditableSceneLink> EditableSceneLinkPtr;
 
     
-class CNOID_EXPORT EditableSceneBody : public SceneBody, public SceneWidgetEditable
+class CNOID_EXPORT EditableSceneBody : public SceneBody, public SceneWidgetEventHandler
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
@@ -54,19 +56,17 @@ public:
 
     virtual void updateModel() override;
 
-    virtual void onSceneModeChanged(const SceneWidgetEvent& event) override;
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onDoubleClickEvent(const SceneWidgetEvent& event) override;
-    virtual bool onButtonReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual void onPointerLeaveEvent(const SceneWidgetEvent& event) override;
-    virtual bool onKeyPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onKeyReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onScrollEvent(const SceneWidgetEvent& event) override;
-    virtual void onFocusChanged(const SceneWidgetEvent& event, bool on) override;
-    virtual bool onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager) override;
-    virtual bool onUndoRequest() override;
-    virtual bool onRedoRequest() override;
+    virtual void onSceneModeChanged(SceneWidgetEvent* event) override;
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onDoubleClickEvent(SceneWidgetEvent* event) override;
+    virtual bool onButtonReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual void onPointerLeaveEvent(SceneWidgetEvent* event) override;
+    virtual bool onKeyPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onKeyReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onScrollEvent(SceneWidgetEvent* event) override;
+    virtual void onFocusChanged(SceneWidgetEvent* event, bool on) override;
+    virtual bool onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager) override;
 
 protected:
     virtual ~EditableSceneBody();
@@ -77,7 +77,7 @@ private:
     class Impl;
     Impl* impl;
     
-    friend class EditableSceneBodyImpl;
+    friend class EditableSceneLink;
 };
             
 typedef ref_ptr<EditableSceneBody> EditableSceneBodyPtr;

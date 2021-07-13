@@ -192,10 +192,14 @@ static bool CustomMaterialCombinerCallback(btManifoldPoint& cp, const btCollisio
     Link* crawlerlink;
     double sign = 1;
     double friction;
-    if(link0 && link0->actuationMode() == Link::JOINT_SURFACE_VELOCITY){
+    if(link0 &&
+       (link0->jointType() == Link::PseudoContinuousTrackJoint ||
+        link0->actuationMode() == Link::DeprecatedJointSurfaceVelocity)){
         crawlerlink = link0;
         friction = bulletLink0->simImpl->friction;
-    } else if(link1 && link1->actuationMode() == Link::JOINT_SURFACE_VELOCITY){
+    } else if(link1 &&
+              (link1->jointType() == Link::PseudoContinuousTrackJoint ||
+               link1->actuationMode() == Link::DeprecatedJointSurfaceVelocity)){
         crawlerlink = link1;
         sign = -1;
         friction = bulletLink1->simImpl->friction;
@@ -441,7 +445,7 @@ void BulletLink::addMesh(MeshExtractor* extractor, bool meshOnly)
             const SgVertexArray& vertices_ = *mesh->vertices();
             const int numVertices = vertices_.size();
             for(int i=0; i < numVertices; ++i){
-                const Vector3 v = T * vertices_[i].cast<Position::Scalar>();
+                const Vector3 v = T * vertices_[i].cast<Isometry3::Scalar>();
                 btVector3 v0 = invShift * btVector3(v.x(), v.y(), v.z());
                 vertices.push_back(v0.x());
                 vertices.push_back(v0.y());
@@ -473,7 +477,7 @@ void BulletLink::addMesh(MeshExtractor* extractor, bool meshOnly)
             const SgVertexArray& vertices_ = *mesh->vertices();
             const int numVertices = vertices_.size();
             for(int i=0; i < numVertices; ++i){
-                const Vector3 v = T * vertices_[i].cast<Position::Scalar>();
+                const Vector3 v = T * vertices_[i].cast<Isometry3::Scalar>();
                 btVector3 v0 = invShift * btVector3(v.x(), v.y(), v.z());
                 HACD::Vec3<HACD::Real> vertex(v0.x(), v0.y(), v0.z());
                 points.push_back(vertex);
@@ -771,10 +775,12 @@ void BulletLink::createLinkBody(BulletSimulatorItemImpl* simImpl, BulletLink* pa
                 btVector3 pivotA(b(0), b(1), b(2));
                 btVector3 parentComToCurrentPivot = parent->invShift * pivotA;
                 btVector3 currentPivotToCurrentCom = invShift.getBasis() * shift.getOrigin();
-                multiBody->setupFixed(link->index()-1, mass, localInertia, link->parent()->index()-1,
-                        qua,   // rotate points in parent frame to this frame, when q = 0
-                        parentComToCurrentPivot, // vector from parent COM to joint axis, in PARENT frame
-                        currentPivotToCurrentCom); // vector from joint axis to my COM, in MY frame
+                multiBody->setupFixed(
+                    link->index()-1, mass, localInertia, link->parent()->index()-1,
+                    qua,   // rotate points in parent frame to this frame, when q = 0
+                    parentComToCurrentPivot, // vector from parent COM to joint axis, in PARENT frame
+                    currentPivotToCurrentCom, // vector from joint axis to my COM, in MY frame
+                    true);
             }else{
                 btTransform frameA,frameB;
                 frameA.setIdentity();
@@ -787,7 +793,8 @@ void BulletLink::createLinkBody(BulletSimulatorItemImpl* simImpl, BulletLink* pa
                 ((btGeneric6DofConstraint*)joint)->setLinearUpperLimit(btVector3(0.0, 0.0, 0.0));
                 ((btGeneric6DofConstraint*)joint)->setAngularLowerLimit(btVector3(0.0, 0.0, 0.0));
                 ((btGeneric6DofConstraint*)joint)->setAngularUpperLimit(btVector3(0.0, 0.0, 0.0));
-                if(link->actuationMode() == Link::JOINT_SURFACE_VELOCITY){
+                if(link->jointType() == Link::PseudoContinuousTrackJoint ||
+                   link->actuationMode() == Link::DeprecatedJointSurfaceVelocity){
                     body->setCollisionFlags(body->getCollisionFlags()  | btCollisionObject::CF_CUSTOM_MATERIAL_CALLBACK);
                     body->setUserPointer(this);
                     if(!gContactAddedCallback)
@@ -1087,7 +1094,9 @@ void BulletBody::createBody(BulletSimulatorItemImpl* simImpl_, short group)
 bool BulletBody::haveCrawlerJoint()
 {
     for(int i=0; i < body->numLinks(); i++){
-        if(body->link(i)->actuationMode() == Link::JOINT_SURFACE_VELOCITY){
+        auto link = body->link(i);
+        if(link->jointType() == Link::PseudoContinuousTrackJoint ||
+           link->actuationMode() == Link::DeprecatedJointSurfaceVelocity){
             return true;
         }
     }
@@ -1112,7 +1121,7 @@ void BulletBody::setExtraJoints()
         BulletLinkPtr bulletLinkPair[2];
         for(int i=0; i < 2; ++i){
             BulletLinkPtr bulletLink;
-            Link* link = extraJoint.link[i];
+            Link* link = extraJoint.link(i);
             if(link->index() < bulletLinks.size()){
                 bulletLink = bulletLinks[link->index()];
                 if(bulletLink->link == link){
@@ -1127,11 +1136,11 @@ void BulletBody::setExtraJoints()
         if(bulletLinkPair[1]){
             Link* link0 = bulletLinkPair[0]->link;
             Link* link1 = bulletLinkPair[1]->link;
-            Vector3 p0 = extraJoint.point[0];  // link0 local position
-            Vector3 a = extraJoint.axis;        // link0 local axis
-            Vector3 p1 = extraJoint.point[1];  // link1 local position
+            Vector3 p0 = extraJoint.point(0);  // link0 local position
+            Vector3 a = extraJoint.axis();        // link0 local axis
+            Vector3 p1 = extraJoint.point(1);  // link1 local position
 
-            if(extraJoint.type == ExtraJoint::EJ_PISTON){
+            if(extraJoint.type() == ExtraJoint::EJ_PISTON){
                 Vector3 u(0,0,1);
                 Vector3 ty = a.cross(u);
                 btMatrix3x3 btR;
@@ -1164,7 +1173,7 @@ void BulletBody::setExtraJoints()
                 joint->calculateTransforms();
                 dynamicsWorld->addConstraint(joint, true);
                 extraJoints.push_back(joint);
-            }else if(extraJoint.type == ExtraJoint::EJ_BALL){
+            }else if(extraJoint.type() == ExtraJoint::EJ_BALL){
                 btVector3 pivotInA(p0(0), p0(1), p0(2));
                 btVector3 pivotInB(p1(0), p1(1), p1(2));
                 btPoint2PointConstraint* joint = new btPoint2PointConstraint(*(bulletLinkPair[0]->body), *(bulletLinkPair[1]->body),
@@ -1279,7 +1288,7 @@ void BulletBody::updateForceSensors()
 ////////////////////////////////////SimItem imple////////////////////////////////////////
 void BulletSimulatorItem::initialize(ExtensionManager* ext)
 {
-    ext->itemManager().registerClass<BulletSimulatorItem>(N_("BulletSimulatorItem"));
+    ext->itemManager().registerClass<BulletSimulatorItem, SimulatorItem>(N_("BulletSimulatorItem"));
     ext->itemManager().addCreationPanel<BulletSimulatorItem>();
 }
 

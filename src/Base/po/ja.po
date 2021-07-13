@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2020-10-16 01:56+0900\n"
+"POT-Creation-Date: 2021-06-10 15:10+0900\n"
 "PO-Revision-Date: 2011-11-12 11:42+0000\n"
 "Last-Translator: nakaoka <s.nakaoka@aist.go.jp>\n"
 "Language-Team: Japanese\n"
@@ -17,946 +17,184 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: ReferencedObjectSeqItem.cpp:15
-msgid "ReferencedObjectSeqItem"
-msgstr "参照オブジェクト時系列アイテム"
-
-#: SceneItem.cpp:47
-msgid "SceneItem"
-msgstr "シーンアイテム"
-
-#: SceneItem.cpp:50 SceneView.cpp:78
-msgid "Scene"
-msgstr "シーン"
-
-#: SceneItem.cpp:151 MainWindow.cpp:232 Item.cpp:1435 PointSetItem.cpp:522
-msgid "File"
-msgstr "ファイル"
-
-#: SceneItem.cpp:153 PointSetItem.cpp:532 MultiPointSetItem.cpp:551
-#: LightingItem.cpp:485
-msgid "Translation"
-msgstr "並進"
-
-#: SceneItem.cpp:166 PointSetItem.cpp:535 MultiPointSetItem.cpp:554
-msgid "Rotation"
-msgstr "回転"
-
-#: SceneItem.cpp:177
-msgid "Lightweight rendering"
-msgstr "軽量レンダリング"
-
-#: ItemPropertyWidget.cpp:550
-msgid "Select File"
-msgstr "ファイルを選択"
-
-#: ItemPropertyWidget.cpp:554 MovieRecorder.cpp:369
-msgid "Select"
-msgstr "選択"
-
-#: ItemPropertyWidget.cpp:557
-msgid "OK"
-msgstr "OK"
-
-#: ItemPropertyWidget.cpp:559 ProjectManager.cpp:738 ProjectManager.cpp:764
-#: ItemFileDialog.cpp:77 PluginManager.cpp:690 SceneWidget.cpp:936
-#: CaptureBar.cpp:97 TaskView.cpp:286
-msgid "Cancel"
-msgstr "キャンセル"
-
-#: ItemPropertyWidget.cpp:580 ProjectManager.cpp:742 ProjectManager.cpp:769
-#: ItemFileDialog.cpp:367 PluginManager.cpp:694 CaptureBar.cpp:100
-msgid "Any files (*)"
-msgstr "全てのファイル (*)"
-
-#: ItemPropertyWidget.cpp:757
-msgid "Update"
-msgstr "更新"
-
-#: ItemPropertyWidget.cpp:760
-msgid "Reset Column Sizes"
-msgstr "コラムサイズのリセット"
-
-#: MultiSE3MatrixSeqItem.cpp:15
-msgid "MultiSE3MatrixSeqItem"
-msgstr ""
-
-#: MultiSE3MatrixSeqItem.cpp:18 MultiSE3SeqItem.cpp:18
-msgid "Number of SE3 values in a frame"
-msgstr "フレームあたりSE3要素数"
-
-#: ItemTreeWidget.cpp:1185
-msgid "The copied items cannot be pasted to \"{0}\"."
-msgstr "コピーされたアイテムを\"{0}\"にペーストできませんでした．"
-
-#: ProjectManager.cpp:165
-msgid "Open Project"
-msgstr "プロジェクトの読み込み"
-
-#: ProjectManager.cpp:167
-msgid "Save Project"
-msgstr "プロジェクトの保存"
-
-#: ProjectManager.cpp:169
-msgid "Save Project As"
-msgstr "名前を付けてプロジェクトを保存"
-
-#: ProjectManager.cpp:172 PathVariableEditor.cpp:59
-msgid "Project File Options"
-msgstr "プロジェクトファイルオプション"
-
-#: ProjectManager.cpp:174
-msgid "Perspective"
-msgstr "レイアウト"
-
-#: ProjectManager.cpp:295
-msgid ""
-"The state of the \"{0}\" {1} was not completely restored.\n"
-"{2}"
-msgstr ""
-"\"{0}\" {1} の状態は完全には復帰できませんでした．\n"
-"{2}"
-
-#: ProjectManager.cpp:332
-msgid "Loading project file \"{}\" ..."
-msgstr "プロジェクトファイル\"{}\"を読み込み中…"
-
-#: ProjectManager.cpp:356
-msgid "Resource \"{0}\" is not found."
-msgstr "リソース \"{}\" がみつかりません．"
-
-#: ProjectManager.cpp:361
-msgid "The project file is empty."
-msgstr "プロジェクトファイルは空です．"
-
-#: ProjectManager.cpp:470
-msgid "{0} / {1} item(s) have been loaded."
-msgstr "{0} / {1} のアイテムが読みこまれました．"
-
-#: ProjectManager.cpp:476
-msgid "{0} item(s) were not loaded."
-msgstr "{0}個のアイテムが正常に読み込まれませんでした．"
-
-#: ProjectManager.cpp:478
-msgid "{0} item(s) were not loaded in the builtin project \"{1}\"."
-msgstr ""
-"ビルトインプロジェクト \"{1}\" の{}個のアイテムが正常に読み込まれませんでし"
-"た．"
-
-#: ProjectManager.cpp:503
-msgid "Project \"{}\" has been completely loaded."
-msgstr "プロジェクト \"{}\" を完全に読み込みました．"
-
-#: ProjectManager.cpp:505
-msgid "Project \"{}\" has been partially loaded."
-msgstr "プロジェクト \"{}\" 部分的にを読み込みました．"
-
-#: ProjectManager.cpp:516
-msgid "Loading project \"{}\" failed. Any valid objects were not loaded."
-msgstr ""
-"プロジェクト\"{}\"の読み込みに失敗しました．いかなるオブジェクトもロードされ"
-"ていません．"
-
-#: ProjectManager.cpp:575
-msgid "Can't open file \"{}\" for writing.\n"
-msgstr "\"{}\"は書き込み用ファイルとして開けません．\n"
-
-#: ProjectManager.cpp:590
-msgid "Saving sub project {0} as \"{1}\" ..."
-msgstr "サブプロジェクト \"{0}\" を \"{1}\" に保存中…"
-
-#: ProjectManager.cpp:592
-msgid "Saving the project as \"{}\" ..."
-msgstr "プロジェクトを \"{}\" に保存中…"
-
-#: ProjectManager.cpp:649
-msgid "Saving the project file has been finished."
-msgstr "プロジェクトファイルの保存が完了しました."
-
-#: ProjectManager.cpp:654
-msgid "Saving the project file failed."
-msgstr "プロジェクトファイルの保存に失敗しました．"
-
-#: ProjectManager.cpp:706 TextEditView.cpp:217 TextEditView.cpp:278
-#: MessageView.cpp:1031
-msgid "Warning"
-msgstr "警告"
-
-#: ProjectManager.cpp:711
-msgid ""
-"A project item exists. Do you want to save it as a project file before "
-"loading a new project?"
-msgstr ""
-"プロジェクトアイテムがあります．新しいプロジェクトを読み込む前にこのアイテム"
-"を保存しますか？"
-
-#: ProjectManager.cpp:714
-msgid ""
-"Project items exist. Do you want to save them as a project file before "
-"loading a new project?"
-msgstr ""
-"プロジェクトアイテムあります．新しいプロジェクトを読み込む前にこのアイテムを"
-"保存しますか？"
-
-#: ProjectManager.cpp:720
-msgid ""
-"Project \"%1\" exists. Do you want to save it before loading a new project?"
-msgstr ""
-"既存のプロジェクト \"%1\" があります．新しいプロジェクトを読み込む前にこのプ"
-"ロジェクトを保存しますか？"
-
-#: ProjectManager.cpp:734
-msgid "Open a Choreonoid project file"
-msgstr "Choreonoidプロジェクトファイルの読み込み"
-
-#: ProjectManager.cpp:737 PluginManager.cpp:689
-msgid "Open"
-msgstr "読み込み"
-
-#: ProjectManager.cpp:741 ProjectManager.cpp:768
-msgid "Project files (*.cnoid)"
-msgstr "プロジェクトファイル (*.cnoid)"
-
-#: ProjectManager.cpp:759
-msgid "Save a choreonoid project file"
-msgstr "Choreonoid プロジェクトファイルの保存"
-
-#: ProjectManager.cpp:763 TextEditView.cpp:121 ItemFileDialog.cpp:244
-#: CaptureBar.cpp:96
-msgid "Save"
-msgstr "保存"
-
-#: ProjectManager.cpp:813 ItemFileDialog.cpp:441
-msgid "%1 already exists. Do you want to replace it? "
-msgstr "既存のファイル %1 を上書きしてもよいですか？"
-
-#: MultiValueSeqItem.cpp:40
-msgid "MultiValueSeqItem"
-msgstr ""
-
-#: MultiValueSeqItem.cpp:43
-msgid "Number of values in a frame"
-msgstr "フレームあたり要素数"
-
-#: MultiValueSeqItem.cpp:46
-msgid "Plain Format of a Multi Value Sequence"
-msgstr "複数数値列のプレインフォーマット"
-
-#: GeneralSliderView.cpp:218
-msgid "General Sliders"
-msgstr "汎用スライダ"
-
-#: ItemTreeArchiver.cpp:102
+#: ItemTreeArchiver.cpp:100
 msgid "Not all items were stored correctly."
 msgstr "正常に書き出しできないアイテムがあります．"
 
-#: ItemTreeArchiver.cpp:115
+#: ItemTreeArchiver.cpp:113
 msgid "\"{}\" cannot be stored. Its type is not registered."
 msgstr "\"{}\" は型が登録されていないため書き出しできません．"
 
-#: ItemTreeArchiver.cpp:127
+#: ItemTreeArchiver.cpp:125
 msgid "Storing {0} \"{1}\""
 msgstr "{0} \"{1}\"を書き出し中"
 
-#: ItemTreeArchiver.cpp:134
+#: ItemTreeArchiver.cpp:132
 msgid "\"{}\" cannot be stored."
 msgstr "\"{}\" は書き出しできません．"
 
-#: ItemTreeArchiver.cpp:208
+#: ItemTreeArchiver.cpp:206
 msgid ""
 "Addon \"{0}\" of item \"{1}\" cannot be stored. Its type is not registered."
 msgstr ""
 "アイテム \"{1}\" のアドオン \"{0}\" は型が登録されていないため書き出しできま"
 "せん．"
 
-#: ItemTreeArchiver.cpp:279
-msgid "Item cannot be restored."
-msgstr "アイテムを読み出すことができません。"
+#: ItemTreeArchiver.cpp:275
+msgid "{0} \"{1}\" cannot be restored."
+msgstr "{0} \"{1}\" を読み出すことができません．"
+
+#: ItemTreeArchiver.cpp:277
+msgid "\"{0}\" cannot be restored."
+msgstr "\"{0}\" を読み出すことができません．"
 
 #: ItemTreeArchiver.cpp:281
-msgid "\"{}\" cannot be restored."
-msgstr "\"{}\" を読み出すことができません．"
+msgid "An instance of {0} cannot be restored."
+msgstr "{0}のインスタンスを読み出すことができません．"
 
-#: ItemTreeArchiver.cpp:317
+#: ItemTreeArchiver.cpp:283
+msgid "An instance of unkown item type cannot be restored."
+msgstr "不明なアイテム型のインスタンスを読み出すことができません。"
+
+#: ItemTreeArchiver.cpp:315
+msgid "The archive has an empty-name sub item, which cannot be processed."
+msgstr ""
+"アーカイブ内に名前の無いサブアイテムがありますがこれを処理することはできませ"
+"ん．"
+
+#: ItemTreeArchiver.cpp:321
 msgid "Sub item \"{}\" is not found. Its children cannot be restored."
 msgstr "サブアイテム\"{}\"が見つからないため読み出しができません．"
 
-#: ItemTreeArchiver.cpp:327
+#: ItemTreeArchiver.cpp:330
 msgid "Archive is broken."
 msgstr "アーカイブが壊れています．"
 
-#: ItemTreeArchiver.cpp:336
+#: ItemTreeArchiver.cpp:339
 msgid "{0} of {1}Plugin is not a registered item type."
 msgstr "{1}Pluginの{0}は未登録のタイプであるため読み込みできません．"
 
-#: ItemTreeArchiver.cpp:356
+#: ItemTreeArchiver.cpp:359
 msgid "Restoring {0} \"{1}\""
 msgstr "{0} \"{1}\" を読み出し中"
 
-#: ItemTreeArchiver.cpp:362
+#: ItemTreeArchiver.cpp:365
 msgid "The 'data' key does not have mapping-type data."
 msgstr "'data'の値がマッピング型でありません．"
 
-#: ItemTreeArchiver.cpp:391
+#: ItemTreeArchiver.cpp:394
 msgid "The 'addons' value must be a listing."
 msgstr "'addons'の値はリストでなければなりません．"
 
-#: ItemTreeArchiver.cpp:400
+#: ItemTreeArchiver.cpp:403
 msgid "The name and plugin are not specified at addon {0}."
 msgstr "アドオン {0} の名前とプラグインが指定されていません．"
 
-#: ItemTreeArchiver.cpp:405
+#: ItemTreeArchiver.cpp:408
 msgid "Addon \"{0}\" of plugin \"{1}\" cannot be created."
 msgstr "プラグイン \"{1}\" のアドオン \"{0}\" を生成できません．"
 
-#: ItemTreeArchiver.cpp:409
-msgid "Addon \"{0}\" is cannot be added to item \"{1}\"."
+#: ItemTreeArchiver.cpp:412
+msgid "Addon \"{0}\" cannot be added to item \"{1}\"."
 msgstr "アドオン \"{0}\" はアイテム \"{1}\" に追加できません．"
 
-#: ItemTreeArchiver.cpp:413
+#: ItemTreeArchiver.cpp:416
 msgid "Addon \"{0}\" of plugin \"{1}\" cannot be restored."
 msgstr "プラグイン \"{1}\" のアドオン \"{0}\" を読み出すことができません．"
 
-#: GL1SceneRenderer.cpp:464
-msgid "OpenGL {0} is available for the \"{1}\" view.\n"
-msgstr "OpenGL {0} が \"{1}\" ビューで利用可能です．\n"
-
-#: GL1SceneRenderer.cpp:466
-msgid "Driver profile: {0} {1}."
-msgstr "ドライバプロファイル: {0} {1}."
-
-#: MainWindow.cpp:232
-msgid "Exit"
-msgstr "終了"
-
-#: MainWindow.cpp:235
-msgid "Edit"
-msgstr "編集"
-
-#: MainWindow.cpp:237
-msgid "View"
-msgstr "表示"
-
-#: MainWindow.cpp:239
-msgid "Show Toolbar"
-msgstr "ツールバーの表示"
-
-#: MainWindow.cpp:243
-msgid "Show View"
-msgstr "ビューの表示"
-
-#: MainWindow.cpp:244
-msgid "Create View"
-msgstr "ビューの生成"
-
-#: MainWindow.cpp:245
-msgid "Delete View"
-msgstr "ビューの消去"
-
-#: MainWindow.cpp:247
-msgid "Show View Tabs"
-msgstr "ビュータブの表示"
-
-#: MainWindow.cpp:253
-msgid "Show Status Bar"
-msgstr "ステータスバーの表示"
-
-#: MainWindow.cpp:259
-msgid "Full Screen"
-msgstr "フルスクリーン"
-
-#: MainWindow.cpp:263
-msgid "Layout"
-msgstr "レイアウト"
-
-#: MainWindow.cpp:265
-msgid "Store Last Toolbar Layout"
-msgstr "終了時のレイアウトを保存"
-
-#: MainWindow.cpp:268
-msgid "Reset Layout"
-msgstr "レイアウトのリセット"
-
-#: MainWindow.cpp:270
-msgid "Tools"
-msgstr "ツール"
-
-#: MainWindow.cpp:271
-msgid "Filters"
-msgstr "フィルタ"
-
-#: MainWindow.cpp:272
-msgid "Options"
-msgstr "オプション"
-
-#: MainWindow.cpp:273
-msgid "Help"
-msgstr "ヘルプ"
-
-#: MultiValueSeqGraphView.cpp:16
-msgid "Multi Value Seq"
-msgstr ""
-
-#: GLSLProgram.cpp:51
-msgid "Shader \"{}\" is not found."
-msgstr "シェーダ\"{}\"がみつかりません．"
-
-#: GLSLProgram.cpp:74
-msgid ""
-"Shader compilation of \"{0}\" failed.\n"
-"{1}"
-msgstr ""
-"\"{0}\"のシェーダコンパイルに失敗しました．\n"
-"{1}"
-
-#: GLSLProgram.cpp:76
-msgid "Shader compilation of \"{}\" failed."
-msgstr "\"{}\"のシェーダコンパイルに失敗しました．"
-
-#: GLSLProgram.cpp:85
-msgid "Unable to create shader program."
-msgstr "シェーダプログラムを生成できません．"
-
-#: GLSLProgram.cpp:100
-msgid "Program has not been compiled."
-msgstr "プログラムはコンパイルされていません．"
-
-#: GLSLProgram.cpp:117
-msgid "Program link failed."
-msgstr "プログラムのリンクに失敗しました．"
-
-#: GLSLProgram.cpp:131
-msgid "Program is not linked"
-msgstr "プログラムはリンクされていません"
-
-#: GLSLProgram.cpp:147
-msgid "Program failed to validate"
-msgstr "プログラムの有効化に失敗しました"
-
-#: GLSLProgram.cpp:157
-msgid "Shader has not been linked."
-msgstr "シェーダがリンクされていません．"
-
-#: TextEditView.cpp:79
-msgid "Text Editor"
-msgstr "テキストエディタ"
-
-#: TextEditView.cpp:218
-msgid ""
-"The document has been modified.\n"
-" Do you want to save your changes?"
-msgstr ""
-"ドキュメントは変更されています．\n"
-"変更内容を保存しますか？"
-
-#: TextEditView.cpp:250
-msgid "unselected"
-msgstr "アイテムが選択されてません．"
-
-#: TextEditView.cpp:279
-msgid ""
-"The file has been modified outside of text editor.\n"
-"Do you want to reload it?"
-msgstr ""
-"外部のエディタによって内容が変更されました．\n"
-"ファイルを読み込み直しますか？"
-
-#: Licenses.cpp:8
-msgid ""
-"Permission is hereby granted, free of charge, to any person obtaining a copy "
-"of this software and associated documentation files (the \"Software\"), to "
-"deal in the Software without restriction, including without limitation the "
-"rights to use, copy, modify, merge, publish, distribute, sublicense, and/or "
-"sell copies of the Software, and to permit persons to whom the Software is "
-"furnished to do so, subject to the following conditions:\n"
-"\n"
-"The above copyright notice and this permission notice shall be included in "
-"all copies or substantial portions of the Software.\n"
-"\n"
-"THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
-"IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
-"FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
-"AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
-"LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING "
-"FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS "
-"IN THE SOFTWARE\n"
-msgstr ""
-
-#: Licenses.cpp:30
-msgid ""
-"This program is free software; you can redistribute it and/or modify it "
-"under the terms of the GNU Lesser General Public License as published by the "
-"Free Software Foundation; either version 2.1 of the License, or (at your "
-"option) any later version.\n"
-"\n"
-"This package is distributed in the hope that it will be useful, but WITHOUT "
-"ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or "
-"FITNESS FOR A PARTICULAR PURPOSE.See the GNU Lesser General Public License "
-"for more details.\n"
-msgstr ""
-
-#: TimeBar.cpp:52
-msgid "Time Bar Config"
-msgstr "タイムバーの設定"
-
-#: TimeBar.cpp:58
-msgid "Internal frame rate"
-msgstr "内部フレームレート"
-
-#: TimeBar.cpp:66
-msgid "Playback frame rate"
-msgstr "再生フレームレート"
-
-#: TimeBar.cpp:75
-msgid "Idle loop driven mode"
-msgstr "アイドルループ駆動モード"
-
-#: TimeBar.cpp:81
-msgid "Playback speed scale"
-msgstr "再生スピード倍率"
-
-#: TimeBar.cpp:92
-msgid "Sync with ongoing updates"
-msgstr "進行中の更新に同期"
-
-#: TimeBar.cpp:99
-msgid "Automatically expand the time range"
-msgstr "時間範囲の自動拡張"
-
-#: TimeBar.cpp:145
-msgid "&OK"
-msgstr "&OK"
-
-#: TimeBar.cpp:258
-msgid "TimeBar"
-msgstr "タイムバー"
-
-#: TimeBar.cpp:284
-msgid "Start animation"
-msgstr "アニメーションの開始"
-
-#: TimeBar.cpp:287 TimeBar.cpp:671
-msgid "Resume animation"
-msgstr "アニメーションの再生・停止"
-
-#: TimeBar.cpp:291
-msgid "Refresh state at the current time"
-msgstr "現在時刻で状態を更新"
-
-#: TimeBar.cpp:318 GraphBar.cpp:141 SceneBar.cpp:209 MovieRecorder.cpp:465
-msgid "Show the config dialog"
-msgstr "設定ダイアログの表示"
-
-#: TimeBar.cpp:642
-msgid "Stop animation"
-msgstr "アニメーションの停止"
-
-#: Item.cpp:1414 MultiSeqItemCreationPanel.cpp:23
-msgid "Name"
-msgstr "名前"
-
-#: Item.cpp:1425
-msgid "Display name"
-msgstr "表示名"
-
-#: Item.cpp:1430
-msgid "Class"
-msgstr "クラス"
-
-#: Item.cpp:1438
-msgid "Num children"
-msgstr "小アイテムの数"
-
-#: Item.cpp:1439
-msgid "Sub item?"
-msgstr "サブアイテム？"
-
-#: Item.cpp:1440
-msgid "Temporal"
-msgstr "一時的"
-
-#: Item.cpp:1441
-msgid "Refs"
-msgstr "参照数"
-
-#: GLSLSceneRenderer.cpp:852
-msgid "OpenGL {0}.{1} (GLSL {2}) is available for the \"{3}\" view.\n"
-msgstr "OpenGL {0}.{1} (GLSL {2}) が \"{3}\" ビューで利用可能です．\n"
-
-#: GLSLSceneRenderer.cpp:854
-msgid "Driver profile: {0} {1} {2}.\n"
-msgstr "ドライバプロファイル: {0} {1} {2}.\n"
-
-#: GLSLSceneRenderer.cpp:861
-msgid ""
-"Shadow casting is disabled according to the value of "
-"CNOID_ENABLE_GLSL_SHADOW.\n"
-msgstr "影の描画はCNOID_ENABLE_GLSL_SHADOWの値に従い無効化されました．\n"
-
-#: GLSLSceneRenderer.cpp:864
-msgid ""
-"Shadow casting is enabled according to the value of "
-"CNOID_ENABLE_GLSL_SHADOW.\n"
-msgstr "影の描画はCNOID_ENABLE_GLSL_SHADOWの値に従い有効化されました．\n"
-
-#: GLSLSceneRenderer.cpp:920
-msgid "Shadow casting is disabled for this GPU due to some problems.\n"
-msgstr "影の描画はこのGPUに対しては問題があるため無効化されます．\n"
-
-#: GLSLSceneRenderer.cpp:990 ShaderPrograms.cpp:1152
+#: ShaderPrograms.cpp:1277 GLSLSceneRenderer.cpp:1024
 msgid "Framebuffer is not complete.\n"
 msgstr "フレームバッファが不完全です．\n"
 
-#: ViewArea.cpp:1416
-msgid "Separate the view"
-msgstr "ビューの分離"
+#: CoordinateFrameListItem.cpp:113
+msgid "CoordinateFrameListItem"
+msgstr "座標フレームリストアイテム"
 
-#: OptionManager.cpp:90
-msgid "Input file \"{}\" was not processed."
-msgstr "入力ファイル \"{}\" は処理されませんでした．"
+#: CoordinateFrameListItem.cpp:409
+msgid ""
+"\"{0}\" cannot be added to \"{1}\" because the item of ID {2} already exists "
+"in it. "
+msgstr ""
+"アイテム \"{0}\" のID{2}は既に \"{1}\" に存在するためアイテムを追加できませ"
+"ん．"
 
-#: PositionWidget.cpp:307
-msgid "Roll-pitch-yaw"
-msgstr "ロールピッチヨー"
+#: CoordinateFrameListItem.cpp:798
+msgid "Num coordinate frames"
+msgstr "座標フレーム数"
 
-#: PositionWidget.cpp:312
-msgid "Fetch as a unique RPY value"
-msgstr "一意なRPY値として取り込み"
-
-#: PositionWidget.cpp:317
-msgid "Quoternion"
-msgstr "クオタニオン"
-
-#: PositionWidget.cpp:322
-msgid "Rotation matrix"
-msgstr "回転行列"
-
-#: InfoBar.cpp:38
-msgid " "
-msgstr "　"
-
-#: ScriptBar.cpp:26
-msgid "ScriptBar"
-msgstr "スクリプトバー"
-
-#: ScriptBar.cpp:30
-msgid "Execute scripts"
-msgstr "スクリプトの実行"
-
-#: ItemManager.cpp:201
+#: ItemManager.cpp:203
 msgid "New ..."
 msgstr "新規"
 
-#: ItemManager.cpp:204
+#: ItemManager.cpp:206
 msgid "Load ..."
 msgstr "読み込み"
 
-#: ItemManager.cpp:206
+#: ItemManager.cpp:208
 msgid "Reload Selected Items"
 msgstr "選択アイテムの再読み込み"
 
-#: ItemManager.cpp:211
+#: ItemManager.cpp:213
 msgid "Save Selected Items"
 msgstr "選択アイテムの保存"
 
-#: ItemManager.cpp:213
+#: ItemManager.cpp:215
 msgid "Save Selected Items As"
 msgstr "名前を付けて選択アイテムを保存"
 
-#: ItemManager.cpp:218
+#: ItemManager.cpp:220
 msgid "Import ..."
 msgstr "インポート"
 
-#: ItemManager.cpp:222
+#: ItemManager.cpp:224
 msgid "Export Selected Items"
 msgstr "選択アイテムのエクスポート"
 
-#: ItemManager.cpp:487
+#: ItemManager.cpp:502
 msgid "Class {} is not registered as an item class."
 msgstr "クラス{}はアイテムクラスとして登録されていません．"
 
-#: ItemManager.cpp:493
+#: ItemManager.cpp:508
 msgid "The panel to create {} is not registered."
 msgstr "{}を生成するパネルは登録されていません．"
 
-#: ItemManager.cpp:576
+#: ItemManager.cpp:591
 msgid "Item$"
 msgstr "アイテム$"
 
-#: ItemManager.cpp:578
+#: ItemManager.cpp:593
 msgid "Create New %1"
 msgstr "%1の新規生成"
 
-#: ItemManager.cpp:621 ViewManager.cpp:283
+#: ItemManager.cpp:638 ViewManager.cpp:283
 msgid "&Create"
 msgstr "作成(&C)"
 
-#: ItemManager.cpp:624 ViewManager.cpp:288 PathVariableEditor.cpp:99
+#: ItemManager.cpp:641 PathVariableEditor.cpp:99 ViewManager.cpp:288
 msgid "&Cancel"
 msgstr "キャンセル(&C)"
 
-#: ItemManager.cpp:791 ViewManager.cpp:277
+#: ItemManager.cpp:810 ViewManager.cpp:277
 msgid "Name:"
 msgstr "名前"
 
-#: ItemManager.cpp:933
+#: ItemManager.cpp:952
 msgid ""
 "\"{0}\" cannot be accessed because the specified item type \"{1}\" is not "
 "registered."
 msgstr "\"{0}\"へのアクセスにおいて指定されたアイテム型\"{1}\"は未登録です．"
 
-#: ItemManager.cpp:975
+#: ItemManager.cpp:994
 msgid "The file format for accessing \"{0}\" cannot be determined."
 msgstr "\"{0}\"のファイル形式を確定できません．"
 
-#: ItemManager.cpp:979
+#: ItemManager.cpp:998
 msgid "Unknown file format \"{0}\" is specified in accessing \"{1}\"."
 msgstr "\"{1}\"に対して不明なファイル形式\"{0}\"が指定されています．"
 
-#: ItemManager.cpp:1330
+#: ItemManager.cpp:1313
 msgid ";;Any files (*)"
 msgstr ";;全てのファイル (*)"
-
-#: MessageView.cpp:202 MessageView.cpp:1014
-msgid "Message"
-msgstr "メッセージ"
-
-#: MessageView.cpp:431
-msgid "Error: "
-msgstr "エラー："
-
-#: MessageView.cpp:433
-msgid "Warning: "
-msgstr "警告："
-
-#: ItemFileDialog.cpp:138
-msgid "Load {0}"
-msgstr "{0}の読み込み"
-
-#: ItemFileDialog.cpp:140
-msgid "Import {0}"
-msgstr "{0}のインポート"
-
-#: ItemFileDialog.cpp:147
-msgid "Load"
-msgstr "読み込み"
-
-#: ItemFileDialog.cpp:149
-msgid "Import"
-msgstr "インポート"
-
-#: ItemFileDialog.cpp:172
-msgid "The singleton instance of {} has already been loaded."
-msgstr "{}のシングルトンインスタンスは既に読み込まれています．"
-
-#: ItemFileDialog.cpp:223
-msgid "Saving {0} to a file is not supported"
-msgstr "{0}のファイル保存はサポートされていません"
-
-#: ItemFileDialog.cpp:225
-msgid "Exporting {0} to a file is not supported"
-msgstr "{0}のファイルエクスポートはサポートされていません"
-
-#: ItemFileDialog.cpp:237
-msgid "Save {} as"
-msgstr "名前を付けて{}を保存"
-
-#: ItemFileDialog.cpp:239
-msgid "Export {} as"
-msgstr "名前を付けて{}をエクスポート"
-
-#: PositionTagGroupItem.cpp:113
-msgid "PositionTagGroupItem"
-msgstr "ポジションタググループアイテム"
-
-#: PositionTagGroupItem.cpp:556
-msgid "Tag Group Conversion"
-msgstr "タググループ変換"
-
-#: PositionTagGroupItem.cpp:565
-msgid ""
-"Which type of positions do you want to keep in the coordinate system change?"
-msgstr "座標系の変更においてどちらのタイプの位置を保持しますか？"
-
-#: PositionTagGroupItem.cpp:569
-msgid "Global positions"
-msgstr "グローバル位置"
-
-#: PositionTagGroupItem.cpp:572
-msgid "Clear the origin offset"
-msgstr "原点オフセットをクリア"
-
-#: PositionTagGroupItem.cpp:578
-msgid "Local positions"
-msgstr "ローカル位置"
-
-#: PositionTagGroupItem.cpp:596
-msgid ""
-"The parent coordinate system of \"%1\" is changed to the coordinate system "
-"of \"%2\"."
-msgstr "\"%1\" の親座標系は \"%2\" の座標系に変更されます."
-
-#: PositionTagGroupItem.cpp:600
-msgid ""
-"The parent coordinate system of \"%1\" is changed to the global coordinate "
-"system."
-msgstr "\"%1\" の親座標系はグローバル座標系に変更されます."
-
-#: GraphWidget.cpp:1151
-msgid "Graph: Position = ({0:.5f}, {1:.5f})"
-msgstr "グラフ位置 = ({0:.5f}, {1:.5f})"
-
-#: PositionTagListWidget.cpp:149 CoordinateFrameListView.cpp:212
-msgid "Position"
-msgstr "ポジション"
-
-#: ItemFileIO.cpp:295
-msgid "Item with empty filename cannot be loaded."
-msgstr "空のファイル名のアイテムを読み込むことはできません．"
-
-#: ItemFileIO.cpp:300
-msgid "{0} cannot be loaded because {1}"
-msgstr "{0}はロードできません: {1}"
-
-#: ItemFileIO.cpp:305
-msgid "Loading {0} \"{1}\""
-msgstr "{0} \"{1}\" を読み込み中"
-
-#: ItemFileIO.cpp:313 ItemFileIO.cpp:391
-msgid " -> failed.\n"
-msgstr " -> 失敗.\n"
-
-#: ItemFileIO.cpp:332 ItemFileIO.cpp:402
-msgid " -> ok!\n"
-msgstr " -> 完了!\n"
-
-#: ItemFileIO.cpp:367
-msgid "{0} cannot be saved with empty filename."
-msgstr "ファイル名が指定されていないので{0}を保存できません．"
-
-#: ItemFileIO.cpp:372
-msgid "{0} cannot be saved because {1}"
-msgstr "{0}は保存できません： {1}"
-
-#: ItemFileIO.cpp:379
-msgid "Saving {0} \"{1}\" to \"{2}\""
-msgstr "{0} \"{1}\" を \"{2}\" に保存中"
-
-#: ItemFileIO.cpp:382
-msgid "Exporting {0} \"{1}\" into \"{2}\""
-msgstr "{0} \"{1}\" を \"{2}\" にエクスポート中"
-
-#: SceneView.cpp:160
-msgid "Use dedicated item tree view checks to select the target items"
-msgstr "対象アイテム選択用の専用のチェックをアイテムツリービューに追加"
-
-#: ScriptItem.cpp:24 ExtCommandItem.cpp:32
-msgid "Execute"
-msgstr "実行"
-
-#: ScriptItem.cpp:25 ExtCommandItem.cpp:33
-msgid "Terminate"
-msgstr "停止"
-
-#: PluginManager.cpp:212
-msgid "Plugin"
-msgstr "プラグイン"
-
-#: PluginManager.cpp:213
-msgid "Load Plugin"
-msgstr "プラグインの読み込み"
-
-#: PluginManager.cpp:218
-msgid "Startup Plugin Loading"
-msgstr "起動時のプラグイン読み込み"
-
-#: PluginManager.cpp:221
-msgid "Check the naming convention of plugin files"
-msgstr "プラグインファイルの命名規則をチェックする"
-
-#: PluginManager.cpp:461
-msgid ""
-"{0}-plugin cannot be initialized because required plugin(s) {1} are not "
-"found."
-msgstr ""
-"必要なプラグイン{1}が見つからないため、{0}プラグインの初期化ができません．"
-
-#: PluginManager.cpp:486 PluginManager.cpp:589
-msgid "Plugin file \"{}\" has already been activated."
-msgstr "プラグインファイル\"{}\"は既に読み込まれています．"
-
-#: PluginManager.cpp:489
-msgid "Detecting plugin file \"{}\""
-msgstr "プラグインファイル\"{}\"を検出しました．"
-
-#: PluginManager.cpp:513
-msgid "The plugin entry function \"getChoreonoidPlugin\" is not found."
-msgstr "プラグインエントリ関数 \"getChoreonoidPlugin\" が見つかりません．"
-
-#: PluginManager.cpp:523
-msgid "The plugin object cannot be created."
-msgstr "プラグインオブジェクトが生成できません．"
-
-#: PluginManager.cpp:534
-msgid ""
-"The internal version of the {0} plugin is different from the system internal "
-"version.\n"
-"The plugin file \"{1}\" should be removed or updated to avoid a problem."
-msgstr ""
-"{0}プラグインの内部バージョンがシステムの内部バージョンと一致しません．\n"
-"問題を避けるため，プラグインファイル \"{1}\" は削除か更新を行なってください．"
-
-#: PluginManager.cpp:565
-msgid "Plugin file \"{0}\" conflicts with \"{1}\"."
-msgstr "{0}プラグインは\"{1}\"と競合しています．"
-
-#: PluginManager.cpp:574 PluginManager.cpp:673
-msgid "Loading the plugin failed."
-msgstr "プラグインの読み込みができませんでした．"
-
-#: PluginManager.cpp:629
-msgid "The plugin object cannot be intialized."
-msgstr "プラグインオブジェクトの初期化ができません．"
-
-#: PluginManager.cpp:653
-msgid "About Plugins"
-msgstr "プラグインについて"
-
-#: PluginManager.cpp:654 PluginManager.cpp:728
-msgid "About {} Plugin"
-msgstr "{}プラグインについて"
-
-#: PluginManager.cpp:665
-msgid "{}-plugin has been activated."
-msgstr "{}プラグインが読み込まれました．"
-
-#: PluginManager.cpp:686
-msgid "Load plugins"
-msgstr "プラグインの読み込み"
-
-#: PluginManager.cpp:693
-msgid "Plugin files (*.%1)"
-msgstr "プラグインファイル (*.%1)"
-
-#: PluginManager.cpp:830
-msgid "Plugin {} cannot be finalized."
-msgstr "プラグイン{}を終了できません．"
-
-#: PluginManager.cpp:869
-msgid "Plugin dll {} has been unloaded."
-msgstr "プラグイン{}のDLLが解放されました．"
-
-#: Vector3SeqItem.cpp:14
-msgid "Vector3SeqItem"
-msgstr "３次元ベクタ列アイテム"
-
-#: RootItem.cpp:117
-msgid "RootItem"
-msgstr "ルートアイテム"
-
-#: RootItem.cpp:139
-msgid "Primary check"
-msgstr "プライマリチェック"
 
 #: PointSetItem.cpp:141
 msgid "PointSetItem"
@@ -966,550 +204,118 @@ msgstr "ポイントセットアイテム"
 msgid "Point Cloud (PCD)"
 msgstr "ポイントクラウド(PCD)"
 
-#: PointSetItem.cpp:523 MultiPointSetItem.cpp:545
+#: PointSetItem.cpp:527 SceneItem.cpp:161 MainWindow.cpp:231 Item.cpp:1597
+msgid "File"
+msgstr "ファイル"
+
+#: PointSetItem.cpp:528 MultiPointSetItem.cpp:545
 msgid "Rendering mode"
 msgstr "描画モード"
 
-#: PointSetItem.cpp:525 MultiPointSetItem.cpp:547
+#: PointSetItem.cpp:530 MultiPointSetItem.cpp:547
 msgid "Point size"
 msgstr "デフォルト点サイズ"
 
-#: PointSetItem.cpp:527 MultiPointSetItem.cpp:549
+#: PointSetItem.cpp:532 MultiPointSetItem.cpp:549
 msgid "Voxel size"
 msgstr "ボクセルサイズ"
 
-#: PointSetItem.cpp:529
+#: PointSetItem.cpp:534
 msgid "Editable"
 msgstr "編集可能"
 
-#: PointSetItem.cpp:531
+#: PointSetItem.cpp:536
 msgid "Num points"
 msgstr "ポイント数"
 
-#: PointSetItem.cpp:644 MultiPointSetItem.cpp:163
+#: PointSetItem.cpp:537 MultiPointSetItem.cpp:551 SceneItem.cpp:163
+#: LightingItem.cpp:486
+msgid "Translation"
+msgstr "並進"
+
+#: PointSetItem.cpp:540 MultiPointSetItem.cpp:554 SceneItem.cpp:176
+msgid "Rotation"
+msgstr "回転"
+
+#: PointSetItem.cpp:651 MultiPointSetItem.cpp:163
 msgid "Point"
 msgstr "点"
 
-#: PointSetItem.cpp:645 MultiPointSetItem.cpp:164
+#: PointSetItem.cpp:652 MultiPointSetItem.cpp:164
 msgid "Voxel"
 msgstr "ボクセル"
 
-#: PointSetItem.cpp:925 MultiPointSetItem.cpp:784
+#: PointSetItem.cpp:933 MultiPointSetItem.cpp:787
 msgid "PointSet: Clear Attention Points"
 msgstr "PointSet: 注視点のクリア"
 
-#: PointSetItem.cpp:931 MultiPointSetItem.cpp:790
+#: PointSetItem.cpp:939 MultiPointSetItem.cpp:793
 msgid "PointSet: Start Eraser Mode"
 msgstr "PointSet: 消去モード開始"
 
-#: PointSetItem.cpp:943 MultiPointSetItem.cpp:801
+#: PointSetItem.cpp:951 MultiPointSetItem.cpp:804
 msgid "PointSet: Exit Eraser Mode"
 msgstr "PointSet: 消去モード終了"
 
-#: MultiSE3SeqItem.cpp:15
-msgid "MultiSE3SeqItem"
-msgstr ""
-
-#: ImageView.cpp:121
-msgid "Image"
-msgstr "画像"
-
-#: ImageView.cpp:247
-msgid "ImageViewBar"
-msgstr "画像ビューバー"
-
-#: ImageView.cpp:265
-msgid "Select an imageable item"
-msgstr "画像アイテムの選択"
-
-#: ImageView.cpp:274
-msgid "Adjust image size according to view"
-msgstr "画像サイスをビューに合わせる"
-
-#: CoordinateFrameItem.cpp:63
-msgid "CoordinateFrameItem"
-msgstr "座標フレームアイテム"
-
-#: CoordinateFrameItem.cpp:266 LocationView.cpp:315
-msgid "Local"
-msgstr "ローカル"
-
-#: CoordinateFrameItem.cpp:266
-msgid "Global"
-msgstr "グローバル"
-
-#: CoordinateFrameItem.cpp:276 CoordinateFrameItem.cpp:283
-#: CoordinateFrameItem.cpp:286
-msgid "ID"
-msgstr ""
-
-#: CoordinateFrameItem.cpp:278 CoordinateFrameItem.cpp:291
-#: CoordinateFrameItem.cpp:294
-msgid "Mode"
-msgstr "モード"
-
-#: CoordinateFrameItem.cpp:279 CoordinateFrameItem.cpp:302
-#: CoordinateFrameListView.cpp:210
-msgid "Note"
-msgstr "注釈"
-
-#: App.cpp:313 App.cpp:475
-msgid "About Choreonoid"
-msgstr "Choreonoid について"
-
-#: App.cpp:317
+#: ItemEditRecordManager.cpp:169
 msgid ""
-"The Eigen library version {0}.{1}.{2} is used (SIMD intruction sets in use: "
-"{3})."
+"The edit history has been cleared because inconsistent item move operation "
+"on \"{0}\" was carried out."
 msgstr ""
-"Eigenライブラリバージョン{0}.{1}.{2}が使用されています．( 使用されているSIMD"
-"命令セット: {3} )"
-
-#: MultiSE3SeqGraphView.cpp:17
-msgid "Multi SE3 Seq"
-msgstr "SE3軌道"
-
-#: CoordinateFrameListView.cpp:520
-msgid "Coordinate Frames"
-msgstr "座標フレーム"
-
-#: CoordinateFrameListView.cpp:546 CoordinateFrameListView.cpp:752
-msgid "Add"
-msgstr "追加"
-
-#: CoordinateFrameListView.cpp:633
-msgid "Support offset frames"
-msgstr "オフセットフレームのサポート"
-
-#: CoordinateFrameListView.cpp:756
-msgid "Remove"
-msgstr "削除"
-
-#: GraphBar.cpp:107
-msgid "GraphBar"
-msgstr "グラフバー"
-
-#: GraphBar.cpp:120
-msgid "Plot trajectories of the target data on the graph view"
-msgstr "対象データの軌道をグラフビューにプロット"
-
-#: GraphBar.cpp:127
-msgid "Plot velocity trajectories"
-msgstr "速度軌道のプロット"
-
-#: GraphBar.cpp:133
-msgid "Plot acceleration trajectories"
-msgstr "加速度軌道のプロット"
-
-#: GraphBar.cpp:154
-msgid "Graph Config"
-msgstr "グラフ設定"
-
-#: GraphBar.cpp:160
-msgid "Line width"
-msgstr "線幅"
-
-#: GraphBar.cpp:172
-msgid "y-range, 10^"
-msgstr "y軸範囲, 10^"
-
-#: GraphBar.cpp:183
-msgid "Show limit values"
-msgstr "リミット値の表示"
-
-#: GraphBar.cpp:192
-msgid "Show grid"
-msgstr "グリッドの表示"
-
-#: GraphBar.cpp:207
-msgid "Show rulers"
-msgstr "定規の表示"
-
-#: GraphBar.cpp:217
-msgid "Edit mode"
-msgstr "編集モード"
-
-#: GraphBar.cpp:226
-msgid "Free line"
-msgstr "フリーライン編集モード"
-
-#: GraphBar.cpp:233
-msgid "Line edit"
-msgstr "ライン編集モード"
-
-#: GraphBar.cpp:242
-msgid "Control points"
-msgstr "制御点の表示"
-
-#: GraphBar.cpp:248
-msgid "Step"
-msgstr "ステップ"
-
-#: GraphBar.cpp:256 LocationView.cpp:304
-msgid "Offset"
-msgstr "オフセット"
-
-#: GraphBar.cpp:267
-msgid "Time bar sync"
-msgstr "タイムバーと同期"
-
-#: GraphBar.cpp:274
-msgid "off"
-msgstr "オフ"
-
-#: GraphBar.cpp:275
-msgid "cont."
-msgstr "連続"
-
-#: GraphBar.cpp:276
-msgid "page"
-msgstr "ページ"
-
-#: ViewManager.cpp:295
-msgid "Create %1"
-msgstr "%1の生成"
-
-#: ViewManager.cpp:331
-msgid "Please specify the name of the new view."
-msgstr "作成するビューの名前を指定してください．"
-
-#: ViewManager.cpp:369
-msgid "Delete All Invisible Views"
-msgstr "全ての非表示ビューを消去"
-
-#: ViewManager.cpp:827
-msgid "{0} is not registered in {1}."
-msgstr "{0} は {1} に登録されていません．"
-
-#: ViewManager.cpp:833
-msgid ""
-"A singleton view \"{0}\" of the {1} type cannot be created because its "
-"singleton instance has already been created."
-msgstr ""
-"\"{1}\"タイプのシングルトンビュー\"{0}\"は既にそのシングルトンインスタンスが"
-"生成されています．"
-
-#: ViewManager.cpp:840
-msgid "{0} cannot be restored."
-msgstr "{0}を復帰することができません．"
-
-#: ViewManager.cpp:843
-msgid "The \"{0}\" view of {1} cannot be restored."
-msgstr "{1} の \"{0}\" ビューを復帰できません．"
-
-#: ViewManager.cpp:883
-msgid ""
-"The \"{0}\" plugin for \"{1}\" is not found. The view cannot be restored."
-msgstr ""
-"\"{1}\"のための\"{0}\"プラグインが見つかりません．ビューの復帰ができません．"
-
-#: ItemTreeView.cpp:34
-msgid "Items"
-msgstr "アイテム"
-
-#: ItemTreeView.cpp:92
-msgid "Cut"
-msgstr "カット"
-
-#: ItemTreeView.cpp:93
-msgid "Copy (single)"
-msgstr "コピー（単独）"
-
-#: ItemTreeView.cpp:94
-msgid "Copy (sub tree)"
-msgstr "コピー（サブツリー）"
-
-#: ItemTreeView.cpp:95
-msgid "Paste"
-msgstr "ペースト"
-
-#: ItemTreeView.cpp:99
-msgid "Check"
-msgstr "チェック"
-
-#: ItemTreeView.cpp:100
-msgid "Uncheck"
-msgstr "アンチェック"
-
-#: ItemTreeView.cpp:101
-msgid "Toggle checks"
-msgstr "チェックの反転"
-
-#: ItemTreeView.cpp:105
-msgid "Reload"
-msgstr "再読み込み"
-
-#: ItemTreeView.cpp:109
-msgid "Select all"
-msgstr "全て選択"
-
-#: ItemTreeView.cpp:110
-msgid "Clear selection"
-msgstr "選択解除"
-
-#: SceneWidget.cpp:177
-msgid "OpengGL image buffer for picking"
-msgstr "ピッキング用OpenGL画像バッファ"
-
-#: SceneWidget.cpp:438
-msgid "Vertical sync"
-msgstr "垂直同期"
-
-#: SceneWidget.cpp:444
-msgid "Low GPU memory consumption mode"
-msgstr "GPUメモリ消費低減モード"
-
-#: SceneWidget.cpp:839
-msgid "The OpenGL resources of {0} has been cleared."
-msgstr "{0}のOpenGLリソースがクリアされました．"
-
-#: SceneWidget.cpp:982
-msgid "FPS Test Result"
-msgstr "フレームレートテスト結果"
-
-#: SceneWidget.cpp:983
-msgid "FPS: %1 frames / %2 [s] = %3"
-msgstr "フレームレート: %1 フレーム / %2 [秒] = %3 [fps]"
-
-#: SceneWidget.cpp:1657
-msgid "Global Position: ({0:.3f} {1:.3f} {2:.3f})"
-msgstr "グローバル座標位置 = ({0:.3f} {1:.3f} {2:.3f})"
-
-#: SceneWidget.cpp:1658
-msgid "Object: {0}, Global Position: ({1:.3f} {2:.3f} {3:.3f})"
-msgstr "オブジェクト: {0}, グローバル座標位置 = ({1:.3f} {2:.3f} {3:.3f})"
-
-#: SceneWidget.cpp:2159
-msgid "Edit Mode"
-msgstr "編集モード"
-
-#: SceneWidget.cpp:2200
-msgid "View Mode"
-msgstr "閲覧モード"
-
-#: SceneWidget.cpp:2235
-msgid "Background Color"
-msgstr "背景色"
-
-#: SceneWidget.cpp:2249
-msgid "Floor Grid Color"
-msgstr "床グリッド色"
-
-#: SceneWidget.cpp:2263
-msgid "Default Color"
-msgstr "デフォルト色"
-
-#: SceneWidget.cpp:3116
-msgid "Scene Config"
-msgstr "シーン設定"
-
-#: SceneWidget.cpp:3128
-msgid "Camera"
-msgstr "カメラ"
-
-#: SceneWidget.cpp:3130
-msgid "Field of view"
-msgstr "視野角"
-
-#: SceneWidget.cpp:3137
-msgid "Clipping depth"
-msgstr "クリッピング深度"
-
-#: SceneWidget.cpp:3139
-msgid "Near"
-msgstr "近隣"
-
-#: SceneWidget.cpp:3145
-msgid "Far"
-msgstr "遠方"
-
-#: SceneWidget.cpp:3155
-msgid "Restrict camera roll"
-msgstr "カメラロールを制限"
-
-#: SceneWidget.cpp:3159
-msgid "Vertical axis"
-msgstr "垂直軸"
-
-#: SceneWidget.cpp:3169
-msgid "Upside down"
-msgstr "上下反転"
-
-#: SceneWidget.cpp:3179
-msgid "Lighting"
-msgstr "ライティング"
-
-#: SceneWidget.cpp:3181
-msgid "Lighting mode"
-msgstr "ライティングモード"
-
-#: SceneWidget.cpp:3183
-msgid "Normal"
-msgstr " 標準"
-
-#: SceneWidget.cpp:3189
-msgid "Minimum"
-msgstr "最小限"
-
-#: SceneWidget.cpp:3194
-msgid "Solid color"
-msgstr "ソリッドカラー"
-
-#: SceneWidget.cpp:3212
-msgid "Smooth shading"
-msgstr "スムーズシェーディング"
-
-#: SceneWidget.cpp:3218
-msgid "Back face culling: "
-msgstr "隠面消去"
-
-#: SceneWidget.cpp:3223
-msgid "Enabled"
-msgstr "有効"
-
-#: SceneWidget.cpp:3224
-msgid "Disabled"
-msgstr "無効"
-
-#: SceneWidget.cpp:3225
-msgid "Forced"
-msgstr "強制"
-
-#: SceneWidget.cpp:3245
-msgid "Head light"
-msgstr "ヘッドライト"
-
-#: SceneWidget.cpp:3250 SceneWidget.cpp:3267 LightingItem.cpp:498
-msgid "Intensity"
-msgstr "照度"
-
-#: SceneWidget.cpp:3258
-msgid "Back lighting"
-msgstr "裏面照射"
-
-#: SceneWidget.cpp:3262
-msgid "World light"
-msgstr "ワールドライト"
-
-#: SceneWidget.cpp:3275
-msgid "Ambient"
-msgstr "環境光"
-
-#: SceneWidget.cpp:3284
-msgid "Additional lights"
-msgstr "追加のライト"
-
-#: SceneWidget.cpp:3293
-msgid "Texture"
-msgstr "テクスチャ"
-
-#: SceneWidget.cpp:3298
-msgid "Fog"
-msgstr "フォグ"
-
-#: SceneWidget.cpp:3308
-msgid "Shadow %1"
-msgstr "影 %1"
-
-#: SceneWidget.cpp:3312
-msgid "Light"
-msgstr "ライト"
-
-#: SceneWidget.cpp:3320
-msgid "Anti-aliasing of shadows"
-msgstr "影のアンチエイリアシング"
-
-#: SceneWidget.cpp:3327
-msgid "Background"
-msgstr "背景"
-
-#: SceneWidget.cpp:3330
-msgid "Background color"
-msgstr "背景色"
-
-#: SceneWidget.cpp:3334
-msgid "Coordinate axes"
-msgstr "座標軸"
-
-#: SceneWidget.cpp:3344
-msgid "XY Grid"
-msgstr "XYグリッド"
-
-#: SceneWidget.cpp:3346
-msgid "XZ Grid"
-msgstr "XZグリッド"
-
-#: SceneWidget.cpp:3347
-msgid "YZ Grid"
-msgstr "YZグリッド"
-
-#: SceneWidget.cpp:3354
-msgid "Span"
-msgstr "長さ"
-
-#: SceneWidget.cpp:3364
-msgid "Interval"
-msgstr "間隔"
-
-#: SceneWidget.cpp:3375 LightingItem.cpp:496
-msgid "Color"
-msgstr "色"
-
-#: SceneWidget.cpp:3386
-msgid "Default color"
-msgstr "デフォルト色"
-
-#: SceneWidget.cpp:3390
-msgid "Default line width"
-msgstr "デフォルトの線幅"
-
-#: SceneWidget.cpp:3398
-msgid "Default point size"
-msgstr "デフォルト点サイズ"
-
-#: SceneWidget.cpp:3409
-msgid "Normal Visualization"
-msgstr "法線の表示"
-
-#: SceneWidget.cpp:3419
-msgid "Lightweight view change"
-msgstr "軽量視点変更"
-
-#: SceneWidget.cpp:3437
-msgid "FPS Test"
-msgstr "FPSテスト"
-
-#: SceneWidget.cpp:3444
-msgid "Show the image for picking (for debug)"
-msgstr "ピッキング用バッファの表示（デバッグ用）"
-
-#: SceneWidget.cpp:3454 DescriptionDialog.cpp:28
-msgid "&Ok"
-msgstr "了解(&O)"
-
-#: CaptureBar.cpp:92
-msgid "Save the image of %1"
-msgstr "%1の画像を保存"
-
-#: CaptureBar.cpp:128
-msgid "The image of %1 cannot be saved into \"%2\"."
-msgstr "%1の画像を\"%2\"に保存できませんでした．"
-
-#: CaptureBar.cpp:172
-msgid "Capture Bar"
-msgstr "キャプチャバー"
-
-#: CaptureBar.cpp:174
-msgid "Include Tab"
-msgstr "タブを含める"
-
-#: CaptureBar.cpp:193
-msgid "CaptureBar"
-msgstr "キャプチャバー"
-
-#: CaptureBar.cpp:195
-msgid "Capture the image of a view or toolbar"
-msgstr "ビューやツールバーの画像をキャプチャします"
+"\"{0}\" に関する一貫性の無い移動操作が実行されたため、編集履歴はクリアされま"
+"した．"
+
+#: ItemEditRecordManager.cpp:249 ItemEditRecordManager.cpp:293
+msgid "Add \"{0}\" to \"{1}\""
+msgstr "\"{0}\" を \"{1}\" に追加"
+
+#: ItemEditRecordManager.cpp:252 ItemEditRecordManager.cpp:290
+msgid "Remove \"{0}\" from \"{1}\""
+msgstr "\"{0}\" を \"{1}\" から除去"
+
+#: ItemEditRecordManager.cpp:333 ItemEditRecordManager.cpp:336
+msgid "Move \"{0}\" from \"{1}\" to \"{2}\""
+msgstr "\"{0}\" を \"{1}\" から \"{2}\" へ移動"
+
+#: ItemEditRecordManager.cpp:427 ItemEditRecordManager.cpp:429
+msgid "Rename \"{0}\" to \"{1}\""
+msgstr "\"{0}\" の名前を \"{1}\" に変更"
+
+#: UnifiedEditHistoryView.cpp:37
+msgid "Edit History"
+msgstr "編集履歴"
+
+#: MultiPointSetItem.cpp:134
+msgid "MultiPointSetItem"
+msgstr "マルチポイントセットアイテム"
+
+#: MultiPointSetItem.cpp:137
+msgid "Multi Point Sets"
+msgstr "マルチポイントセット"
+
+#: MultiPointSetItem.cpp:159
+msgid "All"
+msgstr "全て"
+
+#: MultiPointSetItem.cpp:160
+msgid "Selected"
+msgstr "選択"
+
+#: MultiPointSetItem.cpp:539
+msgid "Visibility"
+msgstr "表示"
+
+#: MultiPointSetItem.cpp:542
+msgid "Auto save"
+msgstr "自動保存"
+
+#: MultiPointSetItem.cpp:543 MovieRecorder.cpp:997
+msgid "Directory"
+msgstr "ディレクトリ"
+
+#: MultiPointSetItem.cpp:544
+msgid "Num point sets"
+msgstr "点群数"
 
 #: MessageLogItem.cpp:52
 msgid "MessageLogItem"
@@ -1559,33 +365,276 @@ msgstr "ファイルモード"
 msgid "skip escapeSequence"
 msgstr "エスケープシーケンスをスキップ"
 
-#: ExtCommandItem.cpp:27
-msgid "ExtCommandItem"
-msgstr "外部コマンドアイテム"
+#: Licenses.cpp:8
+msgid ""
+"Permission is hereby granted, free of charge, to any person obtaining a copy "
+"of this software and associated documentation files (the \"Software\"), to "
+"deal in the Software without restriction, including without limitation the "
+"rights to use, copy, modify, merge, publish, distribute, sublicense, and/or "
+"sell copies of the Software, and to permit persons to whom the Software is "
+"furnished to do so, subject to the following conditions:\n"
+"\n"
+"The above copyright notice and this permission notice shall be included in "
+"all copies or substantial portions of the Software.\n"
+"\n"
+"THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
+"IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
+"FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
+"AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
+"LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING "
+"FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS "
+"IN THE SOFTWARE\n"
+msgstr ""
 
-#: ExtCommandItem.cpp:121
-msgid "External command \"{0}\" has been executed by item \"{1}\"."
-msgstr "外部コマンド\"{0}\"がアイテム\"{1}\"によって実行されました．"
+#: Licenses.cpp:30
+msgid ""
+"This program is free software; you can redistribute it and/or modify it "
+"under the terms of the GNU Lesser General Public License as published by the "
+"Free Software Foundation; either version 2.1 of the License, or (at your "
+"option) any later version.\n"
+"\n"
+"This package is distributed in the hope that it will be useful, but WITHOUT "
+"ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or "
+"FITNESS FOR A PARTICULAR PURPOSE.See the GNU Lesser General Public License "
+"for more details.\n"
+msgstr ""
 
-#: ExtCommandItem.cpp:130
-msgid "External command \"{}\" cannot be executed."
-msgstr "外部コマンド\"{}\"を実行できません．"
+#: VirtualJoystickView.cpp:107
+msgid "Virtual Joystick"
+msgstr "仮想ジョイスティック"
 
-#: ExtCommandItem.cpp:132
-msgid " The command does not exist."
-msgstr "コマンドが存在しません。"
+#: AbstractSeqItem.cpp:44 MultiSeqItemCreationPanel.cpp:42
+#: MovieRecorder.cpp:1019
+msgid "Frame rate"
+msgstr "フレームレート"
 
-#: ExtCommandItem.cpp:160
-msgid "Command"
-msgstr "コマンド"
+#: AbstractSeqItem.cpp:46
+msgid "Offset time"
+msgstr "オフセット時間"
 
-#: ExtCommandItem.cpp:162
-msgid "Execute on loading"
-msgstr "ロード時に実行"
+#: AbstractSeqItem.cpp:52
+msgid "Number of frames"
+msgstr "フレーム数"
 
-#: ExtCommandItem.cpp:164
-msgid "Waiting time after started"
-msgstr "開始後の待ち時間"
+#: AbstractSeqItem.cpp:62 MultiSeqItemCreationPanel.cpp:35
+msgid "Time length"
+msgstr "時間長"
+
+#: AbstractSeqItem.cpp:72
+msgid "Time step"
+msgstr "タイムステップ"
+
+#: AbstractSeqItem.cpp:138
+msgid "Num parts"
+msgstr "パート数"
+
+#: SceneItem.cpp:26 SceneView.cpp:82 SceneItemFileIO.cpp:19
+msgid "Scene"
+msgstr "シーン"
+
+#: SceneItem.cpp:27 SceneItemFileIO.cpp:20
+msgid "Scene / Mesh"
+msgstr "シーン / メッシュ"
+
+#: SceneItem.cpp:64
+msgid "SceneItem"
+msgstr "シーンアイテム"
+
+#: SceneItem.cpp:187
+msgid "Lightweight rendering"
+msgstr "軽量レンダリング"
+
+#: PositionWidget.cpp:321
+msgid "Roll-pitch-yaw"
+msgstr "ロールピッチヨー"
+
+#: PositionWidget.cpp:326
+msgid "Fetch as a unique RPY value"
+msgstr "一意なRPY値として取り込み"
+
+#: PositionWidget.cpp:331
+msgid "Quoternion"
+msgstr "クオタニオン"
+
+#: PositionWidget.cpp:336
+msgid "Rotation matrix"
+msgstr "回転行列"
+
+#: GLSLSceneRenderer.cpp:888
+msgid "OpenGL {0}.{1} (GLSL {2}) is available for the \"{3}\" view.\n"
+msgstr "OpenGL {0}.{1} (GLSL {2}) が \"{3}\" ビューで利用可能です．\n"
+
+#: GLSLSceneRenderer.cpp:890
+msgid "Driver profile: {0} {1} {2}.\n"
+msgstr "ドライバプロファイル: {0} {1} {2}.\n"
+
+#: GLSLSceneRenderer.cpp:897
+msgid ""
+"Shadow casting is disabled according to the value of "
+"CNOID_ENABLE_GLSL_SHADOW.\n"
+msgstr "影の描画はCNOID_ENABLE_GLSL_SHADOWの値に従い無効化されました．\n"
+
+#: GLSLSceneRenderer.cpp:900
+msgid ""
+"Shadow casting is enabled according to the value of "
+"CNOID_ENABLE_GLSL_SHADOW.\n"
+msgstr "影の描画はCNOID_ENABLE_GLSL_SHADOWの値に従い有効化されました．\n"
+
+#: GLSLSceneRenderer.cpp:952
+msgid "Shadow casting is disabled for this GPU due to some problems.\n"
+msgstr "影の描画はこのGPUに対しては問題があるため無効化されます．\n"
+
+#: CaptureBar.cpp:92
+msgid "Save the image of %1"
+msgstr "%1の画像を保存"
+
+#: CaptureBar.cpp:96 TextEditView.cpp:120 ProjectManager.cpp:813
+#: ItemFileDialog.cpp:244
+msgid "Save"
+msgstr "保存"
+
+#: CaptureBar.cpp:97 PluginManager.cpp:709 SceneWidget.cpp:1040
+#: ItemPropertyWidget.cpp:561 ProjectManager.cpp:790 ProjectManager.cpp:814
+#: TaskView.cpp:286 ItemFileDialog.cpp:77
+msgid "Cancel"
+msgstr "キャンセル"
+
+#: CaptureBar.cpp:100 PluginManager.cpp:713 ItemPropertyWidget.cpp:582
+#: ProjectManager.cpp:794 ProjectManager.cpp:819
+msgid "Any files (*)"
+msgstr "全てのファイル (*)"
+
+#: CaptureBar.cpp:128
+msgid "The image of %1 cannot be saved into \"%2\"."
+msgstr "%1の画像を\"%2\"に保存できませんでした．"
+
+#: CaptureBar.cpp:172
+msgid "Capture Bar"
+msgstr "キャプチャバー"
+
+#: CaptureBar.cpp:174
+msgid "Include Tab"
+msgstr "タブを含める"
+
+#: CaptureBar.cpp:193
+msgid "CaptureBar"
+msgstr "キャプチャバー"
+
+#: CaptureBar.cpp:195
+msgid "Capture the image of a view or toolbar"
+msgstr "ビューやツールバーの画像をキャプチャします"
+
+#: PathVariableEditor.cpp:59 ProjectManager.cpp:206
+msgid "Project File Options"
+msgstr "プロジェクトファイルオプション"
+
+#: PathVariableEditor.cpp:60
+msgid "Edit Path Variables"
+msgstr "パス変数の設定"
+
+#: PathVariableEditor.cpp:70
+msgid "Path Variables"
+msgstr "パス変数"
+
+#: PathVariableEditor.cpp:78 PathVariableEditor.cpp:88
+msgid "Variable"
+msgstr "変数"
+
+#: PathVariableEditor.cpp:79
+msgid "Path"
+msgstr "パス"
+
+#: PathVariableEditor.cpp:97
+msgid "&Apply"
+msgstr "適用(&A)"
+
+#: GL1SceneRenderer.cpp:465
+msgid "OpenGL {0} is available for the \"{1}\" view.\n"
+msgstr "OpenGL {0} が \"{1}\" ビューで利用可能です．\n"
+
+#: GL1SceneRenderer.cpp:467
+msgid "Driver profile: {0} {1}."
+msgstr "ドライバプロファイル: {0} {1}."
+
+#: LightingItem.cpp:83
+msgid "LightingItem"
+msgstr "ライティングアイテム"
+
+#: LightingItem.cpp:123
+msgid "Directional light"
+msgstr "ディレクショナルライト"
+
+#: LightingItem.cpp:124
+msgid "Point light"
+msgstr "ポイントライト"
+
+#: LightingItem.cpp:125
+msgid "Spot light"
+msgstr "スポットライト"
+
+#: LightingItem.cpp:484
+msgid "Light Type"
+msgstr "ライトの種類"
+
+#: LightingItem.cpp:491
+msgid "Direction"
+msgstr "方向"
+
+#: LightingItem.cpp:495
+msgid "ON"
+msgstr "オン"
+
+#: LightingItem.cpp:497 SceneWidget.cpp:3560
+msgid "Color"
+msgstr "色"
+
+#: LightingItem.cpp:499 SceneWidget.cpp:3435 SceneWidget.cpp:3452
+msgid "Intensity"
+msgstr "照度"
+
+#: LightingItem.cpp:501
+msgid "AmbientIntensity"
+msgstr "周囲の照度"
+
+#: LightingItem.cpp:505
+msgid "ConstantAttenuation"
+msgstr "一定減衰率"
+
+#: LightingItem.cpp:507
+msgid "LinearAttenuation"
+msgstr "線形減衰率"
+
+#: LightingItem.cpp:509
+msgid "QuadraticAttenuation"
+msgstr "2次減衰率"
+
+#: LightingItem.cpp:513
+msgid "BeamWidth"
+msgstr "最大輝度照射角度"
+
+#: LightingItem.cpp:515
+msgid "CutOffAngle"
+msgstr "遮断角度"
+
+#: LightingItem.cpp:517
+msgid "CutOffExponent"
+msgstr "強度分布"
+
+#: LightingItem.cpp:521
+msgid "Show Marker"
+msgstr "マーカ表示"
+
+#: ScriptItem.cpp:24 ExtCommandItem.cpp:32
+msgid "Execute"
+msgstr "実行"
+
+#: ScriptItem.cpp:25 ExtCommandItem.cpp:33
+msgid "Terminate"
+msgstr "停止"
+
+#: GraphWidget.cpp:1151
+msgid "Graph: Position = ({0:.5f}, {1:.5f})"
+msgstr "グラフ位置 = ({0:.5f}, {1:.5f})"
 
 #: SubProjectItem.cpp:54
 msgid "SubProjectItem"
@@ -1616,93 +665,1194 @@ msgstr "保存モード"
 msgid "Updated"
 msgstr "更新"
 
-#: ItemTreePanelDialog.cpp:127
+#: MainWindow.cpp:231
+msgid "Exit"
+msgstr "終了"
+
+#: MainWindow.cpp:234
+msgid "Edit"
+msgstr "編集"
+
+#: MainWindow.cpp:236
+msgid "View"
+msgstr "表示"
+
+#: MainWindow.cpp:238
+msgid "Show Toolbar"
+msgstr "ツールバーの表示"
+
+#: MainWindow.cpp:243
+msgid "Show View"
+msgstr "ビューの表示"
+
+#: MainWindow.cpp:244
+msgid "Create View"
+msgstr "ビューの生成"
+
+#: MainWindow.cpp:245
+msgid "Delete View"
+msgstr "ビューの消去"
+
+#: MainWindow.cpp:247
+msgid "Show View Tabs"
+msgstr "ビュータブの表示"
+
+#: MainWindow.cpp:253
+msgid "Show Status Bar"
+msgstr "ステータスバーの表示"
+
+#: MainWindow.cpp:259
+msgid "Full Screen"
+msgstr "フルスクリーン"
+
+#: MainWindow.cpp:263
+msgid "Layout"
+msgstr "レイアウト"
+
+#: MainWindow.cpp:268
+msgid "Reset Layout"
+msgstr "レイアウトのリセット"
+
+#: MainWindow.cpp:270
+msgid "Tools"
+msgstr "ツール"
+
+#: MainWindow.cpp:271
+msgid "Filters"
+msgstr "フィルタ"
+
+#: MainWindow.cpp:272
+msgid "Options"
+msgstr "オプション"
+
+#: MainWindow.cpp:273
+msgid "Help"
+msgstr "ヘルプ"
+
+#: LocationView.cpp:134
+msgid "Location"
+msgstr "配置"
+
+#: LocationView.cpp:156
+msgid "Lock"
+msgstr "ロック"
+
+#: LocationView.cpp:161
+msgid "Coord :"
+msgstr "座標系："
+
+#: LocationView.cpp:178
+msgid "Individual Rotation"
+msgstr "個別回転"
+
+#: LocationView.cpp:373
+msgid "<b>{0}</b>"
+msgstr ""
+
+#: LocationView.cpp:376
+msgid "<b>{0}</b> + {1}"
+msgstr ""
+
+#: LocationView.cpp:380
+msgid "<b>{0}</b> + {1} objects"
+msgstr "<b>{0}</b> + {1} オブジェクト"
+
+#: LocationView.cpp:504
+msgid "World"
+msgstr "ワールド"
+
+#: LocationView.cpp:514
+msgid "Offset ( {} )"
+msgstr "オフセット（ {} ）"
+
+#: LocationView.cpp:516
+msgid "Parent ( {} )"
+msgstr "親（ {} ）"
+
+#: LocationView.cpp:524 GraphBar.cpp:313
+msgid "Offset"
+msgstr "オフセット"
+
+#: LocationView.cpp:526
+msgid "Parent"
+msgstr "親"
+
+#: LocationView.cpp:536 CoordinateFrameItem.cpp:278
+msgid "Local"
+msgstr "ローカル"
+
+#: LocationView.cpp:759
+msgid "Change multiple object locations"
+msgstr "複数オブジェクトの配置を変更"
+
+#: Vector3SeqItem.cpp:14
+msgid "Vector3SeqItem"
+msgstr "３次元ベクタ列アイテム"
+
+#: SceneView.cpp:171
+msgid "Use dedicated item tree view checks to select the target items"
+msgstr "対象アイテム選択用の専用のチェックをアイテムツリービューに追加"
+
+#: GeneralSceneFileImporterBase.cpp:127
+msgid "The file format of \"{}\" is not supported.\n"
+msgstr "ファイルフォーマット\"{}\"はサポートされていません．\n"
+
+#: GeneralSceneFileImporterBase.cpp:215
+msgid "[ Mesh import hints ]"
+msgstr "[ メッシュインポートヒント ]"
+
+#: GeneralSceneFileImporterBase.cpp:216
+msgid "Unit:"
+msgstr "単位："
+
+#: GeneralSceneFileImporterBase.cpp:218
+msgid "Meter"
+msgstr "メートル"
+
+#: GeneralSceneFileImporterBase.cpp:219
+msgid "Millimeter"
+msgstr "ミリメートル"
+
+#: GeneralSceneFileImporterBase.cpp:220
+msgid "Inch"
+msgstr "インチ"
+
+#: GeneralSceneFileImporterBase.cpp:222
+msgid "Upper axis:"
+msgstr "上方軸"
+
+#: PositionTagListWidget.cpp:167 CoordinateFrameListView.cpp:214
+msgid "Position"
+msgstr "ポジション"
+
+#: GLSLProgram.cpp:51
+msgid "Shader \"{}\" is not found."
+msgstr "シェーダ\"{}\"がみつかりません．"
+
+#: GLSLProgram.cpp:74
+msgid ""
+"Shader compilation of \"{0}\" failed.\n"
+"{1}"
+msgstr ""
+"\"{0}\"のシェーダコンパイルに失敗しました．\n"
+"{1}"
+
+#: GLSLProgram.cpp:76
+msgid "Shader compilation of \"{}\" failed."
+msgstr "\"{}\"のシェーダコンパイルに失敗しました．"
+
+#: GLSLProgram.cpp:85
+msgid "Unable to create shader program."
+msgstr "シェーダプログラムを生成できません．"
+
+#: GLSLProgram.cpp:100
+msgid "Program has not been compiled."
+msgstr "プログラムはコンパイルされていません．"
+
+#: GLSLProgram.cpp:117
+msgid "Program link failed."
+msgstr "プログラムのリンクに失敗しました．"
+
+#: GLSLProgram.cpp:131
+msgid "Program is not linked"
+msgstr "プログラムはリンクされていません"
+
+#: GLSLProgram.cpp:147
+msgid "Program failed to validate"
+msgstr "プログラムの有効化に失敗しました"
+
+#: GLSLProgram.cpp:157
+msgid "Shader has not been linked."
+msgstr "シェーダがリンクされていません．"
+
+#: ViewManager.cpp:295
+msgid "Create %1"
+msgstr "%1の生成"
+
+#: ViewManager.cpp:331
+msgid "Please specify the name of the new view."
+msgstr "作成するビューの名前を指定してください．"
+
+#: ViewManager.cpp:369
+msgid "Delete All Invisible Views"
+msgstr "全ての非表示ビューを消去"
+
+#: ViewManager.cpp:831
+msgid "{0} is not registered in {1}."
+msgstr "{0} は {1} に登録されていません．"
+
+#: ViewManager.cpp:837
+msgid ""
+"A singleton view \"{0}\" of the {1} type cannot be created because its "
+"singleton instance has already been created."
+msgstr ""
+"\"{1}\"タイプのシングルトンビュー\"{0}\"は既にそのシングルトンインスタンスが"
+"生成されています．"
+
+#: ViewManager.cpp:844
+msgid "{0} cannot be restored."
+msgstr "{0}を復帰することができません．"
+
+#: ViewManager.cpp:847
+msgid "The \"{0}\" view of {1} cannot be restored."
+msgstr "{1} の \"{0}\" ビューを復帰できません．"
+
+#: ViewManager.cpp:887
+msgid ""
+"The \"{0}\" plugin for \"{1}\" is not found. The view cannot be restored."
+msgstr ""
+"\"{1}\"のための\"{0}\"プラグインが見つかりません．ビューの復帰ができません．"
+
+#: ExtCommandItem.cpp:27
+msgid "ExtCommandItem"
+msgstr "外部コマンドアイテム"
+
+#: ExtCommandItem.cpp:121
+msgid "External command \"{0}\" has been executed by item \"{1}\"."
+msgstr "外部コマンド\"{0}\"がアイテム\"{1}\"によって実行されました．"
+
+#: ExtCommandItem.cpp:130
+msgid "External command \"{}\" cannot be executed."
+msgstr "外部コマンド\"{}\"を実行できません．"
+
+#: ExtCommandItem.cpp:132
+msgid " The command does not exist."
+msgstr "コマンドが存在しません。"
+
+#: ExtCommandItem.cpp:160
+msgid "Command"
+msgstr "コマンド"
+
+#: ExtCommandItem.cpp:162
+msgid "Execute on loading"
+msgstr "ロード時に実行"
+
+#: ExtCommandItem.cpp:164
+msgid "Waiting time after started"
+msgstr "開始後の待ち時間"
+
+#: ScriptBar.cpp:26
+msgid "ScriptBar"
+msgstr "スクリプトバー"
+
+#: ScriptBar.cpp:28
+msgid "Execute scripts"
+msgstr "スクリプトの実行"
+
+#: ItemTreePanelDialog.cpp:166
 msgid "Add : "
 msgstr "追加 : "
 
-#: ItemTreePanelDialog.cpp:311
+#: ItemTreePanelDialog.cpp:396
 msgid "Unkown"
 msgstr "不明"
 
-#: ItemTreePanelDialog.cpp:316
+#: ItemTreePanelDialog.cpp:404
 msgid "There are no items to be configured."
 msgstr "設定対象のアイテムがありません．"
 
-#: ItemTreePanelDialog.cpp:318
+#: ItemTreePanelDialog.cpp:406
 msgid "No item is selected."
 msgstr "アイテムが選択されていません．"
 
-#: ItemTreePanelDialog.cpp:338
+#: ItemTreePanelDialog.cpp:430
 msgid "\"{0}\" is not a target item."
 msgstr "\"{0}\" は対象アイテムではありません．"
 
-#: MultiPointSetItem.cpp:134
-msgid "MultiPointSetItem"
-msgstr "マルチポイントセットアイテム"
+#: DescriptionDialog.cpp:28 SceneWidget.cpp:3639
+msgid "&Ok"
+msgstr "了解(&O)"
 
-#: MultiPointSetItem.cpp:137
-msgid "Multi Point Sets"
-msgstr "マルチポイントセット"
+#: MultiSeqItemCreationPanel.cpp:23 Item.cpp:1577
+msgid "Name"
+msgstr "名前"
 
-#: MultiPointSetItem.cpp:159
-msgid "All"
-msgstr "全て"
+#: ReferencedObjectSeqItem.cpp:15
+msgid "ReferencedObjectSeqItem"
+msgstr "参照オブジェクト時系列アイテム"
 
-#: MultiPointSetItem.cpp:160
-msgid "Selected"
-msgstr "選択"
+#: CoordinateFrameItem.cpp:66
+msgid "CoordinateFrameItem"
+msgstr "座標フレームアイテム"
 
-#: MultiPointSetItem.cpp:539
-msgid "Visibility"
-msgstr "表示"
+#: CoordinateFrameItem.cpp:278
+msgid "Global"
+msgstr "グローバル"
 
-#: MultiPointSetItem.cpp:542
-msgid "Auto save"
-msgstr "自動保存"
+#: CoordinateFrameItem.cpp:288 CoordinateFrameItem.cpp:295
+#: CoordinateFrameItem.cpp:298
+msgid "ID"
+msgstr ""
 
-#: MultiPointSetItem.cpp:543 MovieRecorder.cpp:364
-msgid "Directory"
-msgstr "ディレクトリ"
+#: CoordinateFrameItem.cpp:290 CoordinateFrameItem.cpp:303
+#: CoordinateFrameItem.cpp:306
+msgid "Mode"
+msgstr "モード"
 
-#: MultiPointSetItem.cpp:544
-msgid "Num point sets"
-msgstr "点群数"
+#: CoordinateFrameItem.cpp:291 CoordinateFrameItem.cpp:314
+#: CoordinateFrameListView.cpp:212
+msgid "Note"
+msgstr "注釈"
+
+#: ViewArea.cpp:1420
+msgid "Separate the view"
+msgstr "ビューの分離"
 
 #: ItemPropertyView.cpp:27
 msgid "Property"
 msgstr "プロパティ"
 
-#: SceneItemFileIO.cpp:127
-msgid "The file format of \"{}\" is not supported.\n"
-msgstr "ファイルフォーマット\"{}\"はサポートされていません．\n"
+#: SceneItemFileIO.cpp:56
+msgid "Standard scene file"
+msgstr ""
 
-#: SceneItemFileIO.cpp:211
-msgid "[ Mesh import hints ]"
-msgstr "[ メッシュインポートヒント ]"
+#: SceneItemFileIO.cpp:75
+msgid "Empty scene"
+msgstr ""
 
-#: SceneItemFileIO.cpp:212
-msgid "Unit:"
-msgstr "単位："
+#: ItemTreeView.cpp:34
+msgid "Items"
+msgstr "アイテム"
 
-#: SceneItemFileIO.cpp:214
-msgid "Meter"
-msgstr "メートル"
+#: ItemTreeView.cpp:92
+msgid "Cut"
+msgstr "カット"
 
-#: SceneItemFileIO.cpp:215
-msgid "Millimeter"
-msgstr "ミリメートル"
+#: ItemTreeView.cpp:93
+msgid "Copy (single)"
+msgstr "コピー（単独）"
 
-#: SceneItemFileIO.cpp:216
-msgid "Inch"
-msgstr "インチ"
+#: ItemTreeView.cpp:94
+msgid "Copy (sub tree)"
+msgstr "コピー（サブツリー）"
 
-#: SceneItemFileIO.cpp:218
-msgid "Upper axis:"
-msgstr "上方軸"
+#: ItemTreeView.cpp:95
+msgid "Paste"
+msgstr "ペースト"
+
+#: ItemTreeView.cpp:99
+msgid "Check"
+msgstr "チェック"
+
+#: ItemTreeView.cpp:100
+msgid "Uncheck"
+msgstr "アンチェック"
+
+#: ItemTreeView.cpp:101
+msgid "Toggle checks"
+msgstr "チェックの反転"
+
+#: ItemTreeView.cpp:105
+msgid "Reload"
+msgstr "再読み込み"
+
+#: ItemTreeView.cpp:109 PositionTagGroupItem.cpp:1401
+msgid "Select all"
+msgstr "全て選択"
+
+#: ItemTreeView.cpp:110 PositionTagGroupItem.cpp:1402
+msgid "Clear selection"
+msgstr "選択解除"
+
+#: SceneBar.cpp:101
+msgid "Put scene statistics"
+msgstr "シーン統計情報の表示"
+
+#: SceneBar.cpp:108
+msgid "SceneBar"
+msgstr "シーンバー"
+
+#: SceneBar.cpp:133
+msgid "Switch to the edit mode"
+msgstr "編集モードへの切り替え"
+
+#: SceneBar.cpp:142
+msgid "First-person viewpoint control mode"
+msgstr "一人称視点制御"
+
+#: SceneBar.cpp:147
+msgid "Select a camera"
+msgstr "カメラの選択"
+
+#: SceneBar.cpp:154
+msgid "Move the camera to look at the objects"
+msgstr "全ての物体が見えるように視点を移動"
+
+#: SceneBar.cpp:163
+msgid "Vertex rendering"
+msgstr "頂点描画"
+
+#: SceneBar.cpp:168
+msgid "Wireframe rendering"
+msgstr "ワイヤフレーム描画"
+
+#: SceneBar.cpp:172
+msgid "Solid wireframe rendering"
+msgstr "ワイヤフレーム+ポリゴン描画"
+
+#: SceneBar.cpp:177
+msgid "Polygon rendering"
+msgstr "ポリゴン描画"
+
+#: SceneBar.cpp:186
+msgid "Highlight selected objects"
+msgstr ""
+
+#: SceneBar.cpp:191
+msgid "Show visual models"
+msgstr "表示用モデルの表示"
+
+#: SceneBar.cpp:197
+msgid "Flip active model types"
+msgstr "表示するモデルタイプの切り替え"
+
+#: SceneBar.cpp:202
+msgid "Show the collision detection models"
+msgstr "干渉チェック用モデルを表示"
+
+#: SceneBar.cpp:207
+msgid "Toggle the collision line visibility"
+msgstr "干渉線の表示"
+
+#: SceneBar.cpp:211 TimeBar.cpp:316 MovieRecorder.cpp:952 GraphBar.cpp:139
+msgid "Show the config dialog"
+msgstr "設定ダイアログの表示"
+
+#: SceneBar.cpp:552
+msgid "Scene statistics:"
+msgstr "シーン統計情報:"
+
+#: SceneBar.cpp:563
+msgid " Scene \"{}\":"
+msgstr " シーン \"{}\":"
+
+#: SceneBar.cpp:565
+msgid "  Vertices: {}\n"
+msgstr "  頂点: {}\n"
+
+#: SceneBar.cpp:566
+msgid "  Normals: {}\n"
+msgstr "  法線: {}\n"
+
+#: SceneBar.cpp:567
+msgid "  Triangles: {}"
+msgstr "  トライアングル: {}"
+
+#: SceneBar.cpp:577
+msgid "No valid scene item is selected."
+msgstr "有効なシーンアイテムが選択されていません．"
+
+#: SceneBar.cpp:579
+msgid "The total number of {} scene items:\n"
+msgstr "{}シーンアイテムの総数: \n"
+
+#: SceneBar.cpp:580
+msgid " Vertices: {}\n"
+msgstr " 頂点: {}\n"
+
+#: SceneBar.cpp:581
+msgid " Normals: {}\n"
+msgstr " 法線: {}\n"
+
+#: SceneBar.cpp:582
+msgid " Triangles: {}"
+msgstr " トライアングル: {}"
+
+#: MultiSE3SeqGraphView.cpp:17
+msgid "Multi SE3 Seq"
+msgstr "SE3軌道"
+
+#: MultiSE3MatrixSeqItem.cpp:15
+msgid "MultiSE3MatrixSeqItem"
+msgstr ""
+
+#: MultiSE3MatrixSeqItem.cpp:18 MultiSE3SeqItem.cpp:18
+msgid "Number of SE3 values in a frame"
+msgstr "フレームあたりSE3要素数"
+
+#: TimeBar.cpp:50
+msgid "Time Bar Config"
+msgstr "タイムバーの設定"
+
+#: TimeBar.cpp:56
+msgid "Internal frame rate"
+msgstr "内部フレームレート"
+
+#: TimeBar.cpp:64
+msgid "Playback frame rate"
+msgstr "再生フレームレート"
+
+#: TimeBar.cpp:73
+msgid "Idle loop driven mode"
+msgstr "アイドルループ駆動モード"
+
+#: TimeBar.cpp:79
+msgid "Playback speed scale"
+msgstr "再生スピード倍率"
+
+#: TimeBar.cpp:90
+msgid "Sync with ongoing updates"
+msgstr "進行中の更新に同期"
+
+#: TimeBar.cpp:97
+msgid "Automatically expand the time range"
+msgstr "時間範囲の自動拡張"
+
+#: TimeBar.cpp:143
+msgid "&OK"
+msgstr "&OK"
+
+#: TimeBar.cpp:257
+msgid "TimeBar"
+msgstr "タイムバー"
+
+#: TimeBar.cpp:282
+msgid "Start animation"
+msgstr "アニメーションの開始"
+
+#: TimeBar.cpp:285 TimeBar.cpp:613
+msgid "Resume animation"
+msgstr "アニメーションの再生・停止"
+
+#: TimeBar.cpp:289
+msgid "Refresh state at the current time"
+msgstr "現在時刻で状態を更新"
+
+#: TimeBar.cpp:584
+msgid "Stop animation"
+msgstr "アニメーションの停止"
+
+#: PluginManager.cpp:212
+msgid "Plugin"
+msgstr "プラグイン"
+
+#: PluginManager.cpp:213
+msgid "Load Plugin"
+msgstr "プラグインの読み込み"
+
+#: PluginManager.cpp:218
+msgid "Startup Plugin Loading"
+msgstr "起動時のプラグイン読み込み"
+
+#: PluginManager.cpp:221
+msgid "Check the naming convention of plugin files"
+msgstr "プラグインファイルの命名規則をチェックする"
+
+#: PluginManager.cpp:474
+msgid ""
+"{0}-plugin cannot be initialized because required plugin(s) {1} are not "
+"found."
+msgstr ""
+"必要なプラグイン{1}が見つからないため、{0}プラグインの初期化ができません．"
+
+#: PluginManager.cpp:499 PluginManager.cpp:608
+msgid "Plugin file \"{}\" has already been activated."
+msgstr "プラグインファイル\"{}\"は既に読み込まれています．"
+
+#: PluginManager.cpp:502
+msgid "Detecting plugin file \"{}\""
+msgstr "プラグインファイル \"{}\" を検出しました．"
+
+#: PluginManager.cpp:520
+msgid "System error: {0}"
+msgstr "システムエラー: {0}"
+
+#: PluginManager.cpp:528
+msgid "The plugin entry function \"getChoreonoidPlugin\" is not found.\n"
+msgstr "プラグインエントリ関数 \"getChoreonoidPlugin\" が見つかりません．\n"
+
+#: PluginManager.cpp:539
+msgid "The plugin object cannot be created."
+msgstr "プラグインオブジェクトが生成できません．"
+
+#: PluginManager.cpp:550
+msgid ""
+"The internal version of the {0} plugin is different from the system internal "
+"version.\n"
+"The plugin file \"{1}\" should be removed or updated to avoid a problem."
+msgstr ""
+"{0}プラグインの内部バージョンがシステムの内部バージョンと一致しません．\n"
+"問題を避けるため，プラグインファイル \"{1}\" は削除か更新を行なってください．"
+
+#: PluginManager.cpp:584
+msgid "Plugin file \"{0}\" conflicts with \"{1}\"."
+msgstr "{0}プラグインは\"{1}\"と競合しています．"
+
+#: PluginManager.cpp:593 PluginManager.cpp:692
+msgid "Loading the plugin failed."
+msgstr "プラグインの読み込みができませんでした．"
+
+#: PluginManager.cpp:648
+msgid "The plugin object cannot be intialized."
+msgstr "プラグインオブジェクトの初期化ができません．"
+
+#: PluginManager.cpp:672
+msgid "About Plugins"
+msgstr "プラグインについて"
+
+#: PluginManager.cpp:673 PluginManager.cpp:747
+msgid "About {} Plugin"
+msgstr "{}プラグインについて"
+
+#: PluginManager.cpp:684
+msgid "{}-plugin has been activated."
+msgstr "{}プラグインが読み込まれました．"
+
+#: PluginManager.cpp:705
+msgid "Load plugins"
+msgstr "プラグインの読み込み"
+
+#: PluginManager.cpp:708 ProjectManager.cpp:789
+msgid "Open"
+msgstr "読み込み"
+
+#: PluginManager.cpp:712
+msgid "Plugin files (*.%1)"
+msgstr "プラグインファイル (*.%1)"
+
+#: PluginManager.cpp:849
+msgid "Plugin {} cannot be finalized."
+msgstr "プラグイン{}を終了できません．"
+
+#: PluginManager.cpp:888
+msgid "Plugin dll {} has been unloaded."
+msgstr "プラグイン{}のDLLが解放されました．"
+
+#: InfoBar.cpp:39
+msgid " "
+msgstr "　"
+
+#: TextEditView.cpp:75
+msgid "Text"
+msgstr "テキスト"
+
+#: TextEditView.cpp:219
+msgid ""
+"The document has been modified.\n"
+" Do you want to save your changes?"
+msgstr ""
+"ドキュメントは変更されています．\n"
+"変更内容を保存しますか？"
+
+#: TextEditView.cpp:251
+msgid "unselected"
+msgstr "アイテムが選択されてません．"
+
+#: TextEditView.cpp:281 ProjectManager.cpp:758 MessageView.cpp:1134
+msgid "Warning"
+msgstr "警告"
+
+#: TextEditView.cpp:282
+msgid ""
+"The file has been modified outside of text editor.\n"
+"Do you want to reload it?"
+msgstr ""
+"外部のエディタによって内容が変更されました．\n"
+"ファイルを読み込み直しますか？"
+
+#: RootItem.cpp:119
+msgid "RootItem"
+msgstr "ルートアイテム"
+
+#: RootItem.cpp:143
+msgid "Primary check"
+msgstr "プライマリチェック"
+
+#: App.cpp:322 App.cpp:464
+msgid "About Choreonoid"
+msgstr "Choreonoid について"
+
+#: App.cpp:326
+msgid ""
+"The Eigen library version {0}.{1}.{2} is used (SIMD intruction sets in use: "
+"{3})."
+msgstr ""
+"Eigenライブラリバージョン{0}.{1}.{2}が使用されています．( 使用されているSIMD"
+"命令セット: {3} )"
+
+#: ImageView.cpp:116
+msgid "Image"
+msgstr "画像"
+
+#: ImageView.cpp:271
+msgid "ImageViewBar"
+msgstr "画像ビューバー"
+
+#: ImageView.cpp:289
+msgid "Select an imageable item"
+msgstr "画像アイテムの選択"
+
+#: ImageView.cpp:298
+msgid "Adjust image size according to view"
+msgstr "画像サイスをビューに合わせる"
+
+#: GeneralSliderView.cpp:262
+msgid "General Sliders"
+msgstr "汎用スライダ"
+
+#: MovieRecorder.cpp:271 MovieRecorder.cpp:961
+msgid "Movie Recorder"
+msgstr "動画レコーダ"
+
+#: MovieRecorder.cpp:294
+msgid "Offline"
+msgstr "オフライン"
+
+#: MovieRecorder.cpp:295
+msgid "Online"
+msgstr "オンライン"
+
+#: MovieRecorder.cpp:296
+msgid "Direct"
+msgstr "ダイレクト"
+
+#: MovieRecorder.cpp:311
+msgid "Recording of {0} has been started with the {1} mode."
+msgstr "{1}モードによる{0}の録画を開始しました．"
+
+#: MovieRecorder.cpp:484
+msgid "Target view is not specified."
+msgstr "対象のビューが指定されていません．"
+
+#: MovieRecorder.cpp:492
+msgid "Please set a directory to output image files."
+msgstr "画像ファイルを出力するディレクトリを指定してください．"
+
+#: MovieRecorder.cpp:498
+msgid "{} is not a directory."
+msgstr "{}はディレクトリではありません．"
+
+#: MovieRecorder.cpp:574
+msgid "The online mode recording for {} is ready."
+msgstr "オンラインモードによる{}の録画を待機しています．"
+
+#: MovieRecorder.cpp:767
+msgid "Saving an image to \"{}\" failed."
+msgstr "画像の\"{}\"への保存ができませんでした．"
+
+#: MovieRecorder.cpp:801
+msgid "Outputting sequential image files..."
+msgstr "連番画像ファイルを出力中…"
+
+#: MovieRecorder.cpp:801
+msgid "Abort Output"
+msgstr "出力中止"
+
+#: MovieRecorder.cpp:802
+msgid "Movie Recorder's Output Status"
+msgstr "動画レコーダの出力状況"
+
+#: MovieRecorder.cpp:831
+msgid "Recording of {} has been finished."
+msgstr "{}の録画が終了しました．"
+
+#: MovieRecorder.cpp:833
+msgid "Recording of {} has been stopped."
+msgstr "{}の録画を停止しました．"
+
+#: MovieRecorder.cpp:941
+msgid "MovieRecorderBar"
+msgstr "動画レコーダバー"
+
+#: MovieRecorder.cpp:944
+msgid "Toggle Recording"
+msgstr "録画"
+
+#: MovieRecorder.cpp:948
+msgid "Toggle Target View Marker"
+msgstr "対象ビューのマーカを表示"
+
+#: MovieRecorder.cpp:967
+msgid "Target view:"
+msgstr "対象ビュー"
+
+#: MovieRecorder.cpp:973
+msgid "Show the marker"
+msgstr "マーカ表示"
+
+#: MovieRecorder.cpp:982
+msgid "Recording mode: "
+msgstr "録画モード"
+
+#: MovieRecorder.cpp:1002 ItemPropertyWidget.cpp:556
+msgid "Select"
+msgstr "選択"
+
+#: MovieRecorder.cpp:1012
+msgid "Basename"
+msgstr "ベースファイル名"
+
+#: MovieRecorder.cpp:1025
+msgid "[fps]"
+msgstr ""
+
+#: MovieRecorder.cpp:1030
+msgid "Start time"
+msgstr "開始時刻"
+
+#: MovieRecorder.cpp:1036 MovieRecorder.cpp:1045
+msgid "[s]"
+msgstr "[秒]"
+
+#: MovieRecorder.cpp:1039
+msgid "Finish time"
+msgstr "終了時刻"
+
+#: MovieRecorder.cpp:1050
+msgid "Image size"
+msgstr "画像サイズ"
+
+#: MovieRecorder.cpp:1066
+msgid "Capture the mouse cursor"
+msgstr "マウスカーソルもキャプチャする"
+
+#: MovieRecorder.cpp:1075
+msgid "&Record"
+msgstr "録画(&R)"
+
+#: MovieRecorder.cpp:1155
+msgid "Select Directory"
+msgstr "ディレクトリの選択"
+
+#: ItemFileIO.cpp:304
+msgid "Item with empty filename cannot be loaded."
+msgstr "空のファイル名のアイテムを読み込むことはできません．"
+
+#: ItemFileIO.cpp:309
+msgid "{0} cannot be loaded because {1}"
+msgstr "{0}はロードできません: {1}"
+
+#: ItemFileIO.cpp:314
+msgid "Loading {0} \"{1}\""
+msgstr "{0} \"{1}\" を読み込み中"
+
+#: ItemFileIO.cpp:322 ItemFileIO.cpp:400
+msgid " -> failed.\n"
+msgstr " -> 失敗.\n"
+
+#: ItemFileIO.cpp:341 ItemFileIO.cpp:411
+msgid " -> ok!\n"
+msgstr " -> 完了!\n"
+
+#: ItemFileIO.cpp:376
+msgid "{0} cannot be saved with empty filename."
+msgstr "ファイル名が指定されていないので{0}を保存できません．"
+
+#: ItemFileIO.cpp:381
+msgid "{0} cannot be saved because {1}"
+msgstr "{0}は保存できません： {1}"
+
+#: ItemFileIO.cpp:388
+msgid "Saving {0} \"{1}\" to \"{2}\""
+msgstr "{0} \"{1}\" を \"{2}\" に保存中"
+
+#: ItemFileIO.cpp:391
+msgid "Exporting {0} \"{1}\" into \"{2}\""
+msgstr "{0} \"{1}\" を \"{2}\" にエクスポート中"
 
 #: FolderItem.cpp:53
 msgid "FolderItem"
 msgstr "フォルダアイテム"
+
+#: UnifiedEditHistory.cpp:82
+msgid "Undo"
+msgstr "元に戻す"
+
+#: UnifiedEditHistory.cpp:85
+msgid "Redo"
+msgstr "やり直し"
+
+#: UnifiedEditHistory.cpp:272
+msgid "Undo: {0}."
+msgstr "「{0}」を元に戻しました．"
+
+#: UnifiedEditHistory.cpp:279
+msgid "Undo failed and the edit history has been clered."
+msgstr "元に戻すことができませんでした．編集履歴をクリアしました．"
+
+#: UnifiedEditHistory.cpp:301
+msgid "Redo: {0}."
+msgstr "「{0}」をやり直しました．"
+
+#: UnifiedEditHistory.cpp:308
+msgid "Redo failed and the edit history has been clered."
+msgstr "やり直すことができませんでした．編集履歴をクリアしました．"
+
+#: MultiValueSeqItem.cpp:40
+msgid "MultiValueSeqItem"
+msgstr ""
+
+#: MultiValueSeqItem.cpp:43
+msgid "Number of values in a frame"
+msgstr "フレームあたり要素数"
+
+#: MultiValueSeqItem.cpp:46
+msgid "Plain Format of a Multi Value Sequence"
+msgstr "複数数値列のプレインフォーマット"
+
+#: SceneWidget.cpp:154
+msgid "OpengGL image buffer for picking"
+msgstr "ピッキング用OpenGL画像バッファ"
+
+#: SceneWidget.cpp:430
+msgid "Vertical sync"
+msgstr "垂直同期"
+
+#: SceneWidget.cpp:435
+msgid "Low GPU memory consumption mode"
+msgstr "GPUメモリ消費低減モード"
+
+#: SceneWidget.cpp:769
+msgid "OpenGL initialization failed."
+msgstr ""
+
+#: SceneWidget.cpp:905
+msgid "Recursive editable node set change on a scene widget."
+msgstr "シーンウィジェットにおける編集可ノード集合の再帰的変化．"
+
+#: SceneWidget.cpp:907
+msgid "Recursive editable node set change on scene widget {0}."
+msgstr "シーンウィジェットにおける編集可ノード集合の再帰的変化 {0}．"
+
+#: SceneWidget.cpp:938
+msgid "The OpenGL resources of {0} has been cleared."
+msgstr "{0}のOpenGLリソースがクリアされました．"
+
+#: SceneWidget.cpp:1053
+msgid ""
+"FPS test cannot be executed because the current camera is not a built-in "
+"interactive camera."
+msgstr ""
+"カレントカメラが組み込みのインタラクティブカメラでは無いため、FPSテストを実行"
+"できません．"
+
+#: SceneWidget.cpp:1091
+msgid "FPS Test Result"
+msgstr "フレームレートテスト結果"
+
+#: SceneWidget.cpp:1092
+msgid "FPS: %1 frames / %2 [s] = %3"
+msgstr "フレームレート: %1 フレーム / %2 [秒] = %3 [fps]"
+
+#: SceneWidget.cpp:1783
+msgid "Global Position: ({0:.3f} {1:.3f} {2:.3f})"
+msgstr "グローバル座標位置 = ({0:.3f} {1:.3f} {2:.3f})"
+
+#: SceneWidget.cpp:1784
+msgid "Object: {0}, Global Position: ({1:.3f} {2:.3f} {3:.3f})"
+msgstr "オブジェクト: {0}, グローバル座標位置 = ({1:.3f} {2:.3f} {3:.3f})"
+
+#: SceneWidget.cpp:2298
+msgid "Edit Mode"
+msgstr "編集モード"
+
+#: SceneWidget.cpp:2339
+msgid "View Mode"
+msgstr "閲覧モード"
+
+#: SceneWidget.cpp:2374
+msgid "Background Color"
+msgstr "背景色"
+
+#: SceneWidget.cpp:2388
+msgid "Floor Grid Color"
+msgstr "床グリッド色"
+
+#: SceneWidget.cpp:2402
+msgid "Default Color"
+msgstr "デフォルト色"
+
+#: SceneWidget.cpp:3301
+msgid "Scene Config"
+msgstr "シーン設定"
+
+#: SceneWidget.cpp:3313
+msgid "Camera"
+msgstr "カメラ"
+
+#: SceneWidget.cpp:3315
+msgid "Field of view"
+msgstr "視野角"
+
+#: SceneWidget.cpp:3322
+msgid "Clipping depth"
+msgstr "クリッピング深度"
+
+#: SceneWidget.cpp:3324
+msgid "Near"
+msgstr "近隣"
+
+#: SceneWidget.cpp:3330
+msgid "Far"
+msgstr "遠方"
+
+#: SceneWidget.cpp:3340
+msgid "Restrict camera roll"
+msgstr "カメラロールを制限"
+
+#: SceneWidget.cpp:3344
+msgid "Vertical axis"
+msgstr "垂直軸"
+
+#: SceneWidget.cpp:3354
+msgid "Upside down"
+msgstr "上下反転"
+
+#: SceneWidget.cpp:3364
+msgid "Lighting"
+msgstr "ライティング"
+
+#: SceneWidget.cpp:3366
+msgid "Lighting mode"
+msgstr "ライティングモード"
+
+#: SceneWidget.cpp:3368
+msgid "Normal"
+msgstr " 標準"
+
+#: SceneWidget.cpp:3374
+msgid "Minimum"
+msgstr "最小限"
+
+#: SceneWidget.cpp:3379
+msgid "Solid color"
+msgstr "ソリッドカラー"
+
+#: SceneWidget.cpp:3397
+msgid "Smooth shading"
+msgstr "スムーズシェーディング"
+
+#: SceneWidget.cpp:3403
+msgid "Back face culling: "
+msgstr "裏面除去："
+
+#: SceneWidget.cpp:3408
+msgid "Enabled"
+msgstr "有効"
+
+#: SceneWidget.cpp:3409
+msgid "Disabled"
+msgstr "無効"
+
+#: SceneWidget.cpp:3410
+msgid "Forced"
+msgstr "強制"
+
+#: SceneWidget.cpp:3430
+msgid "Head light"
+msgstr "ヘッドライト"
+
+#: SceneWidget.cpp:3443
+msgid "Back lighting"
+msgstr "裏面照射"
+
+#: SceneWidget.cpp:3447
+msgid "World light"
+msgstr "ワールドライト"
+
+#: SceneWidget.cpp:3460
+msgid "Ambient"
+msgstr "環境光"
+
+#: SceneWidget.cpp:3469
+msgid "Additional lights"
+msgstr "追加のライト"
+
+#: SceneWidget.cpp:3478
+msgid "Texture"
+msgstr "テクスチャ"
+
+#: SceneWidget.cpp:3483
+msgid "Fog"
+msgstr "フォグ"
+
+#: SceneWidget.cpp:3493
+msgid "Shadow %1"
+msgstr "影 %1"
+
+#: SceneWidget.cpp:3497
+msgid "Light"
+msgstr "ライト"
+
+#: SceneWidget.cpp:3505
+msgid "Anti-aliasing of shadows"
+msgstr "影のアンチエイリアシング"
+
+#: SceneWidget.cpp:3512
+msgid "Background"
+msgstr "背景"
+
+#: SceneWidget.cpp:3515
+msgid "Background color"
+msgstr "背景色"
+
+#: SceneWidget.cpp:3519
+msgid "Coordinate axes"
+msgstr "座標軸"
+
+#: SceneWidget.cpp:3529
+msgid "XY Grid"
+msgstr "XYグリッド"
+
+#: SceneWidget.cpp:3531
+msgid "XZ Grid"
+msgstr "XZグリッド"
+
+#: SceneWidget.cpp:3532
+msgid "YZ Grid"
+msgstr "YZグリッド"
+
+#: SceneWidget.cpp:3539
+msgid "Span"
+msgstr "長さ"
+
+#: SceneWidget.cpp:3549
+msgid "Interval"
+msgstr "間隔"
+
+#: SceneWidget.cpp:3571
+msgid "Default color"
+msgstr "デフォルト色"
+
+#: SceneWidget.cpp:3575
+msgid "Default line width"
+msgstr "デフォルトの線幅"
+
+#: SceneWidget.cpp:3583
+msgid "Default point size"
+msgstr "デフォルト点サイズ"
+
+#: SceneWidget.cpp:3594
+msgid "Normal Visualization"
+msgstr "法線の表示"
+
+#: SceneWidget.cpp:3604
+msgid "Lightweight view change"
+msgstr "軽量視点変更"
+
+#: SceneWidget.cpp:3622
+msgid "FPS Test"
+msgstr "FPSテスト"
+
+#: SceneWidget.cpp:3629
+msgid "Show the image for picking (for debug)"
+msgstr "ピッキング用バッファの表示（デバッグ用）"
+
+#: ItemPropertyWidget.cpp:552
+msgid "Select File"
+msgstr "ファイルを選択"
+
+#: ItemPropertyWidget.cpp:559
+msgid "OK"
+msgstr "OK"
+
+#: ItemPropertyWidget.cpp:761
+msgid "Update"
+msgstr "更新"
+
+#: ItemPropertyWidget.cpp:764
+msgid "Reset Column Sizes"
+msgstr "コラムサイズのリセット"
 
 #: FileBar.cpp:32
 msgid "FileBar"
@@ -1712,178 +1862,264 @@ msgstr "ファイルバー"
 msgid "Save the project"
 msgstr "プロジェクトを保存"
 
-#: VirtualJoystickView.cpp:107
-msgid "Virtual Joystick"
-msgstr "仮想ジョイスティック"
+#: ProjectManager.cpp:199
+msgid "Open Project"
+msgstr "プロジェクトの読み込み"
 
-#: PathVariableEditor.cpp:60
-msgid "Edit Path Variables"
-msgstr "パス変数の設定"
+#: ProjectManager.cpp:201
+msgid "Save Project"
+msgstr "プロジェクトの保存"
 
-#: PathVariableEditor.cpp:70
-msgid "Path Variables"
-msgstr "パス変数"
+#: ProjectManager.cpp:203
+msgid "Save Project As"
+msgstr "名前を付けてプロジェクトを保存"
 
-#: PathVariableEditor.cpp:78 PathVariableEditor.cpp:88
-msgid "Variable"
-msgstr "変数"
+#: ProjectManager.cpp:208
+msgid "Perspective"
+msgstr "レイアウト"
 
-#: PathVariableEditor.cpp:79
-msgid "Path"
-msgstr "パス"
+#: ProjectManager.cpp:329
+msgid ""
+"The state of the \"{0}\" {1} was not completely restored.\n"
+"{2}"
+msgstr ""
+"\"{0}\" {1} の状態は完全には復帰できませんでした．\n"
+"{2}"
 
-#: PathVariableEditor.cpp:97
-msgid "&Apply"
-msgstr "適用(&A)"
+#: ProjectManager.cpp:370
+msgid "Loading project file \"{}\" ..."
+msgstr "プロジェクトファイル\"{}\"を読み込み中…"
 
-#: MultiSeqItemCreationPanel.cpp:35 AbstractSeqItem.cpp:62
-msgid "Time length"
-msgstr "時間長"
+#: ProjectManager.cpp:394
+msgid "Resource \"{0}\" is not found."
+msgstr "リソース \"{}\" がみつかりません．"
 
-#: MultiSeqItemCreationPanel.cpp:42 AbstractSeqItem.cpp:44
-#: MovieRecorder.cpp:386
-msgid "Frame rate"
-msgstr "フレームレート"
+#: ProjectManager.cpp:399
+msgid "The project file is empty."
+msgstr "プロジェクトファイルは空です．"
 
-#: AbstractSeqItem.cpp:46
-msgid "Offset time"
-msgstr "オフセット時間"
+#: ProjectManager.cpp:522
+msgid "{0} / {1} item(s) have been loaded."
+msgstr "{0} / {1} のアイテムが読みこまれました．"
 
-#: AbstractSeqItem.cpp:52
-msgid "Number of frames"
-msgstr "フレーム数"
+#: ProjectManager.cpp:528
+msgid "{0} item(s) were not loaded."
+msgstr "{0}個のアイテムが正常に読み込まれませんでした．"
 
-#: AbstractSeqItem.cpp:72
-msgid "Time step"
-msgstr "タイムステップ"
+#: ProjectManager.cpp:530
+msgid "{0} item(s) were not loaded in the builtin project \"{1}\"."
+msgstr ""
+"ビルトインプロジェクト \"{1}\" の{}個のアイテムが正常に読み込まれませんでし"
+"た．"
 
-#: AbstractSeqItem.cpp:138
-msgid "Num parts"
-msgstr "パート数"
+#: ProjectManager.cpp:556
+msgid "Project \"{}\" has been completely loaded."
+msgstr "プロジェクト \"{}\" を完全に読み込みました．"
 
-#: LocationView.cpp:104
-msgid "Location"
-msgstr "配置"
+#: ProjectManager.cpp:558
+msgid "Project \"{}\" has been partially loaded."
+msgstr "プロジェクト \"{}\" を部分的に読み込みました．"
 
-#: LocationView.cpp:127
-msgid "Lock"
-msgstr "ロック"
+#: ProjectManager.cpp:569
+msgid "Loading project \"{}\" failed. Any valid objects were not loaded."
+msgstr ""
+"プロジェクト\"{}\"の読み込みに失敗しました．いかなるオブジェクトもロードされ"
+"ていません．"
 
-#: LocationView.cpp:132
-msgid "Coord :"
-msgstr "座標系："
+#: ProjectManager.cpp:626
+msgid "Can't open file \"{}\" for writing.\n"
+msgstr "\"{}\"は書き込み用ファイルとして開けません．\n"
 
-#: LocationView.cpp:285
-msgid "World"
-msgstr "ワールド"
+#: ProjectManager.cpp:641
+msgid "Saving sub project {0} as \"{1}\" ..."
+msgstr "サブプロジェクト \"{0}\" を \"{1}\" に保存中…"
 
-#: LocationView.cpp:295
-msgid "Offset ( {} )"
-msgstr "オフセット（ {} ）"
+#: ProjectManager.cpp:643
+msgid "Saving the project as \"{}\" ..."
+msgstr "プロジェクトを \"{}\" に保存中…"
 
-#: LocationView.cpp:297
-msgid "Parent ( {} )"
-msgstr "親（ {} ）"
+#: ProjectManager.cpp:701
+msgid "Saving the project file has been finished."
+msgstr "プロジェクトファイルの保存が完了しました."
 
-#: LocationView.cpp:306
-msgid "Parent"
-msgstr "親"
+#: ProjectManager.cpp:706
+msgid "Saving the project file failed."
+msgstr "プロジェクトファイルの保存に失敗しました．"
 
-#: SceneBar.cpp:100
-msgid "Put scene statistics"
-msgstr "シーン統計情報の表示"
+#: ProjectManager.cpp:763
+msgid ""
+"A project item exists. Do you want to save it as a project file before "
+"loading a new project?"
+msgstr ""
+"プロジェクトアイテムがあります．新しいプロジェクトを読み込む前にこのアイテム"
+"を保存しますか？"
 
-#: SceneBar.cpp:107
-msgid "SceneBar"
-msgstr "シーンバー"
+#: ProjectManager.cpp:766
+msgid ""
+"Project items exist. Do you want to save them as a project file before "
+"loading a new project?"
+msgstr ""
+"プロジェクトアイテムあります．新しいプロジェクトを読み込む前にこのアイテムを"
+"保存しますか？"
 
-#: SceneBar.cpp:132
-msgid "Switch to the edit mode"
-msgstr "編集モードへの切り替え"
+#: ProjectManager.cpp:772
+msgid ""
+"Project \"%1\" exists. Do you want to save it before loading a new project?"
+msgstr ""
+"既存のプロジェクト \"%1\" があります．新しいプロジェクトを読み込む前にこのプ"
+"ロジェクトを保存しますか？"
 
-#: SceneBar.cpp:141
-msgid "First-person viewpoint control mode"
-msgstr "一人称視点制御"
+#: ProjectManager.cpp:786
+msgid "Open a Choreonoid project file"
+msgstr "Choreonoidプロジェクトファイルの読み込み"
 
-#: SceneBar.cpp:146
-msgid "Select a camera"
-msgstr "カメラの選択"
+#: ProjectManager.cpp:793 ProjectManager.cpp:818
+msgid "Project files (*.cnoid)"
+msgstr "プロジェクトファイル (*.cnoid)"
 
-#: SceneBar.cpp:153
-msgid "Move the camera to look at the objects"
-msgstr "全ての物体が見えるように視点を移動"
+#: ProjectManager.cpp:809
+msgid "Save a choreonoid project file"
+msgstr "Choreonoid プロジェクトファイルの保存"
 
-#: SceneBar.cpp:162
-msgid "Vertex rendering"
-msgstr "頂点描画"
+#: ProjectManager.cpp:863 ItemFileDialog.cpp:437
+msgid "%1 already exists. Do you want to replace it? "
+msgstr "既存のファイル %1 を上書きしてもよいですか？"
 
-#: SceneBar.cpp:169
-msgid "Wireframe rendering"
-msgstr "ワイヤフレーム描画"
+#: MessageView.cpp:236 MessageView.cpp:1117
+msgid "Message"
+msgstr "メッセージ"
 
-#: SceneBar.cpp:173
-msgid "Solid wireframe rendering"
-msgstr "ワイヤフレーム+ポリゴン描画"
+#: MessageView.cpp:526
+msgid "Error: "
+msgstr "エラー："
 
-#: SceneBar.cpp:178
-msgid "Polygon rendering"
-msgstr "ポリゴン描画"
+#: MessageView.cpp:528
+msgid "Warning: "
+msgstr "警告："
 
-#: SceneBar.cpp:189
-msgid "Show visual models"
-msgstr "表示用モデルの表示"
+#: Item.cpp:1587
+msgid "Display name"
+msgstr "表示名"
 
-#: SceneBar.cpp:195
-msgid "Flip active model types"
-msgstr "表示するモデルタイプの切り替え"
+#: Item.cpp:1592
+msgid "Class"
+msgstr "クラス"
 
-#: SceneBar.cpp:200
-msgid "Show the collision detection models"
-msgstr "干渉チェック用モデルを表示"
+#: Item.cpp:1600
+msgid "Num children"
+msgstr "子アイテムの数"
 
-#: SceneBar.cpp:205
-msgid "Toggle the collision line visibility"
-msgstr "干渉線の表示"
+#: Item.cpp:1601
+msgid "Sub item?"
+msgstr "サブアイテム？"
 
-#: SceneBar.cpp:548
-msgid "Scene statistics:"
-msgstr "シーン統計情報:"
+#: Item.cpp:1602
+msgid "Temporal"
+msgstr "一時的"
 
-#: SceneBar.cpp:559
-msgid " Scene \"{}\":"
-msgstr " シーン \"{}\":"
+#: Item.cpp:1603
+msgid "Refs"
+msgstr "参照数"
 
-#: SceneBar.cpp:561
-msgid "  Vertices: {}\n"
-msgstr "  頂点: {}\n"
+#: GraphBar.cpp:107
+msgid "GraphBar"
+msgstr "グラフバー"
 
-#: SceneBar.cpp:562
-msgid "  Normals: {}\n"
-msgstr "  法線: {}\n"
+#: GraphBar.cpp:118
+msgid "Plot trajectories of the target data on the graph view"
+msgstr "対象データの軌道をグラフビューにプロット"
 
-#: SceneBar.cpp:563
-msgid "  Triangles: {}"
-msgstr "  トライアングル: {}"
+#: GraphBar.cpp:125
+msgid "Plot velocity trajectories"
+msgstr "速度軌道のプロット"
 
-#: SceneBar.cpp:573
-msgid "No valid scene item is selected."
-msgstr "有効なシーンアイテムが選択されていません．"
+#: GraphBar.cpp:131
+msgid "Plot acceleration trajectories"
+msgstr "加速度軌道のプロット"
 
-#: SceneBar.cpp:575
-msgid "The total number of {} scene items:\n"
-msgstr "{}シーンアイテムの総数: \n"
+#: GraphBar.cpp:211
+msgid "Graph Config"
+msgstr "グラフ設定"
 
-#: SceneBar.cpp:576
-msgid " Vertices: {}\n"
-msgstr " 頂点: {}\n"
+#: GraphBar.cpp:217
+msgid "Line width"
+msgstr "線幅"
 
-#: SceneBar.cpp:577
-msgid " Normals: {}\n"
-msgstr " 法線: {}\n"
+#: GraphBar.cpp:229
+msgid "y-range, 10^"
+msgstr "y軸範囲, 10^"
 
-#: SceneBar.cpp:578
-msgid " Triangles: {}"
-msgstr " トライアングル: {}"
+#: GraphBar.cpp:240
+msgid "Show limit values"
+msgstr "リミット値の表示"
+
+#: GraphBar.cpp:249
+msgid "Show grid"
+msgstr "グリッドの表示"
+
+#: GraphBar.cpp:264
+msgid "Show rulers"
+msgstr "定規の表示"
+
+#: GraphBar.cpp:274
+msgid "Edit mode"
+msgstr "編集モード"
+
+#: GraphBar.cpp:283
+msgid "Free line"
+msgstr "フリーライン編集モード"
+
+#: GraphBar.cpp:290
+msgid "Line edit"
+msgstr "ライン編集モード"
+
+#: GraphBar.cpp:299
+msgid "Control points"
+msgstr "制御点の表示"
+
+#: GraphBar.cpp:305
+msgid "Step"
+msgstr "ステップ"
+
+#: GraphBar.cpp:324
+msgid "Time bar sync"
+msgstr "タイムバーと同期"
+
+#: GraphBar.cpp:331
+msgid "off"
+msgstr "オフ"
+
+#: GraphBar.cpp:332
+msgid "cont."
+msgstr "連続"
+
+#: GraphBar.cpp:333
+msgid "page"
+msgstr "ページ"
+
+#: MultiValueSeqGraphView.cpp:16
+msgid "Multi Value Seq"
+msgstr ""
+
+#: MultiSE3SeqItem.cpp:15
+msgid "MultiSE3SeqItem"
+msgstr ""
+
+#: CoordinateFrameListView.cpp:524
+msgid "Coordinate Frames"
+msgstr "座標フレーム"
+
+#: CoordinateFrameListView.cpp:550 CoordinateFrameListView.cpp:755
+msgid "Add"
+msgstr "追加"
+
+#: CoordinateFrameListView.cpp:636
+msgid "Support offset frames"
+msgstr "オフセットフレームのサポート"
+
+#: CoordinateFrameListView.cpp:759 PositionTagGroupItem.cpp:1399
+msgid "Remove"
+msgstr "削除"
 
 #: TaskView.cpp:211
 msgid "Task"
@@ -1951,11 +2187,11 @@ msgid ""
 "finish."
 msgstr "タスク \"{}\" は現在コマンドの終了待ちを行っているため更新できません．"
 
-#: TaskView.cpp:550
+#: TaskView.cpp:552
 msgid "Task \"{}\" has been updated with the new one."
 msgstr "タスク \"{}\" が更新されました。"
 
-#: TaskView.cpp:1261
+#: TaskView.cpp:1262
 msgid "Next task \"{}\" is not found."
 msgstr "次のタスク \"{}\" がみつかりません．"
 
@@ -1967,210 +2203,150 @@ msgstr "リトライ"
 msgid "Vertical Layout"
 msgstr "縦配置"
 
-#: LightingItem.cpp:83
-msgid "LightingItem"
-msgstr "ライティングアイテム"
+#: OptionManager.cpp:90
+msgid "Input file \"{}\" was not processed."
+msgstr "入力ファイル \"{}\" は処理されませんでした．"
 
-#: LightingItem.cpp:123
-msgid "Directional light"
-msgstr "ディレクショナルライト"
-
-#: LightingItem.cpp:124
-msgid "Point light"
-msgstr "ポイントライト"
-
-#: LightingItem.cpp:125
-msgid "Spot light"
-msgstr "スポットライト"
-
-#: LightingItem.cpp:483
-msgid "Light Type"
-msgstr "ライトの種類"
-
-#: LightingItem.cpp:490
-msgid "Direction"
-msgstr "方向"
-
-#: LightingItem.cpp:494
-msgid "ON"
-msgstr "オン"
-
-#: LightingItem.cpp:500
-msgid "AmbientIntensity"
-msgstr "周囲の照度"
-
-#: LightingItem.cpp:504
-msgid "ConstantAttenuation"
-msgstr "一定減衰率"
-
-#: LightingItem.cpp:506
-msgid "LinearAttenuation"
-msgstr "線形減衰率"
-
-#: LightingItem.cpp:508
-msgid "QuadraticAttenuation"
-msgstr "2次減衰率"
-
-#: LightingItem.cpp:512
-msgid "BeamWidth"
-msgstr "最大輝度照射角度"
-
-#: LightingItem.cpp:514
-msgid "CutOffAngle"
-msgstr "遮断角度"
-
-#: LightingItem.cpp:516
-msgid "CutOffExponent"
-msgstr "強度分布"
-
-#: LightingItem.cpp:520
-msgid "Show Marker"
-msgstr "マーカ表示"
-
-#: MovieRecorder.cpp:270 MovieRecorder.cpp:328
-msgid "Movie Recorder"
-msgstr "動画レコーダ"
-
-#: MovieRecorder.cpp:293
-msgid "Offline"
-msgstr "オフライン"
-
-#: MovieRecorder.cpp:294
-msgid "Online"
-msgstr "オンライン"
-
-#: MovieRecorder.cpp:295
-msgid "Direct"
-msgstr "ダイレクト"
-
-#: MovieRecorder.cpp:310
-msgid "Recording of {0} has been started with the {1} mode."
-msgstr "{1}モードによる{0}の録画を開始しました．"
-
-#: MovieRecorder.cpp:334
-msgid "Target view:"
-msgstr "対象ビュー"
-
-#: MovieRecorder.cpp:340
-msgid "Show the marker"
-msgstr "マーカ表示"
-
-#: MovieRecorder.cpp:349
-msgid "Recording mode: "
-msgstr "録画モード"
-
-#: MovieRecorder.cpp:379
-msgid "Basename"
-msgstr "ベースファイル名"
-
-#: MovieRecorder.cpp:392
-msgid "[fps]"
-msgstr ""
-
-#: MovieRecorder.cpp:397
-msgid "Start time"
-msgstr "開始時刻"
-
-#: MovieRecorder.cpp:403 MovieRecorder.cpp:412
-msgid "[s]"
-msgstr "[秒]"
-
-#: MovieRecorder.cpp:406
-msgid "Finish time"
-msgstr "終了時刻"
-
-#: MovieRecorder.cpp:417
-msgid "Image size"
-msgstr "画像サイズ"
-
-#: MovieRecorder.cpp:433
-msgid "Capture the mouse cursor"
-msgstr "マウスカーソルもキャプチャする"
-
-#: MovieRecorder.cpp:442
-msgid "&Record"
-msgstr "録画(&R)"
-
-#: MovieRecorder.cpp:453
-msgid "MovieRecorderBar"
-msgstr "動画レコーダバー"
-
-#: MovieRecorder.cpp:457
-msgid "Toggle Recording"
-msgstr "録画"
-
-#: MovieRecorder.cpp:461
-msgid "Toggle Target View Marker"
-msgstr "対象ビューのマーカを表示"
-
-#: MovieRecorder.cpp:648
-msgid "Select Directory"
-msgstr "ディレクトリの選択"
-
-#: MovieRecorder.cpp:710
-msgid "Target view is not specified."
-msgstr "対象のビューが指定されていません．"
-
-#: MovieRecorder.cpp:718
-msgid "Please set a directory to output image files."
-msgstr "画像ファイルを出力するディレクトリを指定してください．"
-
-#: MovieRecorder.cpp:724
-msgid "{} is not a directory."
-msgstr "{}はディレクトリではありません．"
-
-#: MovieRecorder.cpp:800
-msgid "The online mode recording for {} is ready."
-msgstr "オンラインモードによる{}の録画を待機しています．"
-
-#: MovieRecorder.cpp:993
-msgid "Saving an image to \"{}\" failed."
-msgstr "画像の\"{}\"への保存ができませんでした．"
-
-#: MovieRecorder.cpp:1027
-msgid "Outputting sequential image files..."
-msgstr "連番画像ファイルを出力中…"
-
-#: MovieRecorder.cpp:1027
-msgid "Abort Output"
-msgstr "出力中止"
-
-#: MovieRecorder.cpp:1028
-msgid "Movie Recorder's Output Status"
-msgstr "動画レコーダの出力状況"
-
-#: MovieRecorder.cpp:1057
-msgid "Recording of {} has been finished."
-msgstr "{}の録画が終了しました．"
-
-#: MovieRecorder.cpp:1059
-msgid "Recording of {} has been stopped."
-msgstr "{}の録画を停止しました．"
-
-#: AppConfig.cpp:81
+#: AppConfig.cpp:82
 msgid "Invalid file format."
 msgstr "無効なファイルフォーマット"
 
-#: AppConfig.cpp:97
+#: AppConfig.cpp:94
 msgid ""
 "Application config file \"{0}\" cannot be loaded.\n"
-"{1})."
-msgstr ""
-"アプリケーション設定ファイル \"{0}\" を読み込むことができません．\n"
 "{1}"
-
-#: CoordinateFrameListItem.cpp:91
-msgid "CoordinateFrameListItem"
-msgstr "座標フレームリストアイテム"
-
-#: CoordinateFrameListItem.cpp:335
-msgid ""
-"\"{0}\" cannot be added to \"{1}\" because the item of ID {2} already exists "
-"in it. "
 msgstr ""
-"アイテム \"{0}\" のID{2}は既に \"{1}\" に存在するためアイテムを追加できませ"
-"ん．"
+"アプリケーション設定ファイル \"{0}\" を読み込むことができません．\n{1}"
 
-#: CoordinateFrameListItem.cpp:689
-msgid "Num coordinate frames"
-msgstr "座標フレーム数"
+#: ItemTreeWidget.cpp:1260
+msgid "The copied items cannot be pasted to \"{0}\"."
+msgstr "コピーされたアイテムを\"{0}\"にペーストできませんでした．"
+
+#: PositionTagGroupItem.cpp:266
+msgid "PositionTagGroupItem"
+msgstr "ポジションタググループアイテム"
+
+#: PositionTagGroupItem.cpp:857
+msgid "Number of tags"
+msgstr "タグ数"
+
+#: PositionTagGroupItem.cpp:858
+msgid "Offset translation"
+msgstr "並進オフセット"
+
+#: PositionTagGroupItem.cpp:860
+msgid "Offset rotation (RPY)"
+msgstr "姿勢オフセット(RPY)"
+
+#: PositionTagGroupItem.cpp:861
+msgid "Origin marker"
+msgstr "原点マーカ"
+
+#: PositionTagGroupItem.cpp:863
+msgid "Tag marker size"
+msgstr "マーカサイズ"
+
+#: PositionTagGroupItem.cpp:865
+msgid "Show edges"
+msgstr "エッジ表示"
+
+#: PositionTagGroupItem.cpp:867
+msgid "Transparency"
+msgstr "透明度"
+
+#: PositionTagGroupItem.cpp:1393
+msgid "Move"
+msgstr "移動"
+
+#: PositionTagGroupItem.cpp:1427 PositionTagGroupItem.cpp:1520
+msgid "{0}: Origin"
+msgstr "{0}: 原点"
+
+#: PositionTagGroupItem.cpp:1430
+msgid "{0}: Tag {1}"
+msgstr "{0}: タグ {1}"
+
+#: PositionTagGroupItem.cpp:1573
+msgid "Change the origin offset of a position tag group"
+msgstr "ポジションタググループの原点オフセットを変更"
+
+#: PositionTagGroupItem.cpp:1643
+msgid "Add a position tag"
+msgstr "ポジションタグを追加"
+
+#: PositionTagGroupItem.cpp:1645
+msgid "Update a position tag"
+msgstr "ポジションタグを更新"
+
+#: PositionTagGroupItem.cpp:1647
+msgid "Remove a position tag"
+msgstr "ポジションタグを削除"
+
+#: PositionTagGroupItem.cpp:1715
+msgid "Tag Group Conversion"
+msgstr "タググループ変換"
+
+#: PositionTagGroupItem.cpp:1724
+msgid ""
+"Which type of positions do you want to keep in the coordinate system change?"
+msgstr "座標系の変更においてどちらのタイプの位置を保持しますか？"
+
+#: PositionTagGroupItem.cpp:1728
+msgid "Global positions"
+msgstr "グローバル位置"
+
+#: PositionTagGroupItem.cpp:1731
+msgid "Clear the origin offset"
+msgstr "原点オフセットをクリア"
+
+#: PositionTagGroupItem.cpp:1737
+msgid "Local positions"
+msgstr "ローカル位置"
+
+#: PositionTagGroupItem.cpp:1755
+msgid ""
+"The parent coordinate system of \"%1\" is changed to the coordinate system "
+"of \"%2\"."
+msgstr "\"%1\" の親座標系は \"%2\" の座標系に変更されます."
+
+#: PositionTagGroupItem.cpp:1759
+msgid ""
+"The parent coordinate system of \"%1\" is changed to the global coordinate "
+"system."
+msgstr "\"%1\" の親座標系はグローバル座標系に変更されます."
+
+#: ItemFileDialog.cpp:139
+msgid "Load {0}"
+msgstr "{0}の読み込み"
+
+#: ItemFileDialog.cpp:141
+msgid "Import {0}"
+msgstr "{0}のインポート"
+
+#: ItemFileDialog.cpp:148
+msgid "Load"
+msgstr "読み込み"
+
+#: ItemFileDialog.cpp:150
+msgid "Import"
+msgstr "インポート"
+
+#: ItemFileDialog.cpp:173
+msgid "The singleton instance of {} has already been loaded."
+msgstr "{}のシングルトンインスタンスは既に読み込まれています．"
+
+#: ItemFileDialog.cpp:223
+msgid "Saving {0} to a file is not supported"
+msgstr "{0}のファイル保存はサポートされていません"
+
+#: ItemFileDialog.cpp:225
+msgid "Exporting {0} to a file is not supported"
+msgstr "{0}のファイルエクスポートはサポートされていません"
+
+#: ItemFileDialog.cpp:237
+msgid "Save {}"
+msgstr "{} の保存"
+
+#: ItemFileDialog.cpp:239
+msgid "Export {}"
+msgstr "{} のエクスポート"

@@ -11,13 +11,15 @@
 
 namespace cnoid {
 
+class Mapping;
+
 class CNOID_EXPORT PointLight : public Light
 {
 public:
     PointLight();
     PointLight(const PointLight& org, bool copyStateOnly = false);
 
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const PointLight& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -36,6 +38,9 @@ public:
 
     float quadraticAttenuation() const { return quadraticAttenuation_; }
     void setQuadraticAttenuation(float a) { quadraticAttenuation_ = a; }
+
+    bool readSpecifications(const Mapping* info);
+    bool writeSpecifications(Mapping* info) const;
 
 protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;

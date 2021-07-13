@@ -4,7 +4,7 @@
 */
 
 #include "BodyLoader.h"
-#include "YAMLBodyLoader.h"
+#include "StdBodyLoader.h"
 #include "VRMLBodyLoader.h"
 #include "Body.h"
 #include <cnoid/SceneLoader>
@@ -110,30 +110,46 @@ struct FactoryRegistration
     FactoryRegistration(){
         lock_guard<mutex> lock(loaderMapMutex);
 
-        unifiedExtensionMap["body"] = "yaml";
-        unifiedExtensionMap["yaml"] = "yaml";
-        unifiedExtensionMap["yml"] = "yaml";
+        unifiedExtensionMap["body"] = "body";
+        unifiedExtensionMap["yaml"] = "body";
+        unifiedExtensionMap["yml"] = "body";
         unifiedExtensionMap["wrl"] = "wrl";
 
-        loaderFactoryMap["yaml"] = [](){ return make_shared<YAMLBodyLoader>(); };
+        loaderFactoryMap["body"] = [](){ return make_shared<StdBodyLoader>(); };
         loaderFactoryMap["wrl"] = [](){ return make_shared<VRMLBodyLoader>(); };
     }
 } factoryRegistration;
     
 }
 
-bool BodyLoader::registerLoader(const std::string& extension, std::function<AbstractBodyLoaderPtr()> factory)
+void BodyLoader::registerLoader(const std::string& extension, std::function<AbstractBodyLoaderPtr()> factory)
 {
     lock_guard<mutex> lock(loaderMapMutex);
     unifiedExtensionMap[extension] = extension;
     loaderFactoryMap[extension] = factory;
-    return  true;
 }
-   
+
+
+void BodyLoader::registerLoader
+(std::initializer_list<const char*> extensions, std::function<AbstractBodyLoaderPtr()> factory)
+{
+    auto iter = extensions.begin();
+    if(iter != extensions.end()){
+        string ext(*iter++);
+        registerLoader(ext, factory);
+        if(iter != extensions.end()){
+            lock_guard<mutex> lock(loaderMapMutex);
+            while(iter != extensions.end()){
+                unifiedExtensionMap[*iter++] = ext;
+            }
+        }
+    }
+}
+
 
 namespace cnoid {
 
-class BodyLoaderImpl
+class BodyLoader::Impl
 {
 public:
     ostream* os;
@@ -147,8 +163,8 @@ public:
     BodyLoader::LengthUnit lengthUnitHint;
     BodyLoader::UpperAxis upperAxisHint;
 
-    BodyLoaderImpl();
-    ~BodyLoaderImpl();
+    Impl();
+    ~Impl();
     bool load(Body* body, const std::string& filename);
     void mergeExtraLinkInfos(Body* body, Mapping* info);
 };
@@ -158,11 +174,11 @@ public:
 
 BodyLoader::BodyLoader()
 {
-    impl = new BodyLoaderImpl();
+    impl = new Impl;
 }
 
 
-BodyLoaderImpl::BodyLoaderImpl()
+BodyLoader::Impl::Impl()
 {
     os = &nullout();
     isVerbose = false;
@@ -178,7 +194,7 @@ BodyLoader::~BodyLoader()
 }
 
 
-BodyLoaderImpl::~BodyLoaderImpl()
+BodyLoader::Impl::~Impl()
 {
 
 }
@@ -235,12 +251,12 @@ Body* BodyLoader::load(const std::string& filename)
         return body;
     } else {
         delete body;
-        return 0;
+        return nullptr;
     }
 }
 
 
-bool BodyLoaderImpl::load(Body* body, const std::string& filename)
+bool BodyLoader::Impl::load(Body* body, const std::string& filename)
 {
     filesystem::path path(fromUTF8(filename));
     actualLoader = nullptr;

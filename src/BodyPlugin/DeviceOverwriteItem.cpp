@@ -27,11 +27,10 @@ public:
     DeviceOverwriteItem::Impl* impl;
 
     DeviceLocation(DeviceOverwriteItem::Impl* impl);
-    virtual int getType() const override;
-    virtual Position getLocation() const override;
-    virtual void setLocation(const Position& T) override;
+    virtual Isometry3 getLocation() const override;
+    virtual bool setLocation(const Isometry3& T) override;
     virtual Item* getCorrespondingItem() override;
-    virtual LocationProxyPtr getParentLocationProxy() override;
+    virtual LocationProxyPtr getParentLocationProxy() const override;
     virtual SignalProxy<void()> sigLocationChanged() override;
 };
 
@@ -151,7 +150,7 @@ DeviceOverwriteMediator::DeviceInfo DeviceOverwriteMediator::findOrCreateDevice
         deviceFound = false;
         device = restoreDevice(body);
         if(!doCreateOverwriteItem){
-            bodyItem->body()->addDevice(device);
+            bodyItem->body()->addDevice(device, device->link());
         }
     }
     if(overwriteItem || !doCreateOverwriteItem){
@@ -246,7 +245,8 @@ bool DeviceOverwriteItem::setName(const std::string& name)
     if(impl->device){
         impl->device->setName(name);
     }
-    return BodyElementOverwriteItem::setName(name);
+    Item::setName(name);
+    return true;
 }
 
 
@@ -410,36 +410,34 @@ LocationProxyPtr DeviceOverwriteItem::getLocationProxy()
 }
 
 
+namespace {
+
 DeviceLocation::DeviceLocation(DeviceOverwriteItem::Impl* impl)
-    : impl(impl)
+    : LocationProxy(OffsetLocation),
+      impl(impl)
 {
     setEditable(false);
     sigAttributeChanged().connect([impl](){ impl->updateDeviceOffsetMarker(); });
 }
     
 
-int DeviceLocation::getType() const
-{
-    return OffsetLocation;
-}
-
-
-Position DeviceLocation::getLocation() const
+Isometry3 DeviceLocation::getLocation() const
 {
     if(impl->device){
         return impl->device->localPosition();
     }
-    return Position::Identity();
+    return Isometry3::Identity();
 }
 
 
-void DeviceLocation::setLocation(const Position& T)
+bool DeviceLocation::setLocation(const Isometry3& T)
 {
     if(impl->device){
         impl->device->setLocalPosition(T);
     }
     //! \todo Define the signal on the change of the device specification and use it here
     impl->device->notifyStateChange();
+    return true;
 }
 
 
@@ -449,7 +447,7 @@ Item* DeviceLocation::getCorrespondingItem()
 }
 
 
-LocationProxyPtr DeviceLocation::getParentLocationProxy()
+LocationProxyPtr DeviceLocation::getParentLocationProxy() const
 {
     if(!impl->linkLocation){
         if(impl->device){
@@ -472,6 +470,8 @@ SignalProxy<void()> DeviceLocation::sigLocationChanged()
     return dummySignal;
 }
 
+}
+
 
 SgNode* DeviceOverwriteItem::getScene()
 {
@@ -490,7 +490,7 @@ void DeviceOverwriteItem::Impl::updateDeviceOffsetMarker()
             PositionDragger::AllAxes, PositionDragger::PositiveOnlyHandle);
         deviceOffsetMarker->setOverlayMode(true);
         deviceOffsetMarker->setDragEnabled(true);
-        deviceOffsetMarker->setFixedPixelSizeMode(true, 92.0);
+        deviceOffsetMarker->setPixelSize(96, 3);
         deviceOffsetMarker->setDisplayMode(PositionDragger::DisplayInEditMode);
 
         deviceOffsetMarker->sigPositionDragged().connect(
@@ -552,7 +552,7 @@ bool DeviceOverwriteItem::Impl::store(Archive& archive)
                         archive.write("original_device_name", originalDeviceName, DOUBLE_QUOTED);
                     }
                 }
-                archive.setDoubleFormat("%.9g");
+                archive.setFloatingNumberFormat("%.9g");
                 auto T = device->T_local();
                 AngleAxis aa(T.linear());
                 if(aa.angle() != 0.0){

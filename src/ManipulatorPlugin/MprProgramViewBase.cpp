@@ -11,7 +11,7 @@
 #include <cnoid/MessageView>
 #include <cnoid/TimeBar>
 #include <cnoid/BodyItem>
-#include <cnoid/ReferencedObjectSeqItem>
+#include <cnoid/ControllerLogItem>
 #include <cnoid/StringListComboBox>
 #include <cnoid/Buttons>
 #include <cnoid/ConnectionSet>
@@ -45,7 +45,7 @@ public:
     MprProgramViewBase::Impl* viewImpl;
     MprProgramViewBase::StatementDelegate* delegate;
 
-    StatementItem(MprStatement* statement, MprProgramViewBase::Impl* viewImpl);
+    StatementItem(MprStatement* statement, MprProgram* program, MprProgramViewBase::Impl* viewImpl);
     ~StatementItem();
     virtual QVariant data(int column, int role) const override;
     virtual void setData(int column, int role, const QVariant& value) override;
@@ -125,20 +125,49 @@ class MprProgramViewBase::Impl : public TreeWidget
 public:
     MprProgramViewBase* self;
     TargetItemPicker<MprProgramItemBase> targetItemPicker;
-    MprProgramItemBasePtr programItem;
+    MprProgramItemBasePtr currentProgramItem;
     shared_ptr<const string> logTopLevelProgramName;
     weak_ptr<ReferencedObjectSeq> invalidLogSeq;
     unordered_map<MprStatementPtr, StatementItem*> statementItemMap;
     MprDummyStatementPtr dummyStatement;
     int statementItemOperationCallCounter;
-    Connection currentItemChangeConnection;
+    bool isOnTimeChanged;
+    ScopedConnection timeBarConnection;
     ScopedConnectionSet programConnections;
+
+    std::vector<MprStatementPtr> selectedStatements;
+    Signal<void(std::vector<MprStatementPtr>& statements)> sigSelectedStatementsChanged;
+
+    // The following "current statement" is not necessarily same as the current item of the tree widget.
+    // For example, when multiple statements are selected and one of them is unselected with ctrl + left click,
+    // the unselected item will be the current item of the tree widget, which is not an intuitive behavior.
+    // The following current statement corresponds to the last and still selected item in this case.
+    // It is always one of the selected items.
     MprStatementPtr currentStatement;
     Signal<void(MprStatement* statement)> sigCurrentStatementChanged;
-    MprStatementPtr prevCurrentStatement;
+
+    // The following "active statement" corresponds to the current item of the tree widget.
+    // The last clicked item becomes the active statement.
+    MprStatementPtr prevActiveStatement;
+    
     vector<MprStatementPtr> statementsToPaste;
     weak_ref_ptr<MprStatement> weak_errorStatement;
     BodySyncMode bodySyncMode;
+
+    bool isJustAfterDoubleClicked;
+
+    /*
+    struct ExpansionState {
+        ScopedConnection statementConnection;
+        bool expanded;
+    };
+    */
+    typedef map<MprStructuredStatementPtr, bool> ExpansionStateMap;
+    struct ProgramState {
+        ScopedConnectionSet programConnections;
+        ExpansionStateMap expansionStateMap;
+    };
+    map<MprProgramItemBasePtr, ProgramState> programStateMap;
     
     QLabel programNameLabel;
     QHBoxLayout buttonBox[3];
@@ -157,18 +186,23 @@ public:
     ScopedCounter scopedCounterOfStatementItemOperationCall();
     bool isDoingStatementItemOperation() const;
     void setProgramItem(MprProgramItemBase* item);
-    void updateStatementTree();
-    void addProgramStatementsToTree(MprProgram* program, QTreeWidgetItem* parentItem);
-    void onCurrentTreeWidgetItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
-    void setCurrentStatement(MprStatement* statement, bool doSetCurrentItem, bool doActivate);
+    void storeExpansionStates(ExpansionStateMap& expansionStateMap);
+    void storeExpansionStatesIter(MprProgram* program, ExpansionStateMap& expansionStateMap);
+    void clearStatementTree();
+    void addStatementsToTree(
+        MprProgram* program, QTreeWidgetItem* parentItem, MprStructuredStatement* parentStatement,
+        ExpansionStateMap* expansionStateMap);
+    void setCurrentStatement(MprStatement* statement);
     void setErrorStatement(MprStatement* statement);
+    void onItemSelectionChanged();
+    void onCurrentTreeWidgetItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
     void onTreeWidgetItemClicked(QTreeWidgetItem* item, int /* column */);
     void onTreeWidgetItemDoubleClicked(QTreeWidgetItem* item, int /* column */);
     MprStatement* findStatementAtHierachicalPosition(const vector<int>& position);
     MprStatement* findStatementAtHierachicalPositionIter(
         const vector<int>& position, MprProgram* program, int level);
     bool findControllerItemAndLogItem(
-        MprControllerItemBase*& controllerItem, ReferencedObjectSeqItem*& logItem);
+        MprControllerItemBase*& controllerItem, ControllerLogItem*& logItem);
     shared_ptr<ReferencedObjectSeq> findLogSeq();
     bool onTimeChanged(double time);
     bool seekToLogPosition(MprControllerItemBase* controllerItem, MprControllerLog* log);
@@ -205,7 +239,9 @@ public:
 }
 
 
-StatementItem::StatementItem(MprStatement* statement_, MprProgramViewBase::Impl* viewImpl)
+namespace {
+
+StatementItem::StatementItem(MprStatement* statement_, MprProgram* program, MprProgramViewBase::Impl* viewImpl)
     : statement_(statement_),
       viewImpl(viewImpl)
 {
@@ -213,8 +249,13 @@ StatementItem::StatementItem(MprStatement* statement_, MprProgramViewBase::Impl*
         viewImpl->statementItemMap[statement_] = this;
     }
     delegate = viewImpl->findStatementDelegate(statement_);
+    delegate->activateStatement(statement_);
     
-    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsEditable;
+    Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+
+    if(program && program->isEditingEnabled()){
+        flags |= Qt::ItemIsEditable | Qt::ItemIsDragEnabled;
+    }
     if(statement<MprStructuredStatement>()){
         flags |= Qt::ItemIsDropEnabled;
     }
@@ -272,8 +313,8 @@ MprProgram* StatementItem::getProgram() const
     if(auto parentStatement = getParentStatement()){
         return parentStatement->lowerLevelProgram();
     }
-    if(viewImpl->programItem){
-        return viewImpl->programItem->program();
+    if(viewImpl->currentProgramItem){
+        return viewImpl->currentProgramItem->program();
     }
     return nullptr;
 }
@@ -417,6 +458,8 @@ void TreeWidgetStyle::drawPrimitive
     QProxyStyle::drawPrimitive(element, option, painter, widget);
 }
 
+}
+
 
 MprProgramViewBase::StatementDelegate::StatementDelegate()
 {
@@ -458,6 +501,12 @@ int MprProgramViewBase::StatementDelegate::Impl::actualLabelSpan
         span = (NumColumns - column);
     }
     return span;
+}
+
+
+void MprProgramViewBase::StatementDelegate::activateStatement(MprStatement* /* statement */) const
+{
+
 }
 
 
@@ -532,19 +581,15 @@ MprProgramViewBase::Impl::Impl(MprProgramViewBase* self)
 {
     setupWidgets();
 
-    dummyStatement = new MprDummyStatement;
-
-    statementItemOperationCallCounter = 0;
-
     targetItemPicker.sigTargetItemChanged().connect(
         [&](MprProgramItemBase* item){ setProgramItem(item); });
 
-    defaultStatementDelegate = new StatementDelegate;
-
-    TimeBar::instance()->sigTimeChanged().connect(
-        [&](double time){ return onTimeChanged(time); });
-
+    dummyStatement = new MprDummyStatement;
+    statementItemOperationCallCounter = 0;
+    isOnTimeChanged = false;
     bodySyncMode = DirectBodySync;
+    isJustAfterDoubleClicked = false;
+    defaultStatementDelegate = new StatementDelegate;
 }
 
 
@@ -626,10 +671,11 @@ void MprProgramViewBase::Impl::setupWidgets()
     rheader.setSectionResizeMode(3, QHeaderView::Stretch);
     sigSectionResized().connect([&](int, int, int){ updateGeometry(); });
 
-    currentItemChangeConnection =
-        sigCurrentItemChanged().connect(
-            [&](QTreeWidgetItem* current, QTreeWidgetItem* previous){
-                onCurrentTreeWidgetItemChanged(current, previous); });
+    sigItemSelectionChanged().connect([&](){ onItemSelectionChanged(); });
+
+    sigCurrentItemChanged().connect(
+        [&](QTreeWidgetItem* current, QTreeWidgetItem* previous){
+            onCurrentTreeWidgetItemChanged(current, previous); });
 
     sigItemClicked().connect(
         [&](QTreeWidgetItem* item, int column){
@@ -662,7 +708,25 @@ void MprProgramViewBase::Impl::setupWidgets()
             buttonIconSize = QSize(24, 24);
         }
     }
+}
 
+
+void MprProgramViewBase::onActivated()
+{
+    // TODO: Use TimeSyncItemEngine instead of using the time bar directly
+    auto timeBar = TimeBar::instance();
+    impl->timeBarConnection =
+        timeBar->sigTimeChanged().connect(
+            [this](double time){ return impl->onTimeChanged(time); });
+    impl->onTimeChanged(timeBar->time());
+}
+
+
+void MprProgramViewBase::onDeactivated()
+{
+    impl->timeBarConnection.disconnect();
+    impl->currentStatement.reset();
+    impl->prevActiveStatement.reset();
 }
 
 
@@ -689,8 +753,8 @@ void MprProgramViewBase::setBodySyncMode(BodySyncMode mode)
 {
     if(mode != impl->bodySyncMode){
         impl->bodySyncMode = mode;
-        if(!mode && impl->programItem){
-            impl->programItem->clearSuperimposition();
+        if(!mode && impl->currentProgramItem){
+            impl->currentProgramItem->clearSuperimposition();
         }
     }
 }
@@ -709,13 +773,6 @@ void MprProgramViewBase::addEditButton(ToolButton* button, int row)
 }
 
 
-void MprProgramViewBase::onDeactivated()
-{
-    impl->currentStatement = nullptr;
-    impl->prevCurrentStatement = nullptr;
-}
-
-
 void MprProgramViewBase::onAttachedMenuRequest(MenuManager& menuManager)
 {
     menuManager.addItem(_("Refresh"))->sigTriggered().connect(
@@ -723,10 +780,10 @@ void MprProgramViewBase::onAttachedMenuRequest(MenuManager& menuManager)
 
     menuManager.addItem(_("Renumbering"))->sigTriggered().connect(
         [&](){
-            if(impl->programItem){
-                impl->programItem->program()->renumberPositionIds();
-                impl->programItem->notifyUpdate();
-                impl->programItem->suggestFileUpdate();
+            if(impl->currentProgramItem){
+                impl->currentProgramItem->program()->renumberPositionIds();
+                impl->currentProgramItem->notifyUpdate();
+                impl->currentProgramItem->suggestFileUpdate();
                 updateStatementTree();
             }
         });
@@ -745,65 +802,9 @@ bool MprProgramViewBase::Impl::isDoingStatementItemOperation() const
 }
 
 
-void MprProgramViewBase::Impl::setProgramItem(MprProgramItemBase* item)
-{
-    programConnections.disconnect();
-    if(programItem){
-        programItem->clearSuperimposition();
-    }
-    
-    programItem = item;
-    logTopLevelProgramName.reset();
-    currentStatement.reset();
-    weak_errorStatement.reset();
-
-    bool accepted = self->onCurrentProgramItemChanged(item);
-    if(!accepted){
-        programItem = nullptr;
-    }
-
-    if(!programItem){
-        programNameLabel.setStyleSheet("");
-        programNameLabel.setText("---");
-
-    } else {
-        auto program = programItem->program();
-        
-        programConnections.add(
-            programItem->sigNameChanged().connect(
-                [&](const std::string&){ setProgramItem(programItem); }));
-
-        programConnections.add(
-            program->sigStatementInserted().connect(
-                [&](MprProgram::iterator iter){
-                    onStatementInserted(iter); }));
-
-        programConnections.add(
-            program->sigStatementRemoved().connect(
-                [&](MprProgram* program, MprStatement* statement){
-                    onStatementRemoved(program, statement); }));
-
-        programConnections.add(
-            program->sigStatementUpdated().connect(
-                [&](MprStatement* statement){
-                    onStatementUpdated(statement); }));
-        
-        programNameLabel.setStyleSheet("font-weight: bold");
-        if(auto bodyItem = programItem->targetBodyItem()){
-            programNameLabel.setText(
-                format("{0} - {1}", bodyItem->displayName(), programItem->displayName()).c_str());
-        } else {
-            programNameLabel.setText(programItem->displayName().c_str());
-        }
-    }
-
-    updateStatementTree();
-}
-
-
 bool MprProgramViewBase::checkCurrentProgramItem() const
 {
-    if(!impl->programItem){
+    if(!impl->currentProgramItem){
         showWarningDialog(_("Program item is not specified."));
         return false;
     }
@@ -811,42 +812,166 @@ bool MprProgramViewBase::checkCurrentProgramItem() const
 }
 
 
-void MprProgramViewBase::updateStatementTree()
+void MprProgramViewBase::Impl::setProgramItem(MprProgramItemBase* item)
 {
-    impl->updateStatementTree();
+    if(item == currentProgramItem){
+        return;
+    }
+    
+    programConnections.disconnect();
+    if(currentProgramItem){
+        currentProgramItem->clearSuperimposition();
+    }
+
+    if(currentProgramItem){
+        storeExpansionStates(programStateMap[currentProgramItem].expansionStateMap);
+    }
+    
+    currentProgramItem = item;
+    logTopLevelProgramName.reset();
+    currentStatement.reset();
+    prevActiveStatement.reset();
+    weak_errorStatement.reset();
+
+    bool accepted = self->onCurrentProgramItemChanged(item);
+    if(!accepted){
+        currentProgramItem = nullptr;
+    }
+
+    clearStatementTree();
+
+    if(!currentProgramItem){
+        programNameLabel.setStyleSheet("");
+        programNameLabel.setText("---");
+        return;
+    }
+
+    auto program = currentProgramItem->program();
+        
+    programConnections.add(
+        currentProgramItem->sigNameChanged().connect(
+            [&](const std::string&){ setProgramItem(currentProgramItem); }));
+    
+    programConnections.add(
+        program->sigStatementInserted().connect(
+            [&](MprProgram::iterator iter){
+                onStatementInserted(iter); }));
+    
+    programConnections.add(
+        program->sigStatementRemoved().connect(
+            [&](MprStatement* statement, MprProgram* program){
+                onStatementRemoved(program, statement); }));
+    
+    programConnections.add(
+        program->sigStatementUpdated().connect(
+            [&](MprStatement* statement){
+                onStatementUpdated(statement); }));
+    
+    programNameLabel.setStyleSheet("font-weight: bold");
+
+    if(auto bodyItem = currentProgramItem->targetBodyItem()){
+        programNameLabel.setText(
+            format("{0} - {1}", bodyItem->displayName(), currentProgramItem->displayName()).c_str());
+    } else {
+        programNameLabel.setText(currentProgramItem->displayName().c_str());
+    }
+
+    ExpansionStateMap* pExpansionStateMap = nullptr;
+    ProgramState& programState = programStateMap[currentProgramItem];
+    pExpansionStateMap = &programState.expansionStateMap;
+
+    if(programState.programConnections.empty()){
+        auto programItem = currentProgramItem;
+        programState.programConnections.add(
+            programItem->sigDisconnectedFromRoot().connect(
+                [this, programItem](){ programStateMap.erase(programItem); }));
+        
+        programState.programConnections.add(
+            program->sigStatementRemoved().connect(
+                [pExpansionStateMap, programItem](MprStatement* statement, MprProgram*){
+                    if(auto structured = dynamic_cast<MprStructuredStatement*>(statement)){
+                        pExpansionStateMap->erase(structured);
+                    }
+                }));
+    }
+
+    addStatementsToTree(program, invisibleRootItem(), nullptr, pExpansionStateMap);
 }
 
 
-void MprProgramViewBase::Impl::updateStatementTree()
+void MprProgramViewBase::Impl::storeExpansionStates(ExpansionStateMap& expansionStateMap)
 {
-    clear();
-    statementItemMap.clear();
-    
-    if(programItem){
-        addProgramStatementsToTree(programItem->program(), invisibleRootItem());
+    storeExpansionStatesIter(currentProgramItem->program(), expansionStateMap);
+}
+
+
+void MprProgramViewBase::Impl::storeExpansionStatesIter
+(MprProgram* program, ExpansionStateMap& expansionStateMap)
+{
+    for(auto& statement : *program){
+        if(auto structured = dynamic_cast<MprStructuredStatement*>(statement.get())){
+            if(auto item = findStatementItem(structured)){
+                expansionStateMap[structured] = item->isExpanded();
+                if(auto lowerLevelProgram = structured->lowerLevelProgram()){
+                    storeExpansionStatesIter(lowerLevelProgram, expansionStateMap);
+                }
+            }
+        }
     }
 }
 
 
-void MprProgramViewBase::Impl::addProgramStatementsToTree
-(MprProgram* program, QTreeWidgetItem* parentItem)
+void MprProgramViewBase::updateStatementTree()
+{
+    impl->clearStatementTree();
+
+    if(impl->currentProgramItem){
+        impl->addStatementsToTree(
+            impl->currentProgramItem->program(), impl->invisibleRootItem(), nullptr, nullptr);
+    }
+}
+
+
+void MprProgramViewBase::Impl::clearStatementTree()
+{
+    clear();
+    statementItemMap.clear();
+}    
+
+
+void MprProgramViewBase::Impl::addStatementsToTree
+(MprProgram* program, QTreeWidgetItem* parentItem, MprStructuredStatement* parentStatement,
+ ExpansionStateMap* expansionStateMap)
 {
     auto counter = scopedCounterOfStatementItemOperationCall();
 
-    parentItem->setExpanded(true);
+    if(parentStatement){
+        bool done = false;
+        if(expansionStateMap){
+            auto p = expansionStateMap->find(parentStatement);
+            if(p != expansionStateMap->end()){
+                parentItem->setExpanded(p->second);
+                done = true;
+            }
+        }
+        if(!done){
+            parentItem->setExpanded(parentStatement->isExpandedByDefault());
+        }
+    }
 
     if(program->empty()){
         if(program->isSubProgram()){
             // Keep at least one dummy statement item in a sub program
-            parentItem->addChild(new StatementItem(dummyStatement, this));
+            parentItem->addChild(new StatementItem(dummyStatement, nullptr, this));
         }
     } else {
         for(auto& statement : *program){
-            auto statementItem = new StatementItem(statement, this);
+            auto statementItem = new StatementItem(statement, program, this);
             parentItem->addChild(statementItem);
             if(auto structured = dynamic_cast<MprStructuredStatement*>(statement.get())){
                 if(auto lowerLevelProgram = structured->lowerLevelProgram()){
-                    addProgramStatementsToTree(lowerLevelProgram, statementItem);
+                    addStatementsToTree(
+                        lowerLevelProgram, statementItem, structured, expansionStateMap);
                 }
             }
         }
@@ -856,7 +981,56 @@ void MprProgramViewBase::Impl::addProgramStatementsToTree
 
 MprProgramItemBase* MprProgramViewBase::currentProgramItem()
 {
-    return impl->programItem;
+    return impl->currentProgramItem;
+}
+
+
+void MprProgramViewBase::Impl::onItemSelectionChanged()
+{
+    auto prevCurrentStatement = currentStatement;
+    currentStatement.reset();
+    auto errorStatement = weak_errorStatement.lock();
+    bool isErrorStatementSelected = false;
+    
+    selectedStatements.clear();
+    for(auto& item : selectedItems()){
+        auto statementItem = static_cast<StatementItem*>(item);
+        auto statement = statementItem->statement();
+        if(statement == errorStatement){
+            isErrorStatementSelected = true;
+        }
+        selectedStatements.push_back(statement);
+    }
+
+    if(isErrorStatementSelected){
+        setStyleSheet("QTreeView::item:selected { background-color: red; } "
+                      "QTreeView::branch:selected { background-color: red; }");
+    } else {
+        setStyleSheet("");
+    }
+
+    if(!selectedStatements.empty()){
+        currentStatement = selectedStatements.front();
+    }
+
+    sigSelectedStatementsChanged(selectedStatements);
+
+    if(currentStatement != prevCurrentStatement){
+        self->onCurrentStatementChanged(currentStatement);
+        sigCurrentStatementChanged(currentStatement);
+    }
+}
+
+
+const std::vector<MprStatementPtr>& MprProgramViewBase::selectedStatements()
+{
+    return impl->selectedStatements;
+}
+
+
+SignalProxy<void(std::vector<MprStatementPtr>& statements)> MprProgramViewBase::sigSelectedStatementsChanged()
+{
+    return impl->sigSelectedStatementsChanged;
 }
 
 
@@ -872,45 +1046,11 @@ SignalProxy<void(MprStatement* statement)> MprProgramViewBase::sigCurrentStateme
 }
 
 
-void MprProgramViewBase::Impl::onCurrentTreeWidgetItemChanged
-(QTreeWidgetItem* current, QTreeWidgetItem* previous)
+void MprProgramViewBase::Impl::setCurrentStatement(MprStatement* statement)
 {
-    if(auto statementItem = dynamic_cast<StatementItem*>(previous)){
-        prevCurrentStatement = statementItem->statement();
-    }
-    if(auto statementItem = dynamic_cast<StatementItem*>(current)){
-        setCurrentStatement(statementItem->statement(), false, true);
-    }
-}
-
-
-void MprProgramViewBase::Impl::setCurrentStatement
-(MprStatement* statement, bool doSetCurrentItem, bool doActivate)
-{
-    if(doSetCurrentItem){
-        if(auto item = findStatementItem(statement)){
-            currentItemChangeConnection.block();
-            setCurrentItem(item);
-            currentItemChangeConnection.unblock();
-        }
-        prevCurrentStatement = statement;
-    }
-
-    if(statement == weak_errorStatement.lock()){
-        setStyleSheet("QTreeView::item:selected { background-color: red; } "
-                      "QTreeView::branch:selected { background-color: red; }");
-    } else {
-        setStyleSheet("");
-    }
-
-    if(statement != currentStatement){
-        currentStatement = statement;
-        self->onCurrentStatementChanged(statement);
-        sigCurrentStatementChanged(statement);
-    }
-
-    if(doActivate){
-        self->onStatementActivated(statement);
+    if(auto item = findStatementItem(statement)){
+        setCurrentItem(item);
+        scrollToItem(item);
     }
 }
 
@@ -928,7 +1068,7 @@ void MprProgramViewBase::Impl::setErrorStatement(MprStatement* statement)
                 }
             }
             if(errorStatement == currentStatement && !statement){
-                setCurrentStatement(currentStatement, false, false);
+                setStyleSheet(""); // cancel highlight
             }
         }
         if(statement){
@@ -943,33 +1083,50 @@ void MprProgramViewBase::Impl::setErrorStatement(MprStatement* statement)
 }
 
 
-void MprProgramViewBase::onCurrentStatementChanged(MprStatement*)
+void MprProgramViewBase::onCurrentStatementChanged(MprStatement* s)
 {
 
 }
 
 
+// Detect the active (last-clicked) statement
+void MprProgramViewBase::Impl::onCurrentTreeWidgetItemChanged
+(QTreeWidgetItem* current, QTreeWidgetItem* previous)
+{
+    if(auto statementItem = dynamic_cast<StatementItem*>(previous)){
+        prevActiveStatement = statementItem->statement();
+    }
+    if(auto statementItem = dynamic_cast<StatementItem*>(current)){
+        self->onStatementActivated(statementItem->statement());
+    }
+}
+
+
 void MprProgramViewBase::Impl::onTreeWidgetItemClicked(QTreeWidgetItem* item, int /* column */)
 {
-    if(auto statementItem = dynamic_cast<StatementItem*>(item)){
-        auto statement = statementItem->statement();
-        // If the clicked statement is different from the current one,
-        // onCurrentTreeWidgetItemChanged is processed
-        if(statement == prevCurrentStatement){
-            self->onStatementActivated(statement);
+    if(!isJustAfterDoubleClicked){
+        if(auto statementItem = dynamic_cast<StatementItem*>(item)){
+            auto statement = statementItem->statement();
+            if(statement == prevActiveStatement){
+                self->onStatementActivated(statementItem->statement());
+            }
+            prevActiveStatement = statement;
         }
-        prevCurrentStatement = statement;
+    } else {
+        isJustAfterDoubleClicked = false;
     }
 }
 
 
 void MprProgramViewBase::onStatementActivated(MprStatement* statement)
 {
-    if(auto ps = dynamic_cast<MprPositionStatement*>(statement)){
-        if(impl->bodySyncMode == DirectBodySync){
-            impl->programItem->moveTo(ps);
-        } else if(impl->bodySyncMode == TwoStageBodySync){
-            impl->programItem->superimposePosition(ps);
+    if(!impl->isOnTimeChanged){
+        if(auto ps = dynamic_cast<MprPositionStatement*>(statement)){
+            if(impl->bodySyncMode == DirectBodySync){
+                impl->currentProgramItem->moveTo(ps);
+            } else if(impl->bodySyncMode == TwoStageBodySync){
+                impl->currentProgramItem->superimposePosition(ps);
+            }
         }
     }
 }
@@ -978,10 +1135,9 @@ void MprProgramViewBase::onStatementActivated(MprStatement* statement)
 void MprProgramViewBase::Impl::onTreeWidgetItemDoubleClicked(QTreeWidgetItem* item, int /* column */)
 {
     if(auto statementItem = dynamic_cast<StatementItem*>(item)){
-        auto statement = statementItem->statement();
-        self->onStatementDoubleClicked(statement);
-        prevCurrentStatement = nullptr;
+        self->onStatementDoubleClicked(statementItem->statement());
     }
+    isJustAfterDoubleClicked = true;
 }
 
 
@@ -989,7 +1145,7 @@ void MprProgramViewBase::onStatementDoubleClicked(MprStatement* statement)
 {
     if(impl->bodySyncMode == TwoStageBodySync){
         if(auto ps = dynamic_cast<MprPositionStatement*>(statement)){
-            impl->programItem->moveTo(ps);
+            impl->currentProgramItem->moveTo(ps);
         }
     }
 }
@@ -998,7 +1154,7 @@ void MprProgramViewBase::onStatementDoubleClicked(MprStatement* statement)
 MprStatement* MprProgramViewBase::Impl::findStatementAtHierachicalPosition(const vector<int>& position)
 {
     if(!position.empty()){
-        return findStatementAtHierachicalPositionIter(position, programItem->program(), 0);
+        return findStatementAtHierachicalPositionIter(position, currentProgramItem->program(), 0);
     }
     return nullptr;
 }
@@ -1024,12 +1180,12 @@ MprStatement* MprProgramViewBase::Impl::findStatementAtHierachicalPositionIter
 
 
 bool MprProgramViewBase::Impl::findControllerItemAndLogItem
-(MprControllerItemBase*& controllerItem, ReferencedObjectSeqItem*& logItem)
+(MprControllerItemBase*& controllerItem, ControllerLogItem*& logItem)
 {
-    if(programItem){
-        controllerItem = programItem->findOwnerItem<MprControllerItemBase>();
+    if(currentProgramItem){
+        controllerItem = currentProgramItem->findOwnerItem<MprControllerItemBase>();
         if(controllerItem){
-            logItem = controllerItem->findItem<ReferencedObjectSeqItem>();
+            logItem = controllerItem->findItem<ControllerLogItem>();
             if(logItem){
                 return true;
             }
@@ -1042,7 +1198,7 @@ bool MprProgramViewBase::Impl::findControllerItemAndLogItem
 shared_ptr<ReferencedObjectSeq> MprProgramViewBase::Impl::findLogSeq()
 {
     MprControllerItemBase* controllerItem;
-    ReferencedObjectSeqItem* logItem;
+    ControllerLogItem* logItem;
     if(findControllerItemAndLogItem(controllerItem, logItem)){
         return logItem->seq();
     }
@@ -1056,18 +1212,20 @@ bool MprProgramViewBase::Impl::onTimeChanged(double time)
     bool hit = false;
 
     MprControllerItemBase* controllerItem;
-    ReferencedObjectSeqItem* logItem;
+    ControllerLogItem* logItem;
 
     if(findControllerItemAndLogItem(controllerItem, logItem)){
         auto seq = logItem->seq();
         if(!seq->empty() && seq != invalidLogSeq.lock()){
             auto data = seq->at(seq->lastFrameOfTime(time)).get();
             if(auto log = dynamic_cast<MprControllerLog*>(data)){
+                isOnTimeChanged = true;
                 if(seekToLogPosition(controllerItem, log)){
                     if(time < seq->timeLength()){
                         hit = true;
                     }
                 }
+                isOnTimeChanged = false;
             }
         }
     }
@@ -1103,8 +1261,17 @@ bool MprProgramViewBase::Impl::seekToLogPosition
         } else {
             setErrorStatement(nullptr);
         }
-        setCurrentStatement(statement, true, false);
-        result = true;
+        while(auto item = findStatementItem(statement)){
+            if(auto parentItem = item->parent()){
+                if(!parentItem->isExpanded()){
+                    statement = statement->holderProgram()->holderStatement();
+                    continue;
+                }
+            }
+            break;
+        }
+
+        setCurrentStatement(statement);
     }
 
     return result;
@@ -1129,11 +1296,11 @@ bool MprProgramViewBase::insertStatement(MprStatement* statement, int insertionT
 
 bool MprProgramViewBase::Impl::insertStatement(MprStatement* statement, int insertionType)
 {
-    if(!programItem){
+    if(!currentProgramItem){
         return false;
     }
 
-    auto program = programItem->program();
+    auto program = currentProgramItem->program();
     MprProgram::iterator pos;
     MprStructuredStatement* parentStatement = nullptr;
     auto selected = selectedItems();
@@ -1193,7 +1360,7 @@ void MprProgramViewBase::Impl::onStatementInserted(MprProgram::iterator iter)
         }
     }
 
-    auto statementItem = new StatementItem(statement, this);
+    auto statementItem = new StatementItem(statement, program, this);
     bool added = false;
     auto nextIter = ++iter;
 
@@ -1210,7 +1377,7 @@ void MprProgramViewBase::Impl::onStatementInserted(MprProgram::iterator iter)
     if(added){
         if(auto structured = dynamic_cast<MprStructuredStatement*>(statement.get())){
             if(auto lowerLevelProgram = structured->lowerLevelProgram()){
-                addProgramStatementsToTree(lowerLevelProgram, statementItem);
+                addStatementsToTree(lowerLevelProgram, statementItem, structured, nullptr);
             }
         }
         invalidLogSeq = findLogSeq();
@@ -1238,7 +1405,7 @@ void MprProgramViewBase::Impl::onStatementRemoved
 
         if(holderStatement && holderStatement->lowerLevelProgram()->empty()){
             // Keep at least one dummy statement item in a sub program
-            parentItem->addChild(new StatementItem(dummyStatement, this));
+            parentItem->addChild(new StatementItem(dummyStatement, nullptr, this));
         }
 
         invalidLogSeq = findLogSeq();
@@ -1265,7 +1432,7 @@ void MprProgramViewBase::Impl::forEachStatementInTreeEditEvent
  function<void(MprStructuredStatement* parentStatement, MprProgram* program,
                int index, MprStatement* statement)> func)
 {
-    if(!programItem || isDoingStatementItemOperation()){
+    if(!currentProgramItem || isDoingStatementItemOperation()){
         return;
     }
     QTreeWidgetItem* parentItem = nullptr;
@@ -1274,7 +1441,7 @@ void MprProgramViewBase::Impl::forEachStatementInTreeEditEvent
     
     if(!parent.isValid()){
         parentItem = invisibleRootItem();
-        program = programItem->program();
+        program = currentProgramItem->program();
     } else {
         parentItem = itemFromIndex(parent);
         auto parentStatementItem = static_cast<StatementItem*>(parentItem);
@@ -1321,7 +1488,7 @@ void MprProgramViewBase::Impl::onRowsRemoved(const QModelIndex& parent, int star
             auto program = structured->lowerLevelProgram();
             if(program->empty()){
                 auto counter = scopedCounterOfStatementItemOperationCall();
-                parentItem->addChild(new StatementItem(dummyStatement, this));
+                parentItem->addChild(new StatementItem(dummyStatement, nullptr, this));
             }
         }
     }
@@ -1395,6 +1562,9 @@ void MprProgramViewBase::Impl::keyPressEvent(QKeyEvent* event)
             break;
         case Qt::Key_V:
             pasteStatements();
+            break;
+        default:
+            processed = false;
             break;
         }
     }
@@ -1504,7 +1674,7 @@ void MprProgramViewBase::Impl::copySelectedStatements(bool doCut)
                 if(parentStatement){
                     program = parentStatement->lowerLevelProgram();
                 } else {
-                    program = programItem->program();
+                    program = currentProgramItem->program();
                 }
                 program->remove(statement);
             }
@@ -1515,7 +1685,7 @@ void MprProgramViewBase::Impl::copySelectedStatements(bool doCut)
 
 void MprProgramViewBase::Impl::pasteStatements()
 {
-    MprProgram* program = programItem->program();
+    MprProgram* program = currentProgramItem->program();
     StatementItem* pastePositionItem = nullptr;
     MprStructuredStatement* parentStatement = nullptr;
     MprProgram::iterator pos;
@@ -1540,7 +1710,9 @@ void MprProgramViewBase::Impl::pasteStatements()
     }
     
     for(auto& statement : statementsToPaste){
-        pos = program->insert(pos, statement->clone());
+        auto pasted = statement->clone();
+        pos = program->insert(pos, pasted);
+        currentProgramItem->resolveStatementReferences(pasted);
         ++pos;
     }
 }

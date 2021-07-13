@@ -4,6 +4,7 @@
 
 #include "ValueTree.h"
 #include "UTF8.h"
+#include "MathUtil.h"
 #include <stack>
 #include <iostream>
 #include <yaml.h>
@@ -36,7 +37,7 @@ const char* getTypeName(int typeBits){
 
 map<string, bool> booleanSymbols;
 
-const char* defaultDoubleFormat = "%g";
+const char* defaultFloatingNumberFormat = "%g";
 
 ValueNodePtr invalidNode;
 MappingPtr invalidMapping;
@@ -228,7 +229,30 @@ double ValueNode::toDouble() const
     if(endptr == nptr){
         ScalarTypeMismatchException ex;
         ex.setPosition(line(), column());
-        ex.setMessage(fmt::format(_("The value \"{}\" must be a double value"), scalar->stringValue_));
+        ex.setMessage(fmt::format(_("The value \"{}\" must be a floating point number"), scalar->stringValue_));
+        throw ex;
+    }
+
+    return value;
+}
+
+
+float ValueNode::toFloat() const
+{
+    if(!isScalar()){
+        throwNotScalrException();
+    }
+
+    const ScalarNode* const scalar = static_cast<const ScalarNode* const>(this);
+
+    const char* nptr = &(scalar->stringValue_[0]);
+    char* endptr;
+    const float value = strtof(nptr, &endptr);
+
+    if(endptr == nptr){
+        ScalarTypeMismatchException ex;
+        ex.setPosition(line(), column());
+        ex.setMessage(fmt::format(_("The value \"{}\" must be a floating point number"), scalar->stringValue_));
         throw ex;
     }
 
@@ -238,7 +262,7 @@ double ValueNode::toDouble() const
 
 double ValueNode::toAngle() const
 {
-    if(isDegreeMode()){
+    if(!isForcedRadianMode()){
         return TO_RADIAN * toDouble();
     } else {
         return toDouble();
@@ -279,8 +303,6 @@ bool ValueNode::toBool() const
 }
 
 
-#ifdef _WIN32
-
 bool ValueNode::read(std::string& out_value) const
 {
     if(isScalar()){
@@ -289,37 +311,6 @@ bool ValueNode::read(std::string& out_value) const
     }
     return false;
 }
-
-
-const std::string ValueNode::toString() const
-{
-    if(!isScalar()){
-        throwNotScalrException();
-    }
-    return static_cast<const ScalarNode* const>(this)->stringValue_;
-}
-
-#else
-
-bool ValueNode::read(std::string& out_value) const
-{
-    if(isScalar()){
-        out_value = static_cast<const ScalarNode* const>(this)->stringValue_;
-        return !out_value.empty();
-    }
-    return false;
-}
-
-
-const std::string& ValueNode::toString() const
-{
-    if(!isScalar()){
-        throwNotScalrException();
-    }
-    return static_cast<const ScalarNode* const>(this)->stringValue_;
-}
-
-#endif
 
 
 ScalarNode::ScalarNode(const std::string& value, StringStyle stringStyle)
@@ -456,7 +447,7 @@ Mapping::Mapping()
     indexCounter = 0;
     keyStringStyle_ = PLAIN_STRING;
     isFlowStyle_ = false;
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
 }
 
 
@@ -468,7 +459,7 @@ Mapping::Mapping(int line, int column)
     mode = READ_MODE;
     indexCounter = 0;
     isFlowStyle_ = false;
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
 }
 
 
@@ -476,7 +467,7 @@ Mapping::Mapping(const Mapping& org)
     : ValueNode(org),
       values(org.values),
       mode(org.mode),
-      doubleFormat_(org.doubleFormat_),
+      floatingNumberFormat_(org.floatingNumberFormat_),
       isFlowStyle_(org.isFlowStyle_),
       keyStringStyle_(org.keyStringStyle_)
 {
@@ -509,9 +500,9 @@ void Mapping::clear()
 }
 
 
-void Mapping::setDoubleFormat(const char* format)
+void Mapping::setFloatingNumberFormat(const char* format)
 {
-    doubleFormat_ = format;
+    floatingNumberFormat_ = format;
 }
 
 
@@ -526,7 +517,7 @@ ValueNode* Mapping::find(const std::string& key) const
     if(!isValid()){
         throwNotMappingException();
     }
-    const_iterator p = values.find(key);
+    auto p = values.find(key);
     if(p != values.end()){
         return p->second.get();
     } else {
@@ -535,16 +526,49 @@ ValueNode* Mapping::find(const std::string& key) const
 }
 
 
+ValueNode* Mapping::find(std::initializer_list<const char*> keys) const
+{
+    if(!isValid()){
+        throwNotMappingException();
+    }
+    for(auto& key : keys){
+        auto p = values.find(key);
+        if(p != values.end()){
+            return p->second.get();
+        }
+    }
+    return invalidNode.get();
+}
+
+
 Mapping* Mapping::findMapping(const std::string& key) const
 {
     if(!isValid()){
         throwNotMappingException();
     }
-    const_iterator p = values.find(key);
+    auto p = values.find(key);
     if(p != values.end()){
         ValueNode* node = p->second.get();
         if(node->isMapping()){
             return static_cast<Mapping*>(node);
+        }
+    }
+    return invalidMapping.get();
+}
+
+
+Mapping* Mapping::findMapping(std::initializer_list<const char*> keys) const
+{
+    if(!isValid()){
+        throwNotMappingException();
+    }
+    for(auto& key : keys){
+        auto p = values.find(key);
+        if(p != values.end()){
+            ValueNode* node = p->second.get();
+            if(node->isMapping()){
+                return static_cast<Mapping*>(node);
+            }
         }
     }
     return invalidMapping.get();
@@ -556,11 +580,29 @@ Listing* Mapping::findListing(const std::string& key) const
     if(!isValid()){
         throwNotMappingException();
     }
-    const_iterator p = values.find(key);
+    auto  p = values.find(key);
     if(p != values.end()){
         ValueNode* node = p->second.get();
         if(node->isListing()){
             return static_cast<Listing*>(node);
+        }
+    }
+    return invalidListing.get();
+}
+
+
+Listing* Mapping::findListing(std::initializer_list<const char*> keys) const
+{
+    if(!isValid()){
+        throwNotMappingException();
+    }
+    for(auto& key : keys){
+        auto  p = values.find(key);
+        if(p != values.end()){
+            ValueNode* node = p->second.get();
+            if(node->isListing()){
+                return static_cast<Listing*>(node);
+            }
         }
     }
     return invalidListing.get();
@@ -572,7 +614,7 @@ ValueNodePtr Mapping::extract(const std::string& key)
     if(!isValid()){
         throwNotMappingException();
     }
-    iterator p = values.find(key);
+    auto p = values.find(key);
     if(p != values.end()){
         ValueNodePtr value = p->second;
         values.erase(p);
@@ -580,6 +622,23 @@ ValueNodePtr Mapping::extract(const std::string& key)
     }
     return nullptr;
 }
+
+
+ValueNodePtr Mapping::extract(std::initializer_list<const char*> keys)
+{
+    if(!isValid()){
+        throwNotMappingException();
+    }
+    for(auto& key : keys){
+        auto p = values.find(key);
+        if(p != values.end()){
+            ValueNodePtr node = p->second;
+            values.erase(p);
+            return node;
+        }
+    }
+    return nullptr;
+}    
 
 
 bool Mapping::extract(const std::string& key, double& out_value)
@@ -685,7 +744,7 @@ Mapping* Mapping::openMapping_(const std::string& key, bool doOverwrite)
 
     if(!mapping){
         mapping = new Mapping;
-        mapping->doubleFormat_ = doubleFormat_;
+        mapping->floatingNumberFormat_ = floatingNumberFormat_;
         insertSub(uKey, mapping);
     }
 
@@ -725,7 +784,7 @@ Listing* Mapping::openListing_(const std::string& key, bool doOverwrite)
 
     if(!sequence){
         sequence = new Listing;
-        sequence->doubleFormat_ = doubleFormat_;
+        sequence->floatingNumberFormat_ = floatingNumberFormat_;
         insertSub(uKey, sequence);
     }
 
@@ -796,6 +855,63 @@ bool Mapping::read(const std::string &key, float &out_value) const
     return false;
 }
 
+template<class T>
+static bool readAngle_(const Mapping* mapping, const std::string& key, T& out_angle, const ValueNode* unitAttrNode)
+{
+    if(mapping->read(key, out_angle)){
+        bool isDegree = true;
+        if(unitAttrNode){
+            isDegree = !unitAttrNode->isForcedRadianMode();
+        } else {
+            isDegree = !mapping->isForcedRadianMode();
+        }
+        if(isDegree){
+            out_angle = radian(out_angle);
+        }
+        return true;
+    }
+    return false;
+}
+
+
+bool Mapping::readAngle(const std::string& key, double& out_angle, const ValueNode* unitAttrNode) const
+{
+    return readAngle_(this, key, out_angle, unitAttrNode);
+}
+
+
+bool Mapping::readAngle(const std::string& key, float& out_angle, const ValueNode* unitAttrNode) const
+{
+    return readAngle_(this, key, out_angle, unitAttrNode);
+}
+
+
+template<class T>
+static bool readAngle_
+(const Mapping* mapping, std::initializer_list<const char*> keys, T& out_angle, const ValueNode* unitAttrNode)
+{
+    for(auto& key : keys){
+        if(readAngle_(mapping, key, out_angle, unitAttrNode)){
+            return true;
+        }
+    }
+    return false;
+}
+
+
+bool Mapping::readAngle
+(std::initializer_list<const char*> keys, double& out_angle, const ValueNode* unitAttrNode) const
+{
+    return readAngle_(this, keys, out_angle, unitAttrNode);
+}
+
+
+bool Mapping::readAngle
+(std::initializer_list<const char*> keys, float& out_angle, const ValueNode* unitAttrNode) const
+{
+    return readAngle_(this, keys, out_angle, unitAttrNode);
+}
+
 
 void Mapping::write(const std::string &key, const std::string& value, StringStyle stringStyle)
 {
@@ -857,7 +973,7 @@ void Mapping::write(const std::string &key, int value)
 void Mapping::write(const std::string &key, double value)
 {
     char buf[32];
-    int n = snprintf(buf, 32, doubleFormat_, value);
+    int n = snprintf(buf, 32, floatingNumberFormat_, value);
     writeSub(key, buf, n, PLAIN_STRING);
 }
 
@@ -874,7 +990,7 @@ Listing::Listing()
     typeBits = LISTING;
     line_ = -1;
     column_ = -1;
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
     isFlowStyle_ = false;
     doInsertLFBeforeNextElement = false;
 }
@@ -886,7 +1002,7 @@ Listing::Listing(int size)
     typeBits = LISTING;
     line_ = -1;
     column_ = -1;
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
     isFlowStyle_ = false;
     doInsertLFBeforeNextElement = false;
 }
@@ -897,7 +1013,7 @@ Listing::Listing(int line, int column)
     typeBits = LISTING;
     line_ = line;
     column_ = column;
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
     isFlowStyle_ = false;
     doInsertLFBeforeNextElement = false;
 }
@@ -910,7 +1026,7 @@ Listing::Listing(int line, int column, int reservedSize)
     line_ = line;
     column_ = column;
     values.resize(0);
-    doubleFormat_ = defaultDoubleFormat;
+    floatingNumberFormat_ = defaultFloatingNumberFormat;
     isFlowStyle_ = false;
     doInsertLFBeforeNextElement = false;
 }
@@ -919,7 +1035,7 @@ Listing::Listing(int line, int column, int reservedSize)
 Listing::Listing(const Listing& org)
     : ValueNode(org),
       values(org.values),
-      doubleFormat_(org.doubleFormat_),
+      floatingNumberFormat_(org.floatingNumberFormat_),
       isFlowStyle_(org.isFlowStyle_),
       doInsertLFBeforeNextElement(org.doInsertLFBeforeNextElement)
 {
@@ -951,9 +1067,9 @@ void Listing::reserve(int size)
 }
 
 
-void Listing::setDoubleFormat(const char* format)
+void Listing::setFloatingNumberFormat(const char* format)
 {
-    doubleFormat_ = format;
+    floatingNumberFormat_ = format;
 }
 
 
@@ -982,7 +1098,7 @@ void Listing::appendLF()
 Mapping* Listing::newMapping()
 {
     Mapping* mapping = new Mapping;
-    mapping->doubleFormat_ = doubleFormat_;
+    mapping->floatingNumberFormat_ = floatingNumberFormat_;
     append(mapping);
     return mapping;
 }
@@ -1022,7 +1138,7 @@ void Listing::write(int i, int value)
 void Listing::append(double value)
 {
     char buf[32];
-    int n = snprintf(buf, 32, doubleFormat_, value);
+    int n = snprintf(buf, 32, floatingNumberFormat_, value);
     ScalarNode* node = new ScalarNode(buf, n, PLAIN_STRING);
     if(doInsertLFBeforeNextElement){
         node->typeBits |= INSERT_LF;

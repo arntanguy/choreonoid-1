@@ -17,8 +17,11 @@ choreonoid_add_python_module(PyUtil
   PyEigenArchive.cpp
   PySeqTypes.cpp
   PySceneGraph.cpp
+  PySceneDrawables.cpp
+  PySceneRenderer.cpp
+  PyMeshUtils.cpp
   PyGeometryTypes.cpp
   PyTask.cpp
   )
 
-target_link_libraries(PyUtil CnoidUtil CnoidPyUtil)
+target_link_libraries(PyUtil CnoidUtil)

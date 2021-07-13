@@ -12,7 +12,9 @@ using namespace std;
 using namespace cnoid;
 
 namespace {
+
 enum TranslationMode { TRANSLATION_1D, TRANSLATION_2D, TRANSLATION_VIEW_PLANE };
+
 }
 
 namespace cnoid {
@@ -23,9 +25,9 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         
     int dragMode;
-    Affine3 initialPosition;
+    Isometry3 initialPosition;
     Vector3 initialPoint;
-    Affine3 position;
+    Isometry3 position;
     Vector3 projectedPoint;
 
     Vector3 rotationAxis;
@@ -43,10 +45,10 @@ public:
     std::shared_ptr<SceneProjector> projector;
 
     SceneDragProjectorImpl();
-    bool startRotation(const SceneWidgetEvent& event);
-    bool dragRotation(const SceneWidgetEvent& event);
-    bool startTranslation(const SceneWidgetEvent& event);
-    bool dragTranslation(const SceneWidgetEvent& event);
+    bool startRotation(SceneWidgetEvent* event);
+    bool dragRotation(SceneWidgetEvent* event);
+    bool startTranslation(SceneWidgetEvent* event);
+    bool dragTranslation(SceneWidgetEvent* event);
 };
 }
 
@@ -60,7 +62,7 @@ SceneDragProjector::SceneDragProjector()
 SceneDragProjectorImpl::SceneDragProjectorImpl()
 {
     dragMode = SceneDragProjector::DRAG_NONE;
-    initialPosition = Affine3::Identity();
+    initialPosition = Isometry3::Identity();
 }
 
 
@@ -82,7 +84,7 @@ bool SceneDragProjector::isDragging() const
 }
 
 
-void SceneDragProjector::setInitialPosition(const Affine3& T)
+void SceneDragProjector::setInitialPosition(const Isometry3& T)
 {
     impl->initialPosition = T;
     impl->position = T;
@@ -101,7 +103,7 @@ void SceneDragProjector::setInitialRotation(const Matrix3& R)
 }
 
 
-const Affine3& SceneDragProjector::initialPosition() const
+const Isometry3& SceneDragProjector::initialPosition() const
 {
     return impl->initialPosition;
 }
@@ -119,15 +121,15 @@ const Vector3& SceneDragProjector::rotationAxis() const
 }
 
 
-bool SceneDragProjector::startRotation(const SceneWidgetEvent& event)
+bool SceneDragProjector::startRotation(SceneWidgetEvent* event)
 {
     return impl->startRotation(event);
 }
 
 
-bool SceneDragProjectorImpl::startRotation(const SceneWidgetEvent& event)
+bool SceneDragProjectorImpl::startRotation(SceneWidgetEvent* event)
 {
-    initialPoint = event.point();
+    initialPoint = event->point();
     const Vector3 p = initialPosition.translation();
     const Vector3 arm = initialPoint - (rotationAxis.dot(initialPoint - p) * rotationAxis + p);
 
@@ -137,31 +139,48 @@ bool SceneDragProjectorImpl::startRotation(const SceneWidgetEvent& event)
         return false;
     }
     
+    bool initialized = false;
+    
     rotationBaseX = arm.normalized();
     rotationBaseY = rotationAxis.cross(rotationBaseX);
 
-    const Affine3 C = event.currentCameraPosition();
-    if(fabs(rotationAxis.dot(SgCamera::direction(C))) > 0.4){
-        projector.reset(new ScenePlaneProjector(rotationAxis, initialPoint));
+    Vector3 direction;
+    if(auto persCamera = dynamic_cast<const SgPerspectiveCamera*>(event->camera())){
+        direction = (event->point() - event->cameraPosition().translation()).normalized();
     } else {
-        Quat rotation;
-        rotation.setFromTwoVectors(Vector3::UnitZ(), rotationAxis);
-        projector.reset(
-            new SceneCylinderProjector(p, armLength, numeric_limits<double>::max(), rotation));
+        direction = SgCamera::direction(event->cameraPosition());
     }
-    dragMode = SceneDragProjector::DRAG_ROTATION;
 
-    return true;
+    if(fabs(rotationAxis.dot(direction)) > 0.13){
+        projector = make_shared_aligned<ScenePlaneProjector>(rotationAxis, initialPoint);
+        initialized = true;
+    } else {
+        Quaternion rotation;
+        rotation.setFromTwoVectors(Vector3::UnitZ(), rotationAxis);
+        auto cprojector =
+            make_shared_aligned<SceneCylinderProjector>(
+                p, armLength, numeric_limits<double>::max(), rotation);
+        if(cprojector->initializeProjection(event)){
+            projector = cprojector;
+            initialized = true;
+        }
+    }
+
+    if(initialized){
+        dragMode = SceneDragProjector::DRAG_ROTATION;
+    }
+
+    return initialized;
 }
 
 
-bool SceneDragProjector::dragRotation(const SceneWidgetEvent& event)
+bool SceneDragProjector::dragRotation(SceneWidgetEvent* event)
 {
     return impl->dragRotation(event);
 }
 
 
-bool SceneDragProjectorImpl::dragRotation(const SceneWidgetEvent& event)
+bool SceneDragProjectorImpl::dragRotation(SceneWidgetEvent* event)
 {
     if(dragMode == SceneDragProjector::DRAG_ROTATION){
         if(projector->project(event, projectedPoint)){
@@ -184,7 +203,7 @@ int SceneDragProjector::dragMode() const
 }
 
 
-bool SceneDragProjector::drag(const SceneWidgetEvent& event)
+bool SceneDragProjector::drag(SceneWidgetEvent* event)
 {
     switch(impl->dragMode){
     case DRAG_ROTATION: return impl->dragRotation(event);
@@ -218,7 +237,7 @@ const Vector3& SceneDragProjector::projectedPoint() const
 }
 
 
-const Affine3& SceneDragProjector::position() const
+const Isometry3& SceneDragProjector::position() const
 {
     return impl->position;
 }
@@ -250,21 +269,21 @@ void SceneDragProjector::setTranslationAlongViewPlane()
 }
 
 
-bool SceneDragProjector::startTranslation(const SceneWidgetEvent& event)
+bool SceneDragProjector::startTranslation(SceneWidgetEvent* event)
 {
     return impl->startTranslation(event);
 }
 
 
-bool SceneDragProjectorImpl::startTranslation(const SceneWidgetEvent& event)
+bool SceneDragProjectorImpl::startTranslation(SceneWidgetEvent* event)
 {
-    initialPoint = event.point();
+    initialPoint = event->point();
     
     switch(translationMode){
 
     case TRANSLATION_1D:
     {
-        const Affine3& C = event.currentCameraPosition();
+        const Isometry3& C = event->cameraPosition();
         const Vector3 eye = C.translation();
         const Vector3 center = SgCamera::direction(C) + eye;
         const Vector3 z = (eye - center).normalized();
@@ -285,7 +304,7 @@ bool SceneDragProjectorImpl::startTranslation(const SceneWidgetEvent& event)
 
     case TRANSLATION_VIEW_PLANE:
     {
-        const Affine3& C = event.currentCameraPosition();
+        const Isometry3& C = event->cameraPosition();
         projector.reset(new ScenePlaneProjector(-SgCamera::direction(C), initialPoint));
         break;
     }
@@ -299,13 +318,13 @@ bool SceneDragProjectorImpl::startTranslation(const SceneWidgetEvent& event)
 }
 
 
-bool SceneDragProjector::dragTranslation(const SceneWidgetEvent& event)
+bool SceneDragProjector::dragTranslation(SceneWidgetEvent* event)
 {
     return impl->dragTranslation(event);
 }
 
 
-bool SceneDragProjectorImpl::dragTranslation(const SceneWidgetEvent& event)
+bool SceneDragProjectorImpl::dragTranslation(SceneWidgetEvent* event)
 {
     if(dragMode == SceneDragProjector::DRAG_TRANSLATION){
         if(projector->project(event, projectedPoint)){

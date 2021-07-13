@@ -2,7 +2,7 @@
 #define CNOID_MANIPULATOR_PLUGIN_MPR_POSITION_H
 
 #include <cnoid/CoordinateFrameList>
-#include <cnoid/CloneableReferenced>
+#include <cnoid/ClonableReferenced>
 #include <cnoid/GeneralId>
 #include <cnoid/EigenTypes>
 #include <cnoid/Signal>
@@ -20,7 +20,7 @@ class MprFkPosition;
 class MprPositionList;
 class Mapping;
 
-class CNOID_EXPORT MprPosition : public CloneableReferenced
+class CNOID_EXPORT MprPosition : public ClonableReferenced
 {
 public:
     static constexpr int MaxNumJoints = 8;
@@ -86,13 +86,15 @@ typedef ref_ptr<MprPosition> MprPositionPtr;
 class CNOID_EXPORT MprIkPosition : public MprPosition
 {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     MprIkPosition();
     MprIkPosition(const GeneralId& id);
     MprIkPosition(const MprIkPosition& org);
     MprIkPosition& operator=(const MprIkPosition& rhs) = delete;
 
-    const Position& position() const { return T; }
-    void setPosition(const Position& T) { this->T = T; }
+    const Isometry3& position() const { return T; }
+    void setPosition(const Isometry3& T) { this->T = T; }
     Vector3 rpy() const;
     void setRpy(const Vector3& rpy);
     const Vector3 referenceRpy() const { return referenceRpy_; }
@@ -131,7 +133,7 @@ protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
     
 private:
-    Position T;
+    Isometry3 T;
     Vector3 referenceRpy_;
     GeneralId baseFrameId_;
     GeneralId offsetFrameId_;

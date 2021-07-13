@@ -11,7 +11,8 @@ Signal<bool(LocationProxyPtr location), LogicalSum> sigEditRequest;
 }
 
 
-LocationProxy::LocationProxy()
+LocationProxy::LocationProxy(LocationType type)
+    : locationType_(type)
 {
     isEditable_ = true;
 }
@@ -52,7 +53,13 @@ void LocationProxy::setEditable(bool on)
 }
 
 
-void LocationProxy::setLocation(const Position& /* T */)
+bool LocationProxy::setLocation(const Isometry3& /* T */)
+{
+    return false;
+}
+
+
+void LocationProxy::finishLocationEditing()
 {
 
 }
@@ -64,14 +71,56 @@ Item* LocationProxy::getCorrespondingItem()
 }
 
 
-LocationProxyPtr LocationProxy::getParentLocationProxy()
+LocationProxyPtr LocationProxy::getParentLocationProxy() const
 {
-    if(auto item = getCorrespondingItem()){
+    if(auto item = const_cast<LocationProxy*>(this)->getCorrespondingItem()){
         if(auto parentLocatableItem = item->findOwnerItem<LocatableItem>()){
             return parentLocatableItem->getLocationProxy();
         }
     }
     return nullptr;
+}
+
+
+Isometry3 LocationProxy::getGlobalLocation() const
+{
+    return getGlobalLocationOf(getLocation());
+}
+
+
+Isometry3 LocationProxy::getGlobalLocationOf(const Isometry3 T) const
+{
+    switch(locationType_){
+    case GlobalLocation:
+        return T;
+    case ParentRelativeLocation:
+    case OffsetLocation:
+        if(auto parent = getParentLocationProxy()){
+            return parent->getGlobalLocation() * T;
+        } else {
+            return T;
+        }
+    default:
+        return Isometry3::Identity();
+    }
+}
+
+
+bool LocationProxy::setGlobalLocation(const Isometry3& T)
+{
+    switch(locationType_){
+    case GlobalLocation:
+        return setLocation(T);
+    case ParentRelativeLocation:
+    case OffsetLocation:
+        if(auto parent = getParentLocationProxy()){
+            return setLocation(
+                parent->getGlobalLocation().inverse(Eigen::Isometry) * T);
+        }
+    default:
+        break;
+    }
+    return false;
 }
 
 

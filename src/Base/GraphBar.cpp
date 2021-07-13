@@ -114,8 +114,6 @@ GraphBarImpl::GraphBarImpl(GraphBar* self)
     : self(self),
       config(this)
 {
-    self->setVisibleByDefault(true);    
-    
     orgRenderingToggle = self->addToggleButton(QIcon(":/Base/icon/graph.svg"),
                                                _("Plot trajectories of the target data on the graph view"));
     orgRenderingToggle->setChecked(true);
@@ -146,6 +144,65 @@ GraphBarImpl::GraphBarImpl(GraphBar* self)
     focusedGraphWidget = nullptr;
 }
 
+
+GraphBar::~GraphBar()
+{
+    delete impl;
+    graphBar = nullptr;
+}
+
+
+GraphWidget* GraphBar::focusedGraphWidget()
+{
+    return impl->focusedGraphWidget;
+}
+
+
+void GraphBar::focus(GraphWidget* graph, bool forceUpdate)
+{
+    impl->focus(graph, forceUpdate);
+}
+
+
+void GraphBarImpl::focus(GraphWidget* graph, bool forceUpdate)
+{
+    if(graph && (forceUpdate || (graph != focusedGraphWidget))){
+
+        focusedGraphWidget = graph;
+        self->setEnabled(true);
+
+        connections.block();
+        
+        bool org, vel, acc;
+        graph->getRenderingTypes(org, vel, acc);
+        orgRenderingToggle->setChecked(org);
+        velRenderingToggle->setChecked(vel);
+        accRenderingToggle->setChecked(acc);
+
+        config.focus(graph);
+
+        connections.unblock();
+    }
+}
+
+
+void GraphBar::releaseFocus(GraphWidget* graphWidget)
+{
+    if(impl->focusedGraphWidget == graphWidget){
+        impl->focusedGraphWidget = nullptr;
+        setEnabled(false);
+    }
+}
+
+
+void GraphBarImpl::onRenderingTypesToggled()
+{
+    focusedGraphWidget->setRenderingTypes
+        (orgRenderingToggle->isChecked(), velRenderingToggle->isChecked(), accRenderingToggle->isChecked());
+}
+
+
+namespace {
 
 ConfigDialog::ConfigDialog(GraphBarImpl* barImpl)
     : connections(barImpl->connections),
@@ -284,47 +341,6 @@ ConfigDialog::ConfigDialog(GraphBarImpl* barImpl)
 }
 
 
-GraphBar::~GraphBar()
-{
-    delete impl;
-    graphBar = nullptr;
-}
-
-
-GraphWidget* GraphBar::focusedGraphWidget()
-{
-    return impl->focusedGraphWidget;
-}
-
-
-void GraphBar::focus(GraphWidget* graph, bool forceUpdate)
-{
-    impl->focus(graph, forceUpdate);
-}
-
-
-void GraphBarImpl::focus(GraphWidget* graph, bool forceUpdate)
-{
-    if(graph && (forceUpdate || (graph != focusedGraphWidget))){
-
-        focusedGraphWidget = graph;
-        self->setEnabled(true);
-
-        connections.block();
-        
-        bool org, vel, acc;
-        graph->getRenderingTypes(org, vel, acc);
-        orgRenderingToggle->setChecked(org);
-        velRenderingToggle->setChecked(vel);
-        accRenderingToggle->setChecked(acc);
-
-        config.focus(graph);
-
-        connections.unblock();
-    }
-}
-
-
 void ConfigDialog::focus(GraphWidget* graph)
 {
     editModeCheck.setChecked(graph->mode() == GraphWidget::EDIT_MODE);
@@ -357,22 +373,6 @@ void ConfigDialog::focus(GraphWidget* graph)
     controlPointStepSpin.setValue(step);
     controlPointOffsetSpin.setValue(offset);
     highlightingControlPointCheck.setChecked(graph->highlightsControlPoints());
-}
-
-
-void GraphBar::releaseFocus(GraphWidget* graphWidget)
-{
-    if(impl->focusedGraphWidget == graphWidget){
-        impl->focusedGraphWidget = nullptr;
-        setEnabled(false);
-    }
-}
-
-
-void GraphBarImpl::onRenderingTypesToggled()
-{
-    focusedGraphWidget->setRenderingTypes
-        (orgRenderingToggle->isChecked(), velRenderingToggle->isChecked(), accRenderingToggle->isChecked());
 }
 
 
@@ -459,4 +459,6 @@ void ConfigDialog::onControlPointStepOrOffsetChanged()
 void ConfigDialog::onHighlightingControlPointToggled(bool on)
 {
     focusedGraphWidget->highlightControlPoints(on);
+}
+
 }

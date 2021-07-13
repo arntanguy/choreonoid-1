@@ -20,19 +20,23 @@ public:
     PoseSeqInterpolatorPtr interpolator;
     BodyMotionGenerationBar* bodyMotionGenerationBar;
     LinkTraverse fkTraverse;
+    ScopedConnectionSet connections;
 
-    PoseSeqEngine(PoseSeqItem* poseSeqItem, BodyItem* bodyItem) :
-        bodyItem(bodyItem) {
-
+    PoseSeqEngine(PoseSeqItem* poseSeqItem, BodyItem* bodyItem)
+        : TimeSyncItemEngine(poseSeqItem),
+          bodyItem(bodyItem)
+    {
         interpolator = poseSeqItem->interpolator();
         bodyMotionGenerationBar = BodyMotionGenerationBar::instance();
 
-        poseSeqItem->sigUpdated().connect(std::bind(&PoseSeqEngine::notifyUpdate, this));
-        interpolator->sigUpdated().connect(std::bind(&PoseSeqEngine::notifyUpdate, this));
+        connections.add(
+            poseSeqItem->sigUpdated().connect([this](){ refresh(); }));
+        connections.add(
+            interpolator->sigUpdated().connect([this](){ refresh(); }));
     }
         
-    virtual bool onTimeChanged(double time){
-
+    virtual bool onTimeChanged(double time)
+    {
         BodyPtr body = bodyItem->body();
 
         interpolator->enableLipSyncMix(bodyMotionGenerationBar->isLipSyncMixMode());
@@ -71,23 +75,23 @@ public:
 typedef ref_ptr<PoseSeqEngine> PoseSeqEnginePtr;
     
 
-TimeSyncItemEngine* createPoseSeqEngine(Item* sourceItem)
+TimeSyncItemEngine* createPoseSeqEngine(PoseSeqItem* item, PoseSeqEngine* engine0)
 {
-    PoseSeqEngine* engine = 0;
-    PoseSeqItem* poseSeqItem = dynamic_cast<PoseSeqItem*>(sourceItem);
-    if(poseSeqItem){
-        BodyItem* bodyItem = poseSeqItem->findOwnerItem<BodyItem>();
-        if(bodyItem){
-            engine = new PoseSeqEngine(poseSeqItem, bodyItem);
+    if(auto bodyItem = item->findOwnerItem<BodyItem>()){
+        if(engine0 && engine0->bodyItem == bodyItem){
+            return engine0;
+        } else {
+            return new PoseSeqEngine(item, bodyItem);
         }
     }
-    return engine;
+    return nullptr;
 }
 
 }
 
 
-void cnoid::initializePoseSeqEngine(ExtensionManager* em)
+void cnoid::initializePoseSeqEngine()
 {
-    em->timeSyncItemEngineManger().addEngineFactory(createPoseSeqEngine);
+    TimeSyncItemEngineManager::instance()
+        ->registerFactory<PoseSeqItem, PoseSeqEngine>(createPoseSeqEngine);
 }

@@ -3,12 +3,10 @@
   @author Shin'ichiro Nakaoka
  */
 
-#include "PyReferenced.h"
-#include "PySignal.h"
+#include "PyUtil.h"
 #include "../Task.h"
 #include "../AbstractTaskSequencer.h"
 #include "../ValueTree.h"
-#include <pybind11/stl.h>
 #include <set>
 #include <map>
 
@@ -255,11 +253,9 @@ void exportPyTaskTypes(py::module& m)
         .def_property("function", &TaskCommand::function, &TaskCommand::setFunction)
         .def("setFunction", &TaskCommand::setFunction)
         .def("setFunction", [](TaskCommand& self, py::function func){ return self.setFunction(PyTaskFunc(func)); })
-        .def("setDefault", &TaskCommand::setDefault)
-        .def("setDefault", [](TaskCommand& self){ return self.setDefault(); })
+        .def("setDefault", &TaskCommand::setDefault, py::arg("on") = true)
         .def("isDefault", &TaskCommand::isDefault)
-        .def("setCheckable", &TaskCommand::setCheckable)
-        .def("setCheckable", [](TaskCommand& self){ return self.setCheckable(); })
+        .def("setCheckable", &TaskCommand::setCheckable, py::arg("on") = true)
         .def_property("toggleState",  &TaskCommand::toggleState, &TaskCommand::setToggleState)
         .def("setToggleState", &TaskCommand::setToggleState)
         .def("setChecked",  &TaskCommand::setChecked)
@@ -273,8 +269,7 @@ void exportPyTaskTypes(py::module& m)
         .def("setCommandLinkStep", &TaskCommand::setCommandLinkStep)
         .def("linkToNextCommand", &TaskCommand::linkToNextCommand)
         .def("isCommandLinkAutomatic", &TaskCommand::isCommandLinkAutomatic)
-        .def("setCommandLinkAutomatic", &TaskCommand::setCommandLinkAutomatic)
-        .def("setCommandLinkAutomatic", [](TaskCommand &self){ self.setCommandLinkAutomatic(); })
+        .def("setCommandLinkAutomatic", &TaskCommand::setCommandLinkAutomatic, py::arg("on") = true)
         .def_property("level", &TaskCommand::level, &TaskCommand::setLevel)
         .def("setLevel", &TaskCommand::setLevel)
         .def("linkToNextTask", &TaskCommand::linkToNextTask)
@@ -293,8 +288,7 @@ void exportPyTaskTypes(py::module& m)
         .def(py::init<const std::string&>())
         .def(py::init<const TaskPhase&>())
         .def(py::init<const TaskPhase&, bool>())
-        .def("clone", &TaskPhase::clone)
-        .def("clone", [](TaskPhase& self){ return self.clone(); })
+        .def("clone", &TaskPhase::clone, py::arg("doDeepCopy") = true)
         .def_property("caption", &TaskPhase::caption, &TaskPhase::setCaption)
         .def("setCaption", &TaskPhase::setCaption)
         .def("isSkipped", &TaskPhase::isSkipped)
@@ -388,8 +382,7 @@ void exportPyTaskTypes(py::module& m)
     PySignal<void(Task*)>(m, "TaskSignal");
     
     py::class_<AbstractTaskSequencer>(m, "AbstractTaskSequencer")
-        .def("activate", &AbstractTaskSequencer::activate)
-        .def("activate", [](AbstractTaskSequencer& self){ self.activate(); })
+        .def("activate", &AbstractTaskSequencer::activate, py::arg("on") = true)
         .def("isActive", &AbstractTaskSequencer::isActive)
 
         .def("addTask", [](AbstractTaskSequencer* self, py::object pyTask){

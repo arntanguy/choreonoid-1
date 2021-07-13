@@ -4,22 +4,11 @@
 */
 
 #include "CompetitorMarker.h"
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
+#include <cnoid/StdBodyFileUtil>
 
 using namespace std;
 using namespace cnoid;
-
-namespace {
-
-YAMLBodyLoader::NodeTypeRegistration
-registerCompetitorMarker(
-    "CompetitorMarker",
-    [](YAMLBodyLoader& loader, Mapping& node){
-        CompetitorMarkerPtr device = new CompetitorMarker;
-        return device->readDescription(loader, node);
-    });
-
-}
 
 
 CompetitorMarker::CompetitorMarker()
@@ -31,7 +20,7 @@ CompetitorMarker::CompetitorMarker()
 }
 
 
-const char* CompetitorMarker::typeName()
+const char* CompetitorMarker::typeName() const
 {
     return "CompetitorMarker";
 }
@@ -70,4 +59,22 @@ void CompetitorMarker::forEachActualType(std::function<bool(const std::type_info
     if(!func(typeid(CompetitorMarker))){
         MarkerDevice::forEachActualType(func);
     }
+}
+
+
+namespace {
+
+StdBodyFileDeviceTypeRegistration<CompetitorMarker>
+registerMarkerDevice(
+    "CompetitorMarker",
+    [](StdBodyLoader* loader, const Mapping* info){
+        CompetitorMarkerPtr marker = new CompetitorMarker;
+        if(marker->readSpecifications(info)){
+            return loader->readDevice(marker, info);
+        }
+        return false;
+    },
+    [](StdBodyWriter* /* writer */, Mapping* info, const CompetitorMarker* marker){
+        return marker->writeSpecifications(info);
+    });
 }

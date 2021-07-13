@@ -1,10 +1,13 @@
 #include "AGXVehicleContinuousTrackDevice.h"
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
+#include <cnoid/StdBodyWriter>
 #include <cnoid/YAMLReader>
-#include <cnoid/YAMLSceneReader>
+#include <cnoid/StdSceneReader>
+#include <cnoid/StdSceneWriter>
 #include <cnoid/SceneDevice>
 #include <cnoid/SceneDrawables>
 #include <cnoid/MeshGenerator>
+#include <cnoid/EigenArchive>
 #include "AGXObjectFactory.h"
 #include <cnoid/Link>
 
@@ -17,6 +20,7 @@ class SceneTrackDevice : public SceneDevice
     AGXVehicleContinuousTrackDevice* m_trackDevice;
     std::vector<SgPosTransformPtr> m_sgTracks;
     SgSwitchableGroupPtr trackSwitch;
+    SgUpdate sgUpdate;
 
 public:
     SceneTrackDevice(AGXVehicleContinuousTrackDevice* device)
@@ -24,7 +28,7 @@ public:
     {
         m_trackDevice = device;
         trackSwitch = new SgSwitchableGroup;
-        trackSwitch->turnOff();
+        trackSwitch->setTurnedOn(false);
         addChild(trackSwitch);
         setFunctionOnStateChanged([&](){ update(); });
         initialize();
@@ -42,11 +46,11 @@ public:
 
     void update(){
         if(m_trackDevice->getTrackStates().size() <= 0){
-            trackSwitch->setTurnedOn(false, true);
+            trackSwitch->setTurnedOn(false, sgUpdate);
         } else {
             if(!trackSwitch->isTurnedOn()){
                 createTrackShapes();
-                trackSwitch->setTurnedOn(true, true);
+                trackSwitch->setTurnedOn(true, sgUpdate);
             }
             updateTrackPosition();
         }
@@ -66,79 +70,131 @@ public:
                     shape = new SgShape;
                 }
                 shape->setMesh(meshGenerator.generateBox(size));
-                m_sgTracks[i]->addChild(shape, true);
+                m_sgTracks[i]->addChild(shape, sgUpdate);
             }
         }
     }
 
     void updateTrackPosition() {
-        const Position &linkPos_inv = m_trackDevice->link()->T().inverse();
+        const Isometry3 &linkPos_inv = m_trackDevice->link()->T().inverse();
         const TrackStates& states = m_trackDevice->getTrackStates();
         for(size_t i = 0; i < states.size(); ++i){
             const auto& state = states[i];
             if(state.boxSize.x() == 0.0){
-                trackSwitch->turnOff(true);
+                trackSwitch->setTurnedOn(false, sgUpdate);
                 break;
             } else {
                 m_sgTracks[i]->setTransform(linkPos_inv * state.position);
             }
         }
+        notifyUpdate(sgUpdate);
     }
 };
 
-#define NODE_READ(FIELD1) node.read(#FIELD1, desc.FIELD1)
-bool readAGXVehicleContinuousTrackDevice(YAMLBodyLoader& loader, Mapping& node)
+#define NODE_READ(FIELD1) info->read(#FIELD1, desc.FIELD1)
+bool readAGXVehicleContinuousTrackDevice(StdBodyLoader* loader, const Mapping* info)
 {
     AGXVehicleContinuousTrackDeviceDesc desc;
-    if(!NODE_READ(numberOfNodes)) return false;
-    if(!NODE_READ(nodeThickness)) return false;
-    if(!NODE_READ(nodeWidth)) return false;
-    NODE_READ(nodeDistanceTension);
-    NODE_READ(nodeThickerThickness);
-    NODE_READ(useThickerNodeEvery);
-    NODE_READ(hingeCompliance);
-    node.read("hingeSpookDamping", desc.hingeSpookDamping);
-    NODE_READ(minStabilizingHingeNormalForce);
-    NODE_READ(stabilizingHingeFrictionParameter);
-    NODE_READ(nodesToWheelsMergeThreshold);
-    NODE_READ(nodesToWheelsSplitThreshold);
-    NODE_READ(enableMerge);
-    NODE_READ(numNodesPerMergeSegment);
-    NODE_READ(contactReduction);
-    NODE_READ(enableLockToReachMergeCondition);
-    NODE_READ(lockToReachMergeConditionCompliance);
-    node.read("lockToReachMergeConditionSpookDamping", desc.lockToReachMergeConditionSpookDamping);
-    NODE_READ(maxAngleMergeCondition);
-    node.read("material", desc.materialName);
 
-    desc.nodeShape = dynamic_cast<SgShape*>(       
-        loader.sceneReader().readNode(*node.findMapping("nodeShape"), "Shape"));
-
-    // Get name of wheels from yaml
-    const auto toVectorString = [](ValueNodePtr const vnptr, vector<string>& vs) ->bool
-    {
-        if(!vnptr) return false;
-        Listing& list = *vnptr->toListing();
-        for(int i=0; i < list.size(); i++){
-            vs.push_back(list[i].toString());
-        }
-        return true;
-    };
-    MappingPtr info = static_cast<Mapping*>(node.clone());
-    toVectorString(info->extract("sprocketNames"), desc.sprocketNames);
-    toVectorString(info->extract("idlerNames"), desc.idlerNames);
-    toVectorString(info->extract("rollerNames"), desc.rollerNames);
-    toVectorString(info->extract("guideNames"), desc.guideNames);
-    ValueNodePtr const upAxis = info->extract("upAxis");
-    if(upAxis){
-        Listing& u = *upAxis->toListing();
-        if(u.size() != 3) return false;
-        desc.upAxis = Vector3(u[0].toDouble(), u[1].toDouble(), u[2].toDouble());
-    }else{
+    info->read({ "number_of_nodes", "numberOfNodes" }, desc.numberOfNodes);
+    info->read({ "node_thickness", "nodeThickness" }, desc.nodeThickness);
+    if(!info->read({ "node_width", "nodeWidth" }, desc.nodeWidth)){
         return false;
     }
+    info->read({ "node_distance_tension", "nodeDistanceTension" }, desc.nodeDistanceTension);
+    info->read({ "node_thicker_thickness", "nodeThickerThickness" }, desc.nodeThickerThickness);
+    info->read({ "use_thicker_node_every", "useThickerNodeEvery" }, desc.useThickerNodeEvery);
+    info->read({ "hinge_compliance", "hingeCompliance" }, desc.hingeCompliance);
+    info->read({ "hinge_spook_damping", "hingeSpookDamping" }, desc.hingeSpookDamping);
+    info->read({ "min_stabilizing_hinge_normal_force", "minStabilizingHingeNormalForce" },
+               desc.minStabilizingHingeNormalForce);
+    info->read({ "stabilizing_hinge_friction_parameter", "stabilizingHingeFrictionParameter" },
+               desc.stabilizingHingeFrictionParameter);
+    info->read({ "nodes_to_wheels_merge_treshold", "nodesToWheelsMergeThreshold" },
+               desc.nodesToWheelsMergeThreshold);
+    info->read({ "nodes_to_wheels_split_threshold", "nodesToWheelsSplitThreshold" },
+               desc.nodesToWheelsSplitThreshold);
+    info->read({ "enable_merge", "enableMerge" }, desc.enableMerge);
+    info->read({ "num_nodes_per_merge_segment", "numNodesPerMergeSegment" }, desc.numNodesPerMergeSegment);
+    info->read({ "contact_reduction", "contactReduction" }, desc.contactReduction);
+    info->read({ "enable_lock_to_reach_merge_condition", "enableLockToReachMergeCondition" },
+               desc.enableLockToReachMergeCondition);
+    info->read({ "lock_to_reach_merge_condition_compliance", "lockToReachMergeConditionCompliance" },
+               desc.lockToReachMergeConditionCompliance);
+    info->read({ "lock_to_reach_merge_condition_spook_damping", "lockToReachMergeConditionSpookDamping" },
+               desc.lockToReachMergeConditionSpookDamping);
+    info->read({ "max_angle_merge_condition" "maxAngleMergeCondition" }, desc.maxAngleMergeCondition);
+    info->read("material", desc.materialName);
+
+    desc.nodeShape = dynamic_cast<SgShape*>(       
+        loader->sceneReader()->readNode(info->findMapping("nodeShape"), "Shape"));
+
+    // Get name of wheels from yaml
+    const auto toVectorString =
+        [](Listing* listing, vector<string>& vs) -> bool
+        {
+            if(!listing->isValid()){
+                return false;
+            }
+            for(auto& value : *listing){
+                vs.push_back(value->toString());
+            }
+            return true;
+        };
+
+    toVectorString(info->findListing({ "sprocket_names", "sprocketNames" }), desc.sprocketNames);
+    toVectorString(info->findListing({ "idler_names", "idlerNames" }), desc.idlerNames);
+    toVectorString(info->findListing({ "roller_names", "rollerNames" }), desc.rollerNames);
+    toVectorString(info->findListing({ "guide_names", "guideNames" }), desc.guideNames);
+
+    if(!read(info, { "up_axis", "upAxis" }, desc.upAxis)){
+        return false;
+    }
+
     AGXVehicleContinuousTrackDevicePtr trackDevice = new AGXVehicleContinuousTrackDevice(desc);
-    return loader.readDevice(trackDevice, node);
+    return loader->readDevice(trackDevice, info);
+}
+
+bool writeAGXVehicleContinuousTrackDevice
+(StdBodyWriter* writer, Mapping* info, const AGXVehicleContinuousTrackDevice* device)
+{
+    AGXVehicleContinuousTrackDeviceDesc desc;
+    device->getDesc(desc);
+    
+    info->write("number_of_nodes", desc.numberOfNodes);
+    info->write("node_thickness", desc.nodeThickness);
+    info->write("node_width", desc.nodeWidth);
+    info->write("node_distance_tension", desc.nodeDistanceTension);
+    info->write("node_thicker_thickness", desc.nodeThickerThickness);
+    info->write("use_thicker_node_every", desc.useThickerNodeEvery);
+    info->write("hinge_compliance", desc.hingeCompliance);
+    info->write("hinge_spook_damping", desc.hingeSpookDamping);
+    info->write("min_stabilizing_hinge_normal_force", desc.minStabilizingHingeNormalForce);
+    info->write("stabilizing_hinge_friction_parameter", desc.stabilizingHingeFrictionParameter);
+    info->write("nodes_to_wheels_merge_threshold", desc.nodesToWheelsMergeThreshold);
+    info->write("nodes_to_wheels_split_threshold", desc.nodesToWheelsSplitThreshold);
+    info->write("enable_merge", desc.enableMerge);
+    info->write("num_nodes_per_merge_segment", desc.numNodesPerMergeSegment);
+    info->write("contact_reduction", desc.contactReduction);
+    info->write("enable_lock_to_reach_merge_condition", desc.enableLockToReachMergeCondition);
+    info->write("lock_to_reach_merge_condition_compliance", desc.lockToReachMergeConditionCompliance);
+    info->write("lock_to_reach_merge_condition_spook_damping", desc.lockToReachMergeConditionSpookDamping);
+    info->write("max_angle_merge_condition", desc.maxAngleMergeCondition);
+    info->write("material", desc.materialName);
+
+    if(auto shape = writer->sceneWriter()->writeScene(desc.nodeShape)){
+        shape->remove("type");
+        info->insert("nodeShape", shape);
+    }
+
+    info->writeAsListing("sprocket_names", desc.sprocketNames);
+    info->writeAsListing("idler_names", desc.idlerNames);
+    info->writeAsListing("roller_names", desc.rollerNames);
+    info->writeAsListing("guide_names", desc.guideNames);
+
+    write(info, "up_axis", desc.upAxis);
+
+    return true;
 }
 
 SceneDevice* createSceneAGXVehicleContinuousTrackDevice(Device* device)
@@ -150,10 +206,14 @@ SceneDevice* createSceneAGXVehicleContinuousTrackDevice(Device* device)
 struct TypeRegistration
 {
     TypeRegistration() {
-        YAMLBodyLoader::addNodeType("AGXVehicleContinuousTrackDevice", readAGXVehicleContinuousTrackDevice);
-        SceneDevice::registerSceneDeviceFactory<AGXVehicleContinuousTrackDevice>(createSceneAGXVehicleContinuousTrackDevice);
-        if(AGXObjectFactory::checkModuleEnalbled("AGX-Vehicle") || AGXObjectFactory::checkModuleEnalbled("AgX-Vehicle")){
-        }else {
+        StdBodyLoader::registerNodeType(
+            "AGXVehicleContinuousTrackDevice", readAGXVehicleContinuousTrackDevice);
+        StdBodyWriter::registerDeviceWriter<AGXVehicleContinuousTrackDevice>(
+            "AGXVehicleContinuousTrackDevice", writeAGXVehicleContinuousTrackDevice);
+        SceneDevice::registerSceneDeviceFactory<AGXVehicleContinuousTrackDevice>(
+            createSceneAGXVehicleContinuousTrackDevice);
+
+        if(!AGXObjectFactory::checkModuleEnalbled("AGX-Vehicle") && !AGXObjectFactory::checkModuleEnalbled("AgX-Vehicle")){
             std::cout << "Please check you have AGX-Vehicle module license."
                 "AGXVehicleContinuousTrackDevice should not work." << std::endl;
         }
@@ -172,7 +232,7 @@ AGXVehicleContinuousTrackDevice::AGXVehicleContinuousTrackDevice(const AGXVehicl
     copyStateFrom(org);
 }
 
-const char* AGXVehicleContinuousTrackDevice::typeName()
+const char* AGXVehicleContinuousTrackDevice::typeName() const
 {
     return "AGXVehicleContinuousTrackDevice";
 }
@@ -235,7 +295,7 @@ const double* AGXVehicleContinuousTrackDevice::readState(const double* buf)
         i += 3;
         state.position.translation() << buf[i], buf[i+1], buf[i+2];
         i += 3;
-        state.position.linear() = Quat(buf[i], buf[i+1], buf[i+2], buf[i+3]).toRotationMatrix();
+        state.position.linear() = Quaternion(buf[i], buf[i+1], buf[i+2], buf[i+3]).toRotationMatrix();
         i += 4;
     }
     return buf + i;
@@ -259,7 +319,7 @@ double* AGXVehicleContinuousTrackDevice::writeState(double* out_buf) const
         out_buf[i++] = p.x();
         out_buf[i++] = p.y();
         out_buf[i++] = p.z();
-        Quat q(T.linear());
+        Quaternion q(T.linear());
         out_buf[i++] = q.w();
         out_buf[i++] = q.x();
         out_buf[i++] = q.y();
@@ -311,16 +371,16 @@ void AGXVehicleContinuousTrackDevice::setDesc(const AGXVehicleContinuousTrackDev
     static_cast<AGXVehicleContinuousTrackDeviceDesc&>(*this) = desc;
 }
 
-void AGXVehicleContinuousTrackDevice::getDesc(AGXVehicleContinuousTrackDeviceDesc& desc)
+void AGXVehicleContinuousTrackDevice::getDesc(AGXVehicleContinuousTrackDeviceDesc& desc) const
 {
-    desc = static_cast<AGXVehicleContinuousTrackDeviceDesc&>(*this);
+    desc = static_cast<const AGXVehicleContinuousTrackDeviceDesc&>(*this);
 }
 
 void AGXVehicleContinuousTrackDevice::reserveTrackStateSize(const unsigned int& num) {
     m_trackStates.reserve(num);
 }
 
-void AGXVehicleContinuousTrackDevice::addTrackState(const Vector3& boxSize, const Position& pos) {
+void AGXVehicleContinuousTrackDevice::addTrackState(const Vector3& boxSize, const Isometry3& pos) {
     TrackState s;
     s.boxSize = boxSize;
     s.position = pos;

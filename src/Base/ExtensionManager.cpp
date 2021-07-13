@@ -13,14 +13,13 @@
 #include "View.h"
 #include "ToolBar.h"
 #include "MainWindow.h"
-#include "TimeSyncItemEngine.h"
 #include "LazyCaller.h"
 #include <cnoid/GettextUtil>
 #include <cnoid/ExecutablePath>
 #include <QMenuBar>
 #include <boost/algorithm/string.hpp>
 #include <set>
-#include <stack>
+#include <deque>
 #include "gettext.h"
 
 using namespace std;
@@ -28,66 +27,56 @@ using namespace cnoid;
 
 namespace cnoid {
 
-class ExtensionManagerImpl
+class ExtensionManager::Impl
 {
 public:
-    ExtensionManagerImpl(ExtensionManager* self, const std::string& moduleName);
-    ~ExtensionManagerImpl();
-
-    void setVersion(const std::string& version, bool isPlugin);
-
-    void deleteManagedObjects();
-
     ExtensionManager* self;
     string moduleName;
     string textDomain;
-    stack<ExtensionManager::PtrHolderBase*> pointerHolders;
+    deque<PtrHolderBase*> pointerHolders;
     Signal<void()> sigSystemUpdated;
     Signal<void()> sigReleaseRequest;
     std::unique_ptr<MenuManager> menuManager;
     std::unique_ptr<ItemManager> itemManager;
-    std::unique_ptr<TimeSyncItemEngineManager> timeSyncItemEngineManger;
     std::unique_ptr<ViewManager> viewManager;
+
+    static set<Impl*> instances;
+    static LazyCaller emitSigSystemUpdatedLater;
+
+    Impl(ExtensionManager* self, const std::string& moduleName);
+    ~Impl();
+    void setVersion(const std::string& version, bool isPlugin);
+    deque<PtrHolderBase*>::iterator deleteManagedObject(deque<PtrHolderBase*>::iterator iter);
+    void deleteManagedObjects();
+    static void emitSigSystemUpdated();
 };
 
+set<ExtensionManager::Impl*> ExtensionManager::Impl::instances;
+
+LazyCaller ExtensionManager::Impl::emitSigSystemUpdatedLater(
+    [](){ ExtensionManager::Impl::emitSigSystemUpdated(); });
+
 }
-
-namespace {
-    
-set<ExtensionManagerImpl*> extensionManagerImpls;
-
-void emitSigSystemUpdated()
-{
-    set<ExtensionManagerImpl*>::iterator p = extensionManagerImpls.begin();
-    while(p != extensionManagerImpls.end()){
-        (*p)->sigSystemUpdated();
-        ++p;
-    }
-}
-
-LazyCaller emitSigSystemUpdatedLater(emitSigSystemUpdated);
-}
-
 
 ExtensionManager::ExtensionManager(const std::string& moduleName, bool isPlugin)
 {
-    impl = new ExtensionManagerImpl(this, moduleName);
+    impl = new Impl(this, moduleName);
     impl->setVersion(CNOID_FULL_VERSION_STRING, isPlugin);
 }
 
 
 ExtensionManager::ExtensionManager(const std::string& moduleName, const std::string& version, bool isPlugin)
 {
-    impl = new ExtensionManagerImpl(this, moduleName);
+    impl = new Impl(this, moduleName);
     impl->setVersion(version, isPlugin);
 }
     
     
-ExtensionManagerImpl::ExtensionManagerImpl(ExtensionManager* self, const std::string& moduleName)
+ExtensionManager::Impl::Impl(ExtensionManager* self, const std::string& moduleName)
     : self(self),
       moduleName(moduleName)
 {
-    extensionManagerImpls.insert(this);
+    instances.insert(this);
 }
 
 
@@ -97,7 +86,7 @@ ExtensionManager::~ExtensionManager()
 }
 
 
-ExtensionManagerImpl::~ExtensionManagerImpl()
+ExtensionManager::Impl::~Impl()
 {
     if(itemManager){
         itemManager->detachAllManagedTypeItemsFromRoot();
@@ -106,7 +95,7 @@ ExtensionManagerImpl::~ExtensionManagerImpl()
     ProjectManager::instance()->resetArchivers(moduleName);
     deleteManagedObjects();
     sigReleaseRequest();
-    extensionManagerImpls.erase(this);
+    instances.erase(this);
 }
 
 
@@ -129,15 +118,6 @@ ItemManager& ExtensionManager::itemManager()
         impl->itemManager->bindTextDomain(impl->textDomain);
     }
     return *impl->itemManager;
-}
-
-
-TimeSyncItemEngineManager& ExtensionManager::timeSyncItemEngineManger()
-{
-    if(!impl->timeSyncItemEngineManger){
-        impl->timeSyncItemEngineManger.reset(new TimeSyncItemEngineManager(impl->moduleName));
-    }
-    return *impl->timeSyncItemEngineManger;
 }
 
 
@@ -167,7 +147,7 @@ OptionManager& ExtensionManager::optionManager()
 }
 
 
-void ExtensionManagerImpl::setVersion(const std::string& version, bool isPlugin)
+void ExtensionManager::Impl::setVersion(const std::string& version, bool isPlugin)
 {
     vector<string> v;
     boost::algorithm::split(v, version, boost::is_any_of("."));
@@ -199,7 +179,7 @@ ExtensionManager::PtrHolderBase::~PtrHolderBase()
 
 void ExtensionManager::manageSub(PtrHolderBase* holder)
 {
-    impl->pointerHolders.push(holder);
+    impl->pointerHolders.push_back(holder);
 }
 
 
@@ -212,12 +192,44 @@ void ExtensionManager::addToolBar(ToolBar* toolBar)
 }
 
 
-void ExtensionManagerImpl::deleteManagedObjects()
+void ExtensionManager::mountToolBar(ToolBar* toolBar)
 {
-    while(!pointerHolders.empty()){
-        ExtensionManager::PtrHolderBase* holder = pointerHolders.top();
-        delete holder;
-        pointerHolders.pop();
+    toolBar->setVisibleByDefault();
+
+    // Remove the existing tool bars that have the same name with the new tool bar
+    auto p = impl->pointerHolders.begin();
+    while(p != impl->pointerHolders.end()){
+        auto toolBarHolder = dynamic_cast<PtrHolder<ToolBar*>*>(*p);
+        if(toolBarHolder){
+            auto existingToolBar = toolBarHolder->pointer;
+            if(existingToolBar->objectName() == toolBar->objectName()){
+                MainWindow::instance()->removeToolBar(existingToolBar);
+                p = impl->deleteManagedObject(p);
+                continue;
+            }
+        }
+        ++p;
+    }
+
+    addToolBar(toolBar);
+}
+
+
+deque<ExtensionManager::PtrHolderBase*>::iterator
+ExtensionManager::Impl::deleteManagedObject(deque<PtrHolderBase*>::iterator iter)
+{
+    auto holder = *iter;
+    delete holder;
+    return pointerHolders.erase(iter);
+}
+
+
+
+void ExtensionManager::Impl::deleteManagedObjects()
+{
+    auto p = pointerHolders.begin();
+    while(p != pointerHolders.end()){
+        p = deleteManagedObject(p);
     }
 }
 
@@ -230,7 +242,15 @@ SignalProxy<void()> ExtensionManager::sigSystemUpdated()
 
 void ExtensionManager::notifySystemUpdate()
 {
-    emitSigSystemUpdatedLater();
+    Impl::emitSigSystemUpdatedLater();
+}
+
+
+void ExtensionManager::Impl::emitSigSystemUpdated()
+{
+    for(auto& instance : instances){
+        instance->sigSystemUpdated();
+    }
 }
 
 

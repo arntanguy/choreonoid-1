@@ -30,7 +30,7 @@ struct NodeClassRegistration {
 }
 
 
-SceneCollision::SceneCollision(std::shared_ptr< std::vector<CollisionLinkPairPtr> > collisionPairs)
+SceneCollision::SceneCollision(std::shared_ptr<std::vector<CollisionLinkPairPtr>> collisionPairs)
     : SgLineSet(findClassId<SceneCollision>()),
       collisionPairs(collisionPairs)
 {
@@ -57,7 +57,7 @@ void SceneCollision::render(SceneRenderer* renderer)
     
     if(isDirty){
         vertices_->clear();
-        lineVertices().clear();
+        lineVertexIndices().clear();
         for(size_t i=0; i < collisionPairs->size(); ++i){
             const CollisionLinkPair& pair = *(*collisionPairs)[i];
             const vector<Collision>& cols = pair.collisions;

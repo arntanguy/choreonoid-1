@@ -1,7 +1,8 @@
 #set(CMAKE_BUILD_TYPE Debug)
-#set_source_files_properties(STLSceneLoader.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+#set_source_files_properties(SceneGraph.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
 
 set(CNOID_ENABLE_GETTEXT ${CHOREONOID_ENABLE_GETTEXT})
+set(CNOID_ENABLE_GPERFTOOLS_PROFILER ${ENABLE_GPERFTOOLS_PROFILER})
 configure_file(Config.h.in Config.h)
 
 set(sources
@@ -9,7 +10,6 @@ set(sources
   Referenced.cpp
   CloneMap.cpp # This must be before any class using CloneMap::getFlagId.
   HierarchicalClassRegistry.cpp
-  ConnectionSet.cpp
   FileUtil.cpp
   ExecutablePath.cpp
   FilePathVariableProcessor.cpp
@@ -21,8 +21,10 @@ set(sources
   ValueTree.cpp
   YAMLReader.cpp
   YAMLWriter.cpp
+  ArchiveSession.cpp
   EigenUtil.cpp
   EigenArchive.cpp
+  Uuid.cpp
   GeneralId.cpp
   Selection.cpp
   DataMap.cpp
@@ -51,9 +53,8 @@ set(sources
   SceneMarkers.cpp
   SceneRenderer.cpp
   CoordinateAxesOverlay.cpp # This must be after SceneRenderer.cpp
+  SceneGraphOptimizer.cpp
   SceneUtil.cpp
-  AbstractSceneLoader.cpp
-  SceneLoader.cpp
   MeshGenerator.cpp
   MeshFilter.cpp
   MeshExtractor.cpp
@@ -64,10 +65,15 @@ set(sources
   ImageConverter.cpp
   PointSetUtil.cpp
   CollisionDetector.cpp
-  YAMLSceneReader.cpp
-  YAMLSceneLoader.cpp
+  AbstractSceneLoader.cpp
+  SceneLoader.cpp
+  AbstractSceneWriter.cpp
+  StdSceneReader.cpp
+  StdSceneLoader.cpp
   StdSceneWriter.cpp
   STLSceneLoader.cpp
+  ObjSceneLoader.cpp
+  ObjSceneWriter.cpp
   VRML.cpp
   VRMLParser.cpp
   VRMLWriter.cpp
@@ -92,7 +98,7 @@ set(headers
   ${CMAKE_CURRENT_BINARY_DIR}/Config.h
   Referenced.h
   CloneMap.h
-  CloneableReferenced.h
+  ClonableReferenced.h
   HierarchicalClassRegistry.h
   PolymorphicFunctionSet.h
   PolymorphicReferencedArray.h
@@ -117,10 +123,12 @@ set(headers
   ValueTreeUtil.h
   YAMLReader.h
   YAMLWriter.h
+  ArchiveSession.h
   EigenTypes.h
   EigenUtil.h
   EigenArchive.h
   MathUtil.h
+  Uuid.h
   GeneralId.h
   Selection.h
   DataMap.h
@@ -147,6 +155,7 @@ set(headers
   BoundingBox.h
   SceneNodeClassRegistry.h
   PolymorphicSceneNodeFunctionSet.h
+  SceneUpdate.h
   SceneGraph.h
   SceneDrawables.h
   SceneCameras.h
@@ -155,9 +164,8 @@ set(headers
   SceneMarkers.h
   SceneRenderer.h
   CoordinateAxesOverlay.h
+  SceneGraphOptimizer.h
   SceneUtil.h
-  AbstractSceneLoader.h
-  SceneLoader.h
   MeshGenerator.h
   MeshFilter.h
   MeshExtractor.h
@@ -171,10 +179,16 @@ set(headers
   PointSetUtil.h
   Collision.h
   CollisionDetector.h
-  YAMLSceneReader.h
-  YAMLSceneLoader.h
+  AbstractSceneLoader.h
+  SceneLoader.h
+  AbstractSceneWriter.h
+  StdSceneReader.h
+  StdSceneLoader.h
   StdSceneWriter.h
   STLSceneLoader.h
+  ObjSceneLoader.h
+  ObjSceneWriter.h
+  SimpleScanner.h
   VRML.h
   VRMLParser.h
   VRMLWriter.h
@@ -189,8 +203,17 @@ set(headers
   CnoidUtil.h
   )
 
-include_directories(${LIBYAML_INCLUDE_DIRS} ${PNG_INCLUDE_DIRS} ${JPEG_INCLUDE_DIRS})
+include_directories(
+  ${LIBYAML_INCLUDE_DIRS} ${PNG_INCLUDE_DIRS} ${JPEG_INCLUDE_DIRS} ${LIBUUID_INCLUDE_DIRS})
 link_directories(${LIBYAML_LIBRARY_DIRS})
+
+include_directories(${PROJECT_SOURCE_DIR}/thirdparty/fast_float-0.8.0/include)
+
+if(ENABLE_GPERFTOOLS_PROFILER)
+  include_directories(${GPREFTOOLS_PROFILER_INCLUDE_DIRS})
+  link_directories(${GPREFTOOLS_PROFILER_LIBRARY_DIRS})
+  set(sources ${sources} ProfilerUtil.cpp)
+endif()
 
 set(target CnoidUtil)
 make_gettext_mofiles(${target} mofiles)
@@ -199,15 +222,19 @@ choreonoid_add_library(${target} SHARED ${sources} ${mofiles} HEADERS ${headers}
 if(UNIX)
   set(libraries 
     fmt::fmt
-    ${LIBYAML_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES}
+    ${LIBYAML_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${LIBUUID_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${Boost_SYSTEM_LIBRARY} ${Boost_FILESYSTEM_LIBRARY}
+    ${Boost_SYSTEM_LIBRARY}
     ${GETTEXT_LIBRARIES}
     m dl
     )
 
-  if(CMAKE_COMPILER_IS_GNUCC AND (NOT CMAKE_CXX_STANDARD LESS 17))
-    set(libraries ${libraries} stdc++fs)
+  if(FILESYSTEM_LIBRARY)
+    set(libraries ${libraries} ${FILESYSTEM_LIBRARY})
+  endif()
+
+  if(ENABLE_GPERFTOOLS_PROFILER)
+    target_link_libraries(${target} ${GPREFTOOLS_PROFILER_LIBRARIES})
   endif()
 
   if(APPLE)
@@ -218,7 +245,10 @@ if(UNIX)
   
 elseif(MSVC)
   set_target_properties(${target} PROPERTIES COMPILE_DEFINITIONS "YAML_DECLARE_STATIC")
-  set(libraries fmt::fmt ${LIBYAML_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${GETTEXT_LIBRARIES} winmm)
+  set(libraries
+    fmt::fmt
+    ${LIBYAML_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${GETTEXT_LIBRARIES}
+    winmm Rpcrt4)
   find_file(XINPUT_DLL "XInput1_4.dll")
   if(XINPUT_DLL)
     target_link_libraries(${target} ${libraries} XInput)

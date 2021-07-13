@@ -9,6 +9,7 @@
 #include "MenuManager.h"
 #include "AppConfig.h"
 #include "TimeBar.h"
+#include "UnifiedEditHistory.h"
 #include <QResizeEvent>
 #include <QWindowStateChangeEvent>
 #include <QApplication>
@@ -18,7 +19,6 @@
 
 using namespace std;
 using namespace cnoid;
-using namespace std::placeholders;
 
 namespace {
 
@@ -39,18 +39,17 @@ QSize getScreenSize() {
 
 namespace cnoid {
     
-class MainWindowImpl
+class MainWindow::Impl
 {
 public:
     MainWindow* self;
 
-    MainWindowImpl(MainWindow* self, const char* appName, ExtensionManager* ext);
-    ~MainWindowImpl();
+    Impl(MainWindow* self, const char* appName, ExtensionManager* ext);
+    ~Impl();
 
     QWidget* centralWidget;
     QVBoxLayout* centralVBox;
 
-    std::vector<ToolBar*> toolBars;
     ToolBarArea* toolBarArea;
 
     ViewArea* viewArea;
@@ -60,7 +59,7 @@ public:
 
     MappingPtr config;
     ArchivePtr initialLayoutArchive;
-    Action* storeLastLayoutCheck;
+    //Action* storeLastLayoutCheck;
         
     bool isBeforeShowing;
     bool isBeforeDoingInitialLayout;
@@ -109,11 +108,11 @@ MainWindow::MainWindow(const char* appName, ExtensionManager* ext)
     setWindowTitle(appName);
     setFocusPolicy(Qt::WheelFocus);
 
-    impl = new MainWindowImpl(this, appName, ext);
+    impl = new Impl(this, appName, ext);
 }
 
 
-MainWindowImpl::MainWindowImpl(MainWindow* self, const char* appName, ExtensionManager* ext)
+MainWindow::Impl::Impl(MainWindow* self, const char* appName, ExtensionManager* ext)
     : self(self),
       appName(appName)
 {
@@ -219,18 +218,18 @@ MainWindow::~MainWindow()
 }
 
 
-MainWindowImpl::~MainWindowImpl()
+MainWindow::Impl::~Impl()
 {
 
 }
 
 
-void MainWindowImpl::setupMenus(ExtensionManager* ext)
+void MainWindow::Impl::setupMenus(ExtensionManager* ext)
 {
     MenuManager& mm = ext->menuManager();
 
     mm.setPath("/" N_("File")).setBackwardMode().addItem(_("Exit"))
-        ->sigTriggered().connect(std::bind(&MainWindow::close, self));
+        ->sigTriggered().connect([&](){ self->close(); });
 
     mm.setPath("/" N_("Edit"));
 
@@ -238,14 +237,15 @@ void MainWindowImpl::setupMenus(ExtensionManager* ext)
 
     mm.setPath(N_("Show Toolbar"));
     Menu* showToolBarMenu = static_cast<Menu*>(mm.current());
-    showToolBarMenu->sigAboutToShow().connect(std::bind(&ToolBarArea::setVisibilityMenuItems, toolBarArea, showToolBarMenu));
+    showToolBarMenu->sigAboutToShow().connect(
+        [=](){ toolBarArea->setVisibilityMenuItems(showToolBarMenu); });
     
     mm.setCurrent(viewMenu).setPath(N_("Show View"));
     mm.setCurrent(viewMenu).setPath(N_("Create View"));
     mm.setCurrent(viewMenu).setPath(N_("Delete View"));
 
     showViewTabCheck = mm.setCurrent(viewMenu).addCheckItem(_("Show View Tabs"));
-    showViewTabCheck->sigToggled().connect(std::bind(&ViewArea::setViewTabsVisible, viewArea, _1));
+    showViewTabCheck->sigToggled().connect([=](bool on){ viewArea->setViewTabsVisible(on); });
     showViewTabCheck->setChecked(config->get("showViewTabs", true));
 
     mm.setCurrent(viewMenu).addSeparator();
@@ -254,18 +254,18 @@ void MainWindowImpl::setupMenus(ExtensionManager* ext)
     bool showStatusBar = config->get("showStatusBar", true);
     QWidget* statusBar = InfoBar::instance();
     showStatusBarCheck->setChecked(showStatusBar);
-    showStatusBarCheck->sigToggled().connect(std::bind(&QWidget::setVisible, statusBar, _1));
+    showStatusBarCheck->sigToggled().connect([=](bool on){ statusBar->setVisible(on); });
     
     fullScreenCheck = mm.addCheckItem(_("Full Screen"));
     fullScreenCheck->setChecked(config->get("fullScreen", false));
-    fullScreenCheck->sigToggled().connect(std::bind(&MainWindowImpl::onFullScreenToggled, this, _1));
+    fullScreenCheck->sigToggled().connect([&](bool on){ onFullScreenToggled(on); });
 
     mm.setCurrent(viewMenu).setPath(N_("Layout"));
     
-    storeLastLayoutCheck = mm.addCheckItem(_("Store Last Toolbar Layout"));
-    storeLastLayoutCheck->setChecked(config->get("storeLastLayout", false));
+    //storeLastLayoutCheck = mm.addCheckItem(_("Store Last Toolbar Layout"));
+    //storeLastLayoutCheck->setChecked(config->get("storeLastLayout", false));
 
-    mm.addItem(_("Reset Layout"))->sigTriggered().connect(std::bind(&MainWindowImpl::resetLayout, this));
+    mm.addItem(_("Reset Layout"))->sigTriggered().connect([&](){ resetLayout(); });
     
     mm.setPath("/" N_("Tools"));
     mm.setPath("/" N_("Filters"));
@@ -298,15 +298,15 @@ void MainWindow::removeToolBar(ToolBar* toolbar)
 }
 
 
-void MainWindow::getAllToolBars(std::vector<ToolBar*>& out_toolBars)
+std::vector<ToolBar*> MainWindow::toolBars() const
 {
-    impl->toolBarArea->getAllToolBars(out_toolBars);
+    return impl->toolBarArea->toolBars();
 }
 
 
-void MainWindow::getVisibleToolBars(std::vector<ToolBar*>& out_toolBars)
+std::vector<ToolBar*> MainWindow::visibleToolBars() const
 {
-    impl->toolBarArea->getVisibleToolBars(out_toolBars);
+    return impl->toolBarArea->visibleToolBars();
 }
 
 
@@ -370,10 +370,10 @@ void MainWindow::show()
 }
 
 
-void MainWindowImpl::showFirst()
+void MainWindow::Impl::showFirst()
 {
     if(TRACE_FUNCTIONS){
-        cout << "MainWindowImpl::showFirst()" << endl;
+        cout << "MainWindow::Impl::showFirst()" << endl;
     }
     if(isBeforeShowing){
         if(config->get("fullScreen", false)){
@@ -414,7 +414,7 @@ void MainWindowImpl::showFirst()
 }
 
 
-void MainWindowImpl::onFullScreenToggled(bool on)
+void MainWindow::Impl::onFullScreenToggled(bool on)
 {
     if(on){
         if(!self->isFullScreen()){
@@ -444,10 +444,10 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 }
 
 
-void MainWindowImpl::resizeEvent(QResizeEvent* event)
+void MainWindow::Impl::resizeEvent(QResizeEvent* event)
 {
     if(TRACE_FUNCTIONS){
-        cout << "MainWindowImpl::resizeEvent(): size = (";
+        cout << "MainWindow::Impl::resizeEvent(): size = (";
         cout << event->size().width() << ", " << event->size().height() << ")";
         cout << "window size = (" << self->width() << ", " << self->height() << ")" << endl;
         cout << ", windowState = " << self->windowState();
@@ -475,7 +475,7 @@ void MainWindowImpl::resizeEvent(QResizeEvent* event)
             }
 
             if(TRACE_FUNCTIONS){
-                cout << "MainWindowImpl::resizeEvent(): initializeLayout" << endl;
+                cout << "MainWindow::Impl::resizeEvent(): initializeLayout" << endl;
             }
             
             restoreLayout(initialLayoutArchive);
@@ -510,7 +510,7 @@ void MainWindow::restoreLayout(ArchivePtr archive)
 }
 
 
-void MainWindowImpl::restoreLayout(ArchivePtr& archive)
+void MainWindow::Impl::restoreLayout(ArchivePtr& archive)
 {
     if(!isBeforeDoingInitialLayout){
         toolBarArea->restoreLayout(archive);
@@ -522,7 +522,7 @@ void MainWindowImpl::restoreLayout(ArchivePtr& archive)
 }
 
 
-void MainWindowImpl::resetLayout()
+void MainWindow::Impl::resetLayout()
 {
     toolBarArea->resetLayout(config);
     viewArea->resetLayout();
@@ -547,7 +547,7 @@ void MainWindow::storeWindowStateConfig()
 }
 
 
-void MainWindowImpl::storeWindowStateConfig()
+void MainWindow::Impl::storeWindowStateConfig()
 {
     config->write("showViewTabs", showViewTabCheck->isChecked());
     config->write("showStatusBar", InfoBar::instance()->isVisible());
@@ -560,13 +560,15 @@ void MainWindowImpl::storeWindowStateConfig()
     }
     config->write("width", normalSize.width());
     config->write("height", normalSize.height());
+
+    /*
     config->write("storeLastLayout", storeLastLayoutCheck->isChecked());
-    
     if(storeLastLayoutCheck->isChecked()){
         toolBarArea->storeLayout(config);
     } else {
         toolBarArea->removeLayout(config);
     }
+    */
 }
 
 
@@ -576,9 +578,19 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
 }
 
 
-void MainWindowImpl::keyPressEvent(QKeyEvent* event)
+void MainWindow::Impl::keyPressEvent(QKeyEvent* event)
 {
     switch(event->key()){
+
+    case Qt::Key_Z:
+        if(event->modifiers() & Qt::ControlModifier){
+            if(event->modifiers() & Qt::ShiftModifier){
+                UnifiedEditHistory::instance()->redo();
+            } else {
+                UnifiedEditHistory::instance()->undo();
+            }
+        }
+        break;
         
     case Qt::Key_F11:
         fullScreenCheck->toggle();

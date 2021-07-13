@@ -1,4 +1,5 @@
 #include "MprStatementRegistration.h"
+#include "MprStatement.h"
 #include <unordered_map>
 #include <mutex>
 #include <typeindex>
@@ -95,7 +96,8 @@ static MprStatement* create(const std::string& type, FactoryMap& factoryMap, boo
             for(auto& kv : moduleFactoryMap){
                 auto& anotherFactoryMap = kv.second;
                 if(&factoryMap != &anotherFactoryMap){
-                    if(statement = ::create(type, anotherFactoryMap, false)){
+                    statement = ::create(type, anotherFactoryMap, false);
+                    if(statement){
                         break;
                     }
                 }

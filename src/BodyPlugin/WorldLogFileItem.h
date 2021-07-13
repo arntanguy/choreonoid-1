@@ -13,7 +13,6 @@ namespace cnoid {
 
 class SE3;
 class DeviceState;
-class WorldLogFileItemImpl;
 
 class CNOID_EXPORT WorldLogFileItem : public Item
 {
@@ -27,6 +26,10 @@ public:
     bool setLogFile(const std::string& filename);
     const std::string& logFile() const;
 
+    void setTimeStampSuffixEnabled(bool on);
+    bool isTimeStampSuffixEnabled() const;
+
+    void setRecordingFrameRate(double rate);
     double recordingFrameRate() const;
 
     void clearOutput();
@@ -53,13 +56,14 @@ public:
 
 protected:
     virtual Item* doDuplicate() const override;
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
     virtual bool store(Archive& archive) override;
     virtual bool restore(const Archive& archive) override;
 
 private:
-    WorldLogFileItemImpl* impl;
+    class Impl;
+    Impl* impl;
 };
 
 typedef ref_ptr<WorldLogFileItem> WorldLogFileItemPtr;

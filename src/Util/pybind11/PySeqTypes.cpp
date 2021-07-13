@@ -3,18 +3,20 @@
 */
 
 #include "../MultiValueSeq.h"
+#include "../ReferencedObjectSeq.h"
 #include "../ValueTree.h"
 #include "../YAMLWriter.h"
-#include <pybind11/pybind11.h>
+#include "PyUtil.h"
 
-namespace py = pybind11;
+using namespace std;
 using namespace cnoid;
+namespace py = pybind11;
 
 namespace cnoid {
 
 void exportPySeqTypes(py::module& m)
 {
-    py::class_<AbstractSeq>(m, "AbstractSeq")
+    py::class_<AbstractSeq, shared_ptr<AbstractSeq>>(m, "AbstractSeq")
         .def("cloneSeq", &AbstractSeq::cloneSeq)
         .def("copySeqProperties", &AbstractSeq::copySeqProperties)
         .def_property_readonly("seqType", &AbstractSeq::seqType)
@@ -35,12 +37,10 @@ void exportPySeqTypes(py::module& m)
         .def("getOffsetTime", &AbstractSeq::getOffsetTime)
         .def_property("numFrames", &AbstractSeq::getNumFrames, [](AbstractSeq& self, int n){ self.setNumFrames(n); })
         .def("getNumFrames", &AbstractSeq::getNumFrames)
-        .def("setNumFrames", [](AbstractSeq& self, int n){ self.setNumFrames(n); })
-        .def("setNumFrames", [](AbstractSeq& self, int n, bool clearNewElements){ self.setNumFrames(n, clearNewElements); })
+        .def("setNumFrames", &AbstractSeq::setNumFrames, py::arg("n"), py::arg("fillNewElements") = false)
         .def_property("timeLength", &AbstractSeq::getTimeLength, [](AbstractSeq& self, double length){ self.setTimeLength(length); })
         .def("getTimeLength", &AbstractSeq::getTimeLength)
-        .def("setTimeLength",[](AbstractSeq& self, double length){ self.setTimeLength(length); })
-        .def("setTimeLength",[](AbstractSeq& self, double length, bool clearNewElements){ self.setTimeLength(length, clearNewElements); })
+        .def("setTimeLength", &AbstractSeq::setTimeLength, py::arg("length"), py::arg("clearNewElements") = false)
         .def_property("seqContentName", &AbstractSeq::seqContentName, &AbstractSeq::setSeqContentName)
         .def("setSeqContentName", &AbstractSeq::setSeqContentName)
         .def("readSeq", [](AbstractSeq& self, const Mapping* archive){ return self.readSeq(archive); })
@@ -54,15 +54,16 @@ void exportPySeqTypes(py::module& m)
         .def("getDefaultFrameRate", &AbstractSeq::defaultFrameRate)
         ;
 
-    py::class_<AbstractMultiSeq, AbstractSeq>(m, "AbstractMultiSeq")
+    py::class_<AbstractMultiSeq, shared_ptr<AbstractMultiSeq>, AbstractSeq>(m, "AbstractMultiSeq")
         .def("copySeqProperties", &AbstractMultiSeq::copySeqProperties)
-        .def("setDimension", [](AbstractMultiSeq& self, int numFrames, int numParts){ self.setDimension(numFrames, numParts); })
-        .def("setDimension", [](AbstractMultiSeq& self, int numFrames, int numParts, bool clearNewElements){
-                self.setDimension(numFrames, numParts, clearNewElements); })
-        .def_property("numParts", &AbstractMultiSeq::getNumParts, [](AbstractMultiSeq& self, int numParts){ self.setNumParts(numParts); })
-        .def("setNumParts", [](AbstractMultiSeq& self, int numParts){ self.setNumParts(numParts); })
-        .def("setNumParts", [](AbstractMultiSeq& self, int numParts, bool clearNewElements){
-                self.setNumParts(numParts, clearNewElements); })
+        .def("setDimension",
+             &AbstractMultiSeq::setDimension,
+             py::arg("numFrames"), py::arg("numParts"), py::arg("clearNewElements") = false)
+        .def_property(
+            "numParts",
+            &AbstractMultiSeq::getNumParts,
+            [](AbstractMultiSeq& self, int numParts){ self.setNumParts(numParts); })
+        .def("setNumParts", &AbstractMultiSeq::setNumParts, py::arg("n"), py::arg("fillNewElements") = false)
         .def("getNumParts", &AbstractMultiSeq::getNumParts)
         .def("partIndex", &AbstractMultiSeq::partIndex)
         .def("partLabel", &AbstractMultiSeq::partLabel)
@@ -84,15 +85,16 @@ void exportPySeqTypes(py::module& m)
         .def("getSize", &Deque2DDouble::Row::size)
         ;
 
-    py::class_<MultiValueSeq, AbstractMultiSeq>(m, "MultiValueSeq")
+    py::class_<MultiValueSeq, shared_ptr<MultiValueSeq>, AbstractMultiSeq>(m, "MultiValueSeq")
         .def_property_readonly("empty", &MultiValueSeq::empty)
         .def("resize", &MultiValueSeq::resize)
         .def("clear", &MultiValueSeq::clear)
-        .def("at", (MultiValueSeq::Element& (MultiValueSeq::*)(int, int)) &MultiValueSeq::at, py::return_value_policy::reference_internal)
+        .def("at",
+             (MultiValueSeq::Element& (MultiValueSeq::*)(int, int)) &MultiValueSeq::at,
+             py::return_value_policy::reference_internal)
         .def("append", &MultiValueSeq::append)
         .def("pop_back", &MultiValueSeq::pop_back)
-        .def("pop_front", (void (MultiValueSeq::*)(int)) &MultiValueSeq::pop_front)
-        .def("pop_front", (void (MultiValueSeq::*)()) &MultiValueSeq::pop_front)
+        .def("pop_front", &MultiValueSeq::pop_front, py::arg("n") = 1)
         .def("copySeqProperties", &MultiValueSeq::copySeqProperties)
         .def("clampFrameIndex", &MultiValueSeq::clampFrameIndex)
         .def("getClampFrameIndex", &MultiValueSeq::clampFrameIndex)
@@ -109,6 +111,22 @@ void exportPySeqTypes(py::module& m)
         .def("isEmpty", &MultiValueSeq::empty)
         .def("getFrame", (MultiValueSeq::Frame (MultiValueSeq::*)(int)) &MultiValueSeq::frame)
         .def("getPart", (MultiValueSeq::Part (MultiValueSeq::*)(int)) &MultiValueSeq::part)
+        ;
+
+    py::class_<ReferencedObjectSeq, shared_ptr<ReferencedObjectSeq>, AbstractSeq>(m, "ReferencedObjectSeq")
+        .def_property_readonly("clear", &ReferencedObjectSeq::clear)
+        .def_property_readonly("empty", &ReferencedObjectSeq::empty)
+        //.def("at", (&ReferencedObjectSeq::element_type (ReferencedObjectSeq:*)(int)) &ReferencedObjectSeq::at)
+        .def("__getitem__", [](ReferencedObjectSeq& self, int i){ return self[i]; })
+        .def("__setitem__", [](ReferencedObjectSeq& self, int i, ReferencedPtr obj){ self[i] = obj; })
+        .def_property(
+            "front",
+            [](ReferencedObjectSeq& self){ return self.empty() ? nullptr : self.front(); },
+            [](ReferencedObjectSeq& self, ReferencedPtr obj){ if(!self.empty()) self.front() = obj; })
+        .def_property(
+            "back",
+            [](ReferencedObjectSeq& self){ return self.empty() ? nullptr : self.back(); },
+            [](ReferencedObjectSeq& self, ReferencedPtr obj){ if(!self.empty()) self.back() = obj; })
         ;
 }
 

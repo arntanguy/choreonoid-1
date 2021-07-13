@@ -20,14 +20,14 @@ class CNOID_EXPORT PenetrationBlocker
 {
 public:
     /**
-       @param collidionDetector A CollisionDetector object which is only used for the PenetrationBlocker instance.
+       @param collisionDetector A CollisionDetector object which is only used for the PenetrationBlocker instance.
     */
     PenetrationBlocker(CollisionDetectorPtr collisionDetector, Link* targetLink);
         
     void addOpponentLink(Link* link);
     void setDepth(double depth);
     void start();
-    bool adjust(Position& io_T, const Vector3& pushDirection);
+    bool adjust(Isometry3& io_T, const Vector3& pushDirection);
         
 private:
     PenetrationBlockerImpl* impl;

@@ -8,6 +8,8 @@
 #include "InfoBar.h"
 #include "Item.h"
 #include "TextEdit.h"
+#include <cnoid/Tokenizer>
+#include <fmt/format.h>
 #include <QBoxLayout>
 #include <QMessageBox>
 #include <QCoreApplication>
@@ -15,27 +17,39 @@
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream_buffer.hpp>
 #include <stack>
+#include <regex>
 #include <iostream>
 #include "gettext.h"
 
 using namespace std;
 using namespace cnoid;
+using fmt::format;
 namespace iostreams = boost::iostreams;
 
 namespace {
 
-MessageView* messageView = 0;
+MessageView* messageView = nullptr;
+
+struct PendingMessage
+{
+    string message;
+    int type;
+    PendingMessage(const string& message, int type)
+        : message(message), type(type) { }
+};
+vector<PendingMessage> initialPendingMessages;
+
+int flushingRef = 0;
 
 const bool PUT_COUT_TOO = false;
 
 class TextSink : public iostreams::sink
 {
 public:
-    TextSink(MessageViewImpl* messageViewImpl, bool doFlush);
+    TextSink(MessageView::Impl* viewImpl, bool doFlush);
     std::streamsize write(const char* s, std::streamsize n);
 
-    MessageViewImpl* messageViewImpl;
-    QTextEdit& textEdit;
+    MessageView::Impl* viewImpl;
     bool doFlush;
 };
 
@@ -50,36 +64,47 @@ enum MvCommand { MV_PUT, MV_CLEAR };
 class MessageViewEvent : public QEvent
 {
 public:
-    MessageViewEvent(const QString& message, bool doLF, bool doNotify, bool doFlush)
+    MessageViewEvent(const string& message, bool doLF, bool doNotify, bool doFlush)
         : QEvent(QEvent::User),
           command(MV_PUT),
           message(message),
           doLF(doLF),
           doNotify(doNotify),
-          doFlush(doFlush) {
+          doFlush(doFlush)
+    {
+        
     }
 
+    MessageViewEvent(string&& message, bool doLF, bool doNotify, bool doFlush)
+        : QEvent(QEvent::User),
+          command(MV_PUT),
+          message(message),
+          doLF(doLF),
+          doNotify(doNotify),
+          doFlush(doFlush)
+    {
+        
+    }
+    
     MessageViewEvent(MvCommand command)
         : QEvent(QEvent::User),
-          command(command) {
+          command(command)
+    {
 
     }
         
     MvCommand command;
-    QString message;
+    string message;
     bool doLF;
     bool doNotify;
     bool doFlush;
 };
 
-int flushingRef = 0;
-Signal<void()> sigFlushFinished_;
-
 class TextEditEx : public TextEdit
 {
 public:
-    MessageViewImpl* viewImpl;
-    TextEditEx(MessageViewImpl* viewImpl) : viewImpl(viewImpl) { }
+    MessageView::Impl* viewImpl;
+    TextEditEx(MessageView::Impl* viewImpl) : viewImpl(viewImpl) { }
     virtual void keyPressEvent(QKeyEvent* event);
     virtual void resizeEvent(QResizeEvent* event);
     bool isLatestMessageVisible();
@@ -90,19 +115,21 @@ public:
 
 namespace cnoid {
 
-class MessageViewImpl
+class MessageView::Impl
 {
 public:
     MessageView* self;
 
     Qt::HANDLE mainThreadId;
         
-    TextEditEx textEdit;
+    QHBoxLayout* layout;
+    TextEditEx* textEdit;
     QTextCursor cursor;
     QTextCharFormat orgCharFormat;
     QTextCharFormat currentCharFormat;
     QColor orgForeColor;
     QColor orgBackColor;
+    vector<int> escseqParams;
 
     TextSink textSink;
     iostreams::stream_buffer<TextSink> sbuf;
@@ -117,31 +144,31 @@ public:
 
     Signal<void(const std::string& text)> sigMessage;
 
-    MessageViewImpl(MessageView* self);
+    Impl(MessageView* self);
+    void createTextEdit();
 
-    void put(const QString& message, bool doLF, bool doNotify, bool doFlush);
-    void put(int type, const QString& message, bool doLF, bool doNotify, bool doFlush);
-    void doPut(const QString& message, bool doLF, bool doNotify, bool doFlush);
+    void put(const string& message, int type, bool doLF, bool doNotify, bool doFlush, bool isMovable);
+    void put(const std::string& message, bool doLF, bool doNotify, bool doFlush, bool isMovable);
+    void doPut(const string& message, bool doLF, bool doNotify, bool doFlush, bool isMovable);
     void handleMessageViewEvent(MessageViewEvent* event);
     void flush();
     void doClear();
     void clear();
-
-    void insertPlainText(const QString& message, bool doLF);
-    bool paramtoInt(const QString& txt, vector<int>& n);
+    void insertPlainText(const string& message, bool doLF);
     int setdefault1(const vector<int>& n);
     int setdefault0(const vector<int>& n);
     void inttoColor(int n, QColor& col);
-    void textProperties(const vector<int>& n);
-    void escapeSequence(QString& txt);
+    void applySelectGraphicRenditionCommands(const vector<int>& commands);
+    void extractEscapeSequence(string& txt);
 };
 
 }
 
 
-TextSink::TextSink(MessageViewImpl* messageViewImpl, bool doFlush)
-    : messageViewImpl(messageViewImpl),
-      textEdit(messageViewImpl->textEdit),
+namespace {
+
+TextSink::TextSink(MessageView::Impl* viewImpl, bool doFlush)
+    : viewImpl(viewImpl),
       doFlush(doFlush)
 {
 
@@ -150,8 +177,7 @@ TextSink::TextSink(MessageViewImpl* messageViewImpl, bool doFlush)
 
 std::streamsize TextSink::write(const char* s, std::streamsize n)
 {
-    messageViewImpl->put(QString::fromLocal8Bit(s, n), false, false, doFlush);
-    //messageViewImpl->put(QString::fromUtf8(s, n), false, false, doFlush);
+    viewImpl->put(string(s, n), false, false, doFlush, true);
     return n;
 }
 
@@ -194,12 +220,28 @@ bool TextEditEx::isLatestMessageVisible()
     int scrollPos = getScrollPos();
     return (scrollPos > maxScrollPos() - 3 * scrollSingleStep());
 }
-    
+
+}
+
+
+void MessageView::postMessageBeforeInitialization(const std::string& message, int type)
+{
+    initialPendingMessages.emplace_back(message, type);
+}
+
 
 void MessageView::initializeClass(ExtensionManager* ext)
 {
     messageView = ext->viewManager().registerClass<MessageView>(
         "MessageView", N_("Message"), ViewManager::SINGLE_DEFAULT);
+
+    if(!initialPendingMessages.empty()){
+        for(auto& m : initialPendingMessages){
+            messageView->putln(m.message, m.type);
+        }
+        initialPendingMessages.clear();
+        initialPendingMessages.shrink_to_fit();
+    }
 }
 
 
@@ -223,14 +265,14 @@ MessageView* MessageView::mainInstance()
 
 MessageView::MessageView()
 {
-    impl = new MessageViewImpl(this);
+    impl = new Impl(this);
 }
 
 
-MessageViewImpl::MessageViewImpl(MessageView* self) :
+MessageView::Impl::Impl(MessageView* self) :
     self(self),
     mainThreadId(QThread::currentThreadId()),
-    textEdit(this),
+    textEdit(nullptr),
     textSink(this, false),
     sbuf(textSink),
     os(&sbuf),
@@ -240,28 +282,38 @@ MessageViewImpl::MessageViewImpl(MessageView* self) :
 {
     self->setDefaultLayoutArea(View::BOTTOM);
 
-    textEdit.setObjectName("TextEdit");
-    textEdit.setFrameShape(QFrame::NoFrame);
-    //textEdit.setReadOnly(true);
-    textEdit.setTextInteractionFlags(
-        Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-    textEdit.setWordWrapMode(QTextOption::WrapAnywhere);
-    textEdit.setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
-
-    QHBoxLayout* layout = new QHBoxLayout();
-    layout->addWidget(&textEdit);
+    layout = new QHBoxLayout;
     self->setLayout(layout);
 
-    textEdit.moveCursor(QTextCursor::End);
-    cursor = textEdit.textCursor();
-    
+    createTextEdit();
+}
+
+
+void MessageView::Impl::createTextEdit()
+{
+    if(textEdit){
+        delete textEdit;
+    }
+    textEdit = new TextEditEx(this);
+
+    textEdit->setObjectName("TextEdit");
+    textEdit->setFrameShape(QFrame::NoFrame);
+    //textEdit->setReadOnly(true);
+    textEdit->setTextInteractionFlags(
+        Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    textEdit->setWordWrapMode(QTextOption::WrapAnywhere);
+    textEdit->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+
+    layout->addWidget(textEdit);
+
     QFont font("monospace");
     font.setStyleHint(QFont::TypeWriter);
-    textEdit.setFont(font);
+    textEdit->setFont(font);
 
-    orgForeColor = textEdit.palette().color(QPalette::Text);
-    orgBackColor = textEdit.palette().color(QPalette::Base);
-    
+    orgForeColor = textEdit->palette().color(QPalette::Text);
+    orgBackColor = textEdit->palette().color(QPalette::Base);
+
+    cursor = textEdit->textCursor();
     currentCharFormat = cursor.charFormat();
     orgCharFormat = currentCharFormat;
     orgCharFormat.setForeground(orgForeColor);
@@ -307,182 +359,255 @@ void MessageView::endStdioRedirect()
 }
 
 
-void MessageView::put(const char* message, int type)
+void MessageView::Impl::doClear()
 {
-    impl->put(type, message, false, false, false);
+    /*
+      The QTextEdit::clear function should be used to clear the text in a QTextEdit widget,
+      but it seems that executing the function may cause memory corruption, and the process
+      will crash during execution or at the end if the function is used.
+      To avoid the problem, the function is currently not used here and the QTextEdit instance
+      is recreated to clear the text. When the cause of this problem is found or improved,
+      the QTextEdit::clear function should be used again to avoid the unnecessary cost of
+      recreation.
+    */
+    createTextEdit();
+
+    /*
+    textEdit->clear();
+    cursor = textEdit->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    currentCharFormat = cursor.charFormat();
+    orgCharFormat = currentCharFormat;
+    orgCharFormat.setForeground(orgForeColor);
+    orgCharFormat.setBackground(orgBackColor);
+    */
+}
+
+
+void MessageView::clear()
+{
+    impl->clear();
+}
+
+
+void MessageView::Impl::clear()
+{
+    if(QThread::currentThreadId() == mainThreadId){
+        doClear();
+    } else {
+        QCoreApplication::postEvent(self, new MessageViewEvent(MV_CLEAR), Qt::NormalEventPriority);
+    }
 }
 
 
 void MessageView::put(const std::string& message, int type)
 {
-    impl->put(type, message.c_str(), false, false, false);
+    impl->put(message, type, false, false, false, false);
+}
+
+
+void MessageView::put(std::string&& message, int type)
+{
+    impl->put(message, type, false, false, false, true);
+}
+
+
+void MessageView::put(const char* message, int type)
+{
+    impl->put(message, type, false, false, false, true);
 }
 
 
 void MessageView::put(const QString& message, int type)
 {
-    impl->put(type, message, false, false, false);
-}
-
-
-void MessageView::putln()
-{
-    impl->put(QString(), true, false, false);
+    impl->put(message.toStdString(), type, false, false, false, true);
 }
 
 
 void MessageView::putln(const std::string& message, int type)
 {
-    impl->put(type, message.c_str(), true, false, false);
+    impl->put(message, type, true, false, false, false);
+}
+
+
+void MessageView::putln(std::string&& message, int type)
+{
+    impl->put(message, type, true, false, false, true);
 }
 
 
 void MessageView::putln(const char* message, int type)
 {
-    impl->put(type, message, true, false, false);
+    impl->put(message, type, true, false, false, true);
 }
 
 
 void MessageView::putln(const QString& message, int type)
 {
-    impl->put(type, message, true, false, false);
+    impl->put(message.toStdString(), type, true, false, false, true);
+}
+
+
+void MessageView::putln()
+{
+    impl->put(string(), Normal, true, false, false, true);
 }
 
 
 void MessageView::notify(const std::string& message, int type)
 {
-    impl->put(type, message.c_str(), true, true, false);
+    impl->put(message, type, true, true, false, false);
+}
+
+
+void MessageView::notify(std::string&& message, int type)
+{
+    impl->put(message, type, true, true, false, true);
 }
 
 
 void MessageView::notify(const char* message, int type)
 {
-    impl->put(type, message, true, true, false);
+    impl->put(message, type, true, true, false, true);
 }
 
 
 void MessageView::notify(const QString& message, int type)
 {
-    impl->put(type, message, true, true, false);
+    impl->put(message.toStdString(), type, true, true, false, true);
 }
 
 
-//! \deprecated
-void MessageView::put(int type, const char* message)
-{
-    impl->put(type, message, false, false, false);
-}
-
-
-//! \deprecated
 void MessageView::put(int type, const std::string& message)
 {
-    impl->put(type, message.c_str(), false, false, false);
+    impl->put(message, type, false, false, false, false);
 }
 
 
-//! \deprecated
+void MessageView::put(int type, const char* message)
+{
+    impl->put(message, type, false, false, false, true);
+}
+
+
 void MessageView::put(int type, const QString& message)
 {
-    impl->put(type, message, false, false, false);
+    impl->put(message.toStdString(), type, false, false, false, true);
 }
 
 
-//! \deprecated
-void MessageView::putln(int type, const char* message)
-{
-    impl->put(type, message, true, false, false);
-}
-
-
-//! \deprecated
 void MessageView::putln(int type, const std::string& message)
 {
-    impl->put(type, message.c_str(), true, false, false);
+    impl->put(message, type, true, false, false, false);
 }
 
 
-//! \deprecated
+void MessageView::putln(int type, const char* message)
+{
+    impl->put(message, type, true, false, false, true);
+}
+
+
 void MessageView::putln(int type, const QString& message)
 {
-    impl->put(type, message, true, false, false);
+    impl->put(message.toStdString(), type, true, false, false, true);
 }
 
 
-void MessageViewImpl::put(const QString& message, bool doLF, bool doNotify, bool doFlush)
+void MessageView::Impl::put
+(const string& message, int type, bool doLF, bool doNotify, bool doFlush, bool isMovable)
+{
+    if(type == MessageView::Normal){
+        put(message, doLF, doNotify, doFlush, isMovable);
+        
+    } else {
+        const char* prefix = "";
+        if(type == Error){
+            prefix = _("Error: ");
+        } else if(type == Warning){
+            prefix = _("Warning: ");
+        }
+        put(format("\x1b[31m{0} {1}\x1b[0m", prefix, message), doLF, doNotify, doFlush, true);
+    }
+}
+
+
+void MessageView::Impl::put(const std::string& message, bool doLF, bool doNotify, bool doFlush, bool isMovable)
 {
     if(QThread::currentThreadId() == mainThreadId){
-        doPut(message, doLF, doNotify, doFlush);
+        doPut(message, doLF, doNotify, doFlush, isMovable);
     } else {
-        MessageViewEvent* event = new MessageViewEvent(message, doLF, doNotify, doFlush);
+        MessageViewEvent* event;
+        if(isMovable){
+            event = new MessageViewEvent(std::move(message), doLF, doNotify, false);
+        } else {
+            event = new MessageViewEvent(message, doLF, doNotify, false);
+        }
         QCoreApplication::postEvent(self, event, Qt::NormalEventPriority);
     }
 }
 
 
-void MessageViewImpl::put(int type, const QString& message, bool doLF, bool doNotify, bool doFlush)
+void MessageView::Impl::doPut(const string& message, bool doLF, bool doNotify, bool doFlush, bool isMovable)
 {
-    if(type == MessageView::Normal){
-        put(message, doLF, doNotify, doFlush);
-    } else {
-        // add the escape sequence to make the text red
-        QString highlighted("\033[31m");
-        if(type == MessageView::Error){
-            highlighted.append(_("Error: "));
-        } else if(type == MessageView::Warning){
-            highlighted.append(_("Warning: "));
-        }
-        highlighted.append(message);
-        highlighted.append("\033[0m");
-
-        put(highlighted, doLF, doNotify, doFlush);
-    }
-}
-
-
-void MessageViewImpl::doPut(const QString& message, bool doLF, bool doNotify, bool doFlush)
-{
-    bool isLatestMessageVisible = textEdit.isLatestMessageVisible();
+    bool isLatestMessageVisible = textEdit->isLatestMessageVisible();
     if(isLatestMessageVisible){
-        textEdit.moveCursor(QTextCursor::End);
+        textEdit->moveCursor(QTextCursor::End);
     }
 
-    QString txt(message);
-    while(true){
-        int i = txt.indexOf("\x1b");
-        if(i < 0){
-            break;
-        }
-        if(i > 0){
-            insertPlainText(txt.left(i), false);
-        }
-        txt = txt.mid(++i);
-        escapeSequence(txt);
-    }
-    insertPlainText(txt, doLF);
-
-    if(isLatestMessageVisible){
-        textEdit.ensureCursorVisible();
-    }
-    
     if(PUT_COUT_TOO){
-        cout << message.toStdString();
+        std::cout << message;
         if(doLF){
-            cout << endl;
+            std::cout << endl;
         }
     }
-
-    if(!sigMessage.empty()){
-        std::string text(message.toStdString());
-        if(doLF){
-            text += "\n";
-        }
-        sigMessage(boost::ref(text));
-    }
-    
     if(doNotify){
         InfoBar::instance()->notify(message);
     }
+    if(!sigMessage.empty()){
+        if(doLF){
+            sigMessage(message + "\n");
+        } else {
+            sigMessage(message);
+        }
+    }
+
+    auto pos = message.find_first_of("\x1b");
+    if(pos == string::npos){
+        insertPlainText(message, doLF);
+
+    } else {
+        string text;
+        if(isMovable){
+            text = std::move(message);
+        } else {
+            text = message;
+        }
+        while(true){
+            if(pos > 0){
+                insertPlainText(text.substr(0, pos), false);
+            }
+            text = text.substr(pos + 1);
+            extractEscapeSequence(text);
+            
+            pos = text.find_first_of("\x1b");
+            if(pos == string::npos){
+                break;
+            }
+        }
+        if(text.empty()){
+            if(doLF){
+                cursor.insertText("\n");
+            }
+        } else {
+            insertPlainText(text, doLF);
+        }
+    }
+
+    if(isLatestMessageVisible){
+        textEdit->ensureCursorVisible();
+    }
+    
     if(doFlush){
         flush();
     }
@@ -500,11 +625,11 @@ bool MessageView::event(QEvent* e)
 }
 
 
-void MessageViewImpl::handleMessageViewEvent(MessageViewEvent* event)
+void MessageView::Impl::handleMessageViewEvent(MessageViewEvent* event)
 {
     switch(event->command){
     case MV_PUT:
-        doPut(event->message, event->doLF, event->doNotify, event->doFlush);
+        doPut(event->message, event->doLF, event->doNotify, event->doFlush, true);
         break;
     case MV_CLEAR:
         doClear();
@@ -517,7 +642,7 @@ void MessageViewImpl::handleMessageViewEvent(MessageViewEvent* event)
 
 int MessageView::currentColumn()
 {
-    QTextCursor cursor = impl->textEdit.textCursor();
+    QTextCursor cursor = impl->textEdit->textCursor();
     cursor.movePosition(QTextCursor::End);
     return cursor.columnNumber();
 }
@@ -533,22 +658,14 @@ void MessageView::flush()
 }
 
 
-void MessageViewImpl::flush()
+void MessageView::Impl::flush()
 {
-    if(QThread::currentThreadId() == mainThreadId){
-        ++flushingRef;
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents|QEventLoop::ExcludeSocketNotifiers, 1.0);
-        --flushingRef;
-        if(flushingRef == 0){
-            sigFlushFinished_();
-        }
-    }
-}
-
-
-SignalProxy<void(const std::string& text)> MessageView::sigMessage()
-{
-    return impl->sigMessage;
+    ++flushingRef;
+        
+    QCoreApplication::processEvents(
+        QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers, 1.0);
+    
+    --flushingRef;
 }
 
 
@@ -558,81 +675,22 @@ bool MessageView::isFlushing()
 }
 
 
-SignalProxy<void()> MessageView::sigFlushFinished()
+SignalProxy<void(const std::string& text)> MessageView::sigMessage()
 {
-    return sigFlushFinished_;
+    return impl->sigMessage;
 }
 
 
-void MessageViewImpl::doClear()
+void MessageView::Impl::insertPlainText(const string& message, bool doLF)
 {
-    textEdit.clear();
-}
-
-
-void MessageView::clear()
-{
-    impl->clear();
-}
-
-
-void MessageViewImpl::clear()
-{
-    if(QThread::currentThreadId() == mainThreadId){
-        doClear();
-    } else {
-        QCoreApplication::postEvent(self, new MessageViewEvent(MV_CLEAR), Qt::NormalEventPriority);
+    cursor.insertText(message.c_str());
+    if(doLF){
+        cursor.insertText("\n");
     }
 }
 
 
-void MessageViewImpl::insertPlainText(const QString& message, bool doLF)
-{
-    if(!doLF){
-        cursor.insertText(message);
-    } else {
-        cursor.insertText(message + "\n");
-    }
-}
-
-
-bool MessageViewImpl::paramtoInt(const QString& txt, vector<int>& n)
-{
-    QStringList stringlist = txt.split(';');
-    for(int j=0; j<stringlist.size(); j++){
-        bool ret;
-        int n0 = stringlist[j].toInt(&ret);
-        if(ret){
-            n.push_back(n0);
-        } else {
-            return false;
-        }
-    }
-    return true;
-}
-
-
-int MessageViewImpl::setdefault1(const vector<int>& n)
-{
-    if(n.size()){
-        return n[0];
-    } else {
-        return 1;
-    }
-}
-
-
-int MessageViewImpl::setdefault0(const vector<int>& n)
-{
-    if(n.size()){
-        return n[0];
-    } else {
-        return 0;
-    }
-}
-
-
-void MessageViewImpl::inttoColor(int n, QColor& col)
+void MessageView::Impl::inttoColor(int n, QColor& col)
 {
     switch(n){
     case 0:
@@ -687,11 +745,12 @@ void MessageViewImpl::inttoColor(int n, QColor& col)
 }
 
 
-void MessageViewImpl::textProperties(const vector<int>& n)
+void MessageView::Impl::applySelectGraphicRenditionCommands(const vector<int>& commands)
 {
     QColor col;
-    for(size_t i=0; i < n.size(); i++){
-        switch(n[i]){
+    for(size_t i=0; i < commands.size(); ++i){
+        int command = commands[i];
+        switch(command){
         case 0:  // Reset all
             currentCharFormat = orgCharFormat;
             break;
@@ -728,22 +787,22 @@ void MessageViewImpl::textProperties(const vector<int>& n)
         case 35:  // Magenda
         case 36:  // Cyan
         case 37:  // White
-            inttoColor(n[i]-30, col);
+            inttoColor(command - 30, col);
             currentCharFormat.setForeground(col);
             break;
         case 38:
         {
             size_t j = i + 1;
-            if(j < n.size()){
-                if(n[j] == 2){  // RGB color specification
-                    if(j + 3 < n.size()){
-                        col = QColor(n[j+1], n[j+2], n[j+3]);
+            if(j < commands.size()){
+                if(commands[j] == 2){ // RGB color specification
+                    if(j + 3 < commands.size()){
+                        col = QColor(commands[j+1], commands[j+2], commands[j+3]);
                         currentCharFormat.setForeground(col);
                         i += 4;
                     }
-                }else if(n[j] == 5){  // Color id specification
-                    if(j + 1 < n.size()){
-                        inttoColor(n[j+1], col);
+                } else if(commands[j] == 5){ // Color id specification
+                    if(j + 1 < commands.size()){
+                        inttoColor(commands[j+1], col);
                         currentCharFormat.setForeground(col);
                         i += 2;
                     }
@@ -762,22 +821,22 @@ void MessageViewImpl::textProperties(const vector<int>& n)
         case 45:  // Magenda background
         case 46:  // Cyan background
         case 47:  // White background
-            inttoColor(n[i]-40, col);
+            inttoColor(command - 40, col);
             currentCharFormat.setBackground(col);
             break;
         case 48:
         {
             size_t j = i + 1;
-            if(j < n.size()){
-                if(n[j] == 2){  // Background color specified by RGB
-                    if(j + 3 <n.size()){
-                        col = QColor(n[j+1], n[j+2], n[j+3]);
+            if(j < commands.size()){
+                if(commands[j] == 2){ // Background color specified by RGB
+                    if(j + 3 < commands.size()){
+                        col = QColor(commands[j+1], commands[j+2], commands[j+3]);
                         currentCharFormat.setBackground(col);
                         i += 4;
                     }
-                }else if(n[j] == 5){  // Background color specified by id
-                    if(j + 1 <n.size()){
-                        inttoColor(n[j+1], col);
+                }else if(commands[j] == 5){ // Background color specified by id
+                    if(j + 1 < commands.size()){
+                        inttoColor(commands[j+1], col);
                         currentCharFormat.setBackground(col);
                         i += 2;
                     }
@@ -796,7 +855,7 @@ void MessageViewImpl::textProperties(const vector<int>& n)
         case 95:
         case 96:
         case 97:
-            inttoColor(n[i]-82, col);
+            inttoColor(command - 82, col);
             currentCharFormat.setForeground(col);
             break;
         case 100:
@@ -807,122 +866,145 @@ void MessageViewImpl::textProperties(const vector<int>& n)
         case 105:
         case 106:
         case 107:
-            inttoColor(n[i]-92, col);
+            inttoColor(command - 92, col);
             currentCharFormat.setBackground(col);
             break;
         }
     }
     cursor.setCharFormat(currentCharFormat);
-    textEdit.setTextCursor(cursor);
+    textEdit->setTextCursor(cursor);
 }
 
 
-void MessageViewImpl::escapeSequence(QString& txt)
+void MessageView::Impl::extractEscapeSequence(string& txt)
 {
-    if(!txt.startsWith("[")){
+    static regex escseqPattern("^\\[([0-9;]*)([A-z])");
+
+    std::smatch match;
+    if(!regex_search(txt, match, escseqPattern, std::regex_constants::format_first_only)){
         return;
     }
 
-    int i = txt.indexOf(QRegExp("[@A-z`]"), 1);
-    if(i < 0){
-        return;
-    }
-    QChar c = txt.at(i);
-    vector<int> n;
-    if(i > 1){
-        if(!paramtoInt(txt.mid(1, i-1), n)){
-            return;
+    int command = match.str(2)[0];
+
+    auto& params = escseqParams;
+    params.clear();
+    int param0 = 1;
+    int param1 = 1;
+    const auto& paramString = match.str(1);
+    if(!paramString.empty()){
+        static Tokenizer<CharSeparator<char>> tokens(CharSeparator<char>(";"));
+        tokens.assign(paramString);
+        for(auto& token : tokens){
+            params.push_back(std::stoi(token));
+        }
+        if(!params.empty()){
+            param0 = params[0];
+            if(params.size() >= 2){
+                param1 = params[1];
+            }
         }
     }
-    
-    if(c=='@'){  // Space insertion
-        int nn=setdefault1(n);
-        QString sp(nn,' ');
-        insertPlainText(sp, false);
-    }else if(c=='A' || c=='k'){  // Cursor up
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Up, QTextCursor::MoveAnchor, nn);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='B' || c=='e'){  // Cursor down
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, nn);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='C' || c=='a'){  // Cursor right
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, nn);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='D'  || c=='j'){  // Cursor left
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Left, QTextCursor::MoveAnchor, nn);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='E'){  // Move the cursor to the first column of the next line
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, nn);
-        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='F'){  // Move the cursor the the first column of the previous line
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::Up, QTextCursor::MoveAnchor, nn);
-        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='G'){  // Cursor right by nn
-        int nn=setdefault1(n);
-        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, nn-1);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='H' || c=='f'){  // Cursor down by nn0 and right by nn1
-        int nn0, nn1;
-        switch(n.size()){
-        case 0:
-            nn0 = nn1 = 1;
-            break;
-        case 1:
-            nn0 = n[0];
-            nn1 = 1;
-            break;
-        case 2 :
-        default :
-            nn0 = n[0];
-            nn1 = n[1];
+
+    switch(command){
+
+    case 'm': // Set character attribute
+        if(!escseqParams.empty()){
+            applySelectGraphicRenditionCommands(params);
+        } else {
+            currentCharFormat = orgCharFormat;
+            textEdit->setCurrentCharFormat(currentCharFormat);            
         }
+        break;
+        
+    case '@': // Space insertion
+        cursor.insertText(QString(param0, ' '));
+        break;
+
+    case 'A': // Cursor up
+    case 'k':
+        cursor.movePosition(QTextCursor::Up, QTextCursor::MoveAnchor, param0);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'B': // Cursor down
+    case 'e':
+        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, param0);
+        textEdit->setTextCursor(cursor);
+        break;
+        
+    case 'C': // Cursor right
+    case 'a':
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, param0);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'D': // Cursor left
+    case 'j':
+        cursor.movePosition(QTextCursor::Left, QTextCursor::MoveAnchor, param0);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'E': // Move the cursor to the first column of the next line
+        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, param0);
+        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'F': // Move the cursor the the first column of the previous line
+        cursor.movePosition(QTextCursor::Up, QTextCursor::MoveAnchor, param0);
+        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'G': // Cursor right by nn
+        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, param0 - 1);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'H': // Cursor down by nn0 and right by nn1
+    case 'f':
         cursor.movePosition(QTextCursor::Start, QTextCursor::MoveAnchor);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, nn0-1);
+        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, param0 - 1);
         cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, nn1-1);
-        textEdit.setTextCursor(cursor);
-    }else if(c=='J'){
-        int nn=setdefault0(n);
-        switch(nn){
-        case 0:  // Erase from the cursor position to the end
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, param1 - 1);
+        textEdit->setTextCursor(cursor);
+        break;
+
+    case 'J':
+        switch(params.empty() ? 0 : params[0]){
+        case 0: // Erase from the cursor position to the end
             cursor.clearSelection();
             cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
             cursor.removeSelectedText();
             break;
-        case 1:  // Erase from the beginning to the cursor position
+        case 1: // Erase from the beginning to the cursor position
             cursor.clearSelection();
             cursor.movePosition(QTextCursor::Start, QTextCursor::KeepAnchor);
             cursor.removeSelectedText();
             break;
-        case 2:  // Erase all
-            textEdit.clear();
+        case 2: // Erase all
+            textEdit->clear();
             break;
         default:
             break;
         }
-    }else if(c=='K'){
-        int nn=setdefault0(n);
-        switch(nn){
-        case 0:  // Erase from the cursor position to the end of the line
+        break;
+
+    case 'K':
+        switch(params.empty() ? 0 : params[0]){
+        case 0: // Erase from the cursor position to the end of the line
             cursor.clearSelection();
             cursor.movePosition(QTextCursor::EndOfLine, QTextCursor::KeepAnchor);
             cursor.removeSelectedText();
             break;
-        case 1:  // Erase from the start of the line to the cursor position
+        case 1: // Erase from the start of the line to the cursor position
             cursor.clearSelection();
             cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::KeepAnchor);
             cursor.removeSelectedText();
             break;
-        case 2:  // Erase a line
+        case 2: // Erase a line
             cursor.clearSelection();
             cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
             cursor.movePosition(QTextCursor::EndOfLine, QTextCursor::KeepAnchor);
@@ -931,75 +1013,96 @@ void MessageViewImpl::escapeSequence(QString& txt)
         default:
             break;
         }
-    }else if(c=='L'){  // Insert empty line
-        int nn=setdefault1(n);
+        break;
+
+    case 'L': // Insert empty line
         cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        for(int i=0; i<nn; i++)
-            textEdit.insertPlainText("\n");
-    }else if(c=='M'){  // Erase nn lines
-        int nn=setdefault1(n);
-        cursor.clearSelection();
-        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::KeepAnchor, nn);
-        cursor.removeSelectedText();
-    }else if(c=='P'){  // Delete nn characters
-        int nn=setdefault1(n);
-        cursor.clearSelection();
-        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, nn);
-        cursor.removeSelectedText();
-        //}else if(c=='S'){  // Scroll up nn lines
-        //	int nn=setdefault1(n);
-        //}else if(c=='T'){  // Scroll down nn lines
-        //	int nn=setdefault1(n);
-    }else if(c=='X'){  // Make nn characters blank
-        int nn=setdefault1(n);
-        cursor.clearSelection();
-        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, nn);
-        QString sp(nn,' ');
-        cursor.insertText(sp);
-        //}else if(c=='Z'){  // Move the cursor to nn previous tab stop
-        //	int nn=setdefault1(n);
-        //}else if(c=='a'){   // Same as 'C'
-        //}else if(c=='c'){  // Terminal characteristics
-        //	int nn=setdefault0(n);
-    }else if(c=='d'){  // Move the cursor to the nn line without changing the current column
-        int nn=setdefault1(n);
-        int i = cursor.columnNumber();
-        cursor.movePosition(QTextCursor::Start, QTextCursor::MoveAnchor);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, nn-1);
-        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, i);
-        textEdit.setTextCursor(cursor);
-        //}else if(c=='e'){  // Same as 'B'
-        //}else if(c=='f'){  // Same as 'H'
-        //}else if(c=='g'){  // Delete tab stop
-        //	int nn=setdefault1(0);
-        //	switch(nn){
-        //	case 0:  // Delete one
-        //		break;
-        //	case 3:  // Delete all
-        //		break;
-        //	}
-        //}else if(c=='h'){  // Set mode
-        //}else if(c=='i'){  // Print mode
-        //}else if(c=='j'){  // Same as 'D'
-        //}else if(c=='k'){  // Same as 'A'
-        //}else if(c=='l'){  // Mode release
-    }else if(c=='m'){  // Set character attribute
-        if(!n.size()){
-            currentCharFormat = orgCharFormat;
-            cout << "!n.size()" << endl;
-            textEdit.setCurrentCharFormat(currentCharFormat);            
-            return;
-        }else{
-            textProperties(n);
+        for(int i=0; i < param0; ++i){
+            textEdit->insertPlainText("\n");
         }
-        //}else if(c=='n'){  // State of the terminal
-        //}else if(c=='r'){  // Set up and down margin
-        //}else if(c=='s'){  // Save cursor position
-        //}else if(c=='t'){  // Window operation
-        //}else if(c=='u'){  // Restore saved cursor position
+        break;
+        
+    case 'M': // Erase nn lines
+        cursor.clearSelection();
+        cursor.movePosition(QTextCursor::StartOfLine, QTextCursor::MoveAnchor);
+        cursor.movePosition(QTextCursor::Down, QTextCursor::KeepAnchor, param0);
+        cursor.removeSelectedText();
+        break;
+
+    case 'P': // Delete nn characters
+        cursor.clearSelection();
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, param0);
+        cursor.removeSelectedText();
+        break;
+
+    case 'S': // Scroll up nn lines
+        break;
+
+    case 'T': // Scroll down nn lines
+        break;
+
+    case 'X': // Make nn characters blank
+        cursor.clearSelection();
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, param0);
+        cursor.insertText(QString(param0, ' '));
+        break;
+
+    case 'Z': // Move the cursor to nn previous tab stop
+        break;
+
+    case 'c': // Terminal characteristics
+        break;
+        
+    case 'd': // Move the cursor to the nn line without changing the current column
+    {        
+        int column = cursor.columnNumber();
+        cursor.movePosition(QTextCursor::Start, QTextCursor::MoveAnchor);
+        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, param0 - 1);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, column);
+        textEdit->setTextCursor(cursor);
+        break;
     }
-    txt = txt.mid(++i);
+
+    case 'g': // Delete tab stop
+        switch(param0){
+        case 0: // Delete one
+            break;
+        case 3: // Delete all
+            break;
+        default:
+            break;
+        }
+        break;
+        
+    case 'h': // Set mode
+        break;
+
+    case 'i': // Print mode
+        break;
+
+    case 'l': // Mode release
+        break;
+
+    case 'n': // State of the terminal
+        break;
+
+    case 'r': // Set up and down margin
+        break;
+
+    case 's': // Save cursor position
+        break;
+
+    case 't': // Window operation
+        break;
+
+    case 'u': // Restore saved cursor position
+        break;
+
+    default:
+        break;
+    }
+    
+    txt = txt.substr(match.length(0));
 }
 
 
@@ -1031,10 +1134,12 @@ void cnoid::showWarningDialog(const QString& message)
     QMessageBox::warning(MainWindow::instance(), _("Warning"), message);
 }
 
+
 void cnoid::showWarningDialog(const char* message)
 {
     showWarningDialog(QString(message));
 }
+
 
 void cnoid::showWarningDialog(const std::string& message)
 {
@@ -1045,8 +1150,8 @@ void cnoid::showWarningDialog(const std::string& message)
 bool cnoid::showConfirmDialog(const QString& caption, const QString& message)
 {
     QMessageBox::StandardButton clicked =
-        QMessageBox::question(MainWindow::instance(), caption, message,
-                              QMessageBox::Ok | QMessageBox::Cancel);
+        QMessageBox::question(
+            MainWindow::instance(), caption, message, QMessageBox::Ok | QMessageBox::Cancel);
     return (clicked == QMessageBox::Ok);
 }
 

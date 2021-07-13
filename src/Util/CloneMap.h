@@ -8,7 +8,7 @@
 
 namespace cnoid {
 
-class CloneableReferenced;
+class ClonableReferenced;
 
 class CNOID_EXPORT CloneMap
 {
@@ -34,7 +34,7 @@ public:
         return findClone<ObjectType>(org.get());
     }
 
-template<class ObjectType>
+    template<class ObjectType>
     ObjectType* getClone(const ObjectType* org){
         return static_cast<ObjectType*>(findOrCreateClone_(org));
     }
@@ -52,12 +52,17 @@ template<class ObjectType>
     */
 
     template<class ObjectType>
-    ObjectType* getClone(const ObjectType* org, const CloneFunction& cloneFunction){
-        return static_cast<ObjectType*>(findOrCreateClone_(org, cloneFunction));
+    ObjectType* getClone(const ObjectType* org, std::function<ObjectType*(const ObjectType* org)> cloneFunction){
+        return static_cast<ObjectType*>(
+            findOrCreateClone_(
+                org,
+                [cloneFunction](const Referenced* org) -> Referenced* {
+                    return cloneFunction(static_cast<const ObjectType*>(org));
+                }));
     }
 
     template<class ObjectType>
-    ObjectType* getClone(ref_ptr<ObjectType> org, const CloneFunction& cloneFunction){
+    ObjectType* getClone(ref_ptr<ObjectType> org, std::function<ObjectType*(const ObjectType* org)> cloneFunction){
         return getClone(org.get(), cloneFunction);
     }
 
@@ -99,7 +104,7 @@ private:
 
     Referenced* findClone_(const Referenced* org);
     Referenced* findOrCreateClone_(const Referenced* org);
-    Referenced* findOrCreateClone_(const CloneableReferenced* org);
+    Referenced* findOrCreateClone_(const ClonableReferenced* org);
     Referenced* findOrCreateClone_(const Referenced* org, const CloneFunction& cloneFunction);
     Referenced* findCloneOrReplaceLater_(
         const Referenced* org, std::function<void(Referenced* clone)> replaceFunction);

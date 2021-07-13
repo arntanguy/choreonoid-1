@@ -81,10 +81,10 @@ public:
 }
 
 
-ToolBar::ToolBar(const QString& title)
+ToolBar::ToolBar(const QString& name)
 {
-    setWindowTitle(title);
-    setObjectName(title);
+    setWindowTitle(name);
+    setObjectName(name);
 
     mainWindow = MainWindow::instance();
 
@@ -104,7 +104,8 @@ ToolBar::ToolBar(const QString& title)
     toolBarArea_ = 0;
 
     isVisibleByDefault_ = false;
-    defaultOrderIndex = 0;
+    isPlacedOnNewRowByDefault_ = false;
+    isAutoRaiseByDefault_ = true;
     
     desiredX = 0;
     layoutPriority = 0;
@@ -118,18 +119,6 @@ ToolBar::ToolBar(const QString& title)
 ToolBar::~ToolBar()
 {
 
-}
-
-
-void ToolBar::setVisibleByDefault(bool on)
-{
-    isVisibleByDefault_ = on;
-}
-
-
-void ToolBar::setStretchable(bool on)
-{
-    isStretchable_ = on;
 }
 
 
@@ -149,7 +138,7 @@ ToolButton* ToolBar::addButton(const QString& text, const QString& tooltip)
     }
 #endif
     button->setText(text);
-    button->setAutoRaise(true);
+    button->setAutoRaise(isAutoRaiseByDefault_);
     button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     if(!tooltip.isEmpty()){
         button->setToolTip(tooltip);
@@ -171,7 +160,7 @@ ToolButton* ToolBar::addButton(const QIcon& icon, const QString& tooltip)
 #endif
     button->setIconSize(mainWindow->iconSize());
     button->setIcon(icon);
-    button->setAutoRaise(true);
+    button->setAutoRaise(isAutoRaiseByDefault_);
     button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     if(!tooltip.isEmpty()){
         button->setToolTip(tooltip);
@@ -263,7 +252,7 @@ ToolButton* ToolBar::addRadioButton(const char* const* xpm, const QString& toolt
 void ToolBar::addAction(QAction* action)
 {
     ToolButton* button = new ToolButton(this);
-    button->setAutoRaise(true);
+    button->setAutoRaise(isAutoRaiseByDefault_);
     button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     button->setDefaultAction(action);
     hbox->insertWidget(insertionPosition, button);
@@ -311,12 +300,15 @@ QWidget* ToolBar::addSeparator()
 }
 
 
-void ToolBar::addSpacing()
+void ToolBar::addSpacing(int spacing)
 {
-    if(separatorExtent < 0){
-        separatorExtent = style()->pixelMetric(QStyle::PM_ToolBarSeparatorExtent);
+    if(spacing < 0){
+        if(separatorExtent < 0){
+            separatorExtent = style()->pixelMetric(QStyle::PM_ToolBarSeparatorExtent);
+        }
+        spacing = separatorExtent;
     }
-    hbox->insertSpacing(insertionPosition, separatorExtent);
+    hbox->insertSpacing(insertionPosition, spacing);
     insertionPosition = -1;
 }
 

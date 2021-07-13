@@ -8,7 +8,6 @@ namespace cnoid {
 
 class AttachmentDevice;
 typedef ref_ptr<AttachmentDevice> AttachmentDevicePtr;
-class YAMLBodyLoader;
 class Mapping;
 
 class CNOID_EXPORT HolderDevice : public Device
@@ -17,7 +16,7 @@ public:
     HolderDevice();
     virtual ~HolderDevice();
 
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyHolderDeviceStateFrom(const HolderDevice* other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -50,7 +49,7 @@ public:
     void clearAttachments();
 
     bool readDescription(const Mapping* info);
-    bool writeDescription(Mapping* info);
+    bool writeDescription(Mapping* info) const;
 
 protected:
     HolderDevice(const HolderDevice& org, bool copyStateOnly, CloneMap* cloneMap);

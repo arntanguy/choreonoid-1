@@ -14,9 +14,9 @@
 
 namespace cnoid {
 
-class WorldItemImpl;
 class CollisionDetector;
 class MaterialTable;
+class MaterialTableItem;
 
 class CNOID_EXPORT WorldItem : public Item, public RenderableItem
 {
@@ -27,11 +27,16 @@ public:
     WorldItem(const WorldItem& org);
     virtual ~WorldItem();
 
+    void storeCurrentBodyPositionsAsInitialPositions();
+    void restoreInitialBodyPositions(bool doNotify = true);
+
     ItemList<BodyItem> coldetBodyItems() const;
 
     bool selectCollisionDetector(const std::string& name);
     CollisionDetector* collisionDetector();
-    void enableCollisionDetection(bool on);
+    void setCollisionDetectionEnabled(bool on);
+    [[deprecated("Use setCollisionDetectionEnabled()")]]
+    void enableCollisionDetection(bool on){ setCollisionDetectionEnabled(on); }
     bool isCollisionDetectionEnabled();
     void updateCollisionDetectorLater();
     void updateCollisionDetector();
@@ -39,11 +44,12 @@ public:
     std::vector<CollisionLinkPairPtr>& collisions() const;
     SignalProxy<void()> sigCollisionsUpdated();
 
+    void setDefaultMaterialTableFile(const std::string& filename);
+    MaterialTable* defaultMaterialTable(bool checkFileUpdate = true);
+    MaterialTable* materialTable();
+
     // RenderableItem
     virtual SgNode* getScene() override;
-
-    void setMaterialTableFile(const std::string& filename);
-    MaterialTable* materialTable(bool checkFileUpdate = true);
 
     //! \deprecated
     ItemList<BodyItem> collisionBodyItems() const { return coldetBodyItems(); }
@@ -55,7 +61,8 @@ protected:
     virtual bool restore(const Archive& archive) override;
 
 private:
-    WorldItemImpl* impl;
+    class Impl;
+    Impl* impl;
 };
 
 typedef ref_ptr<WorldItem> WorldItemPtr;

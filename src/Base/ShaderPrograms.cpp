@@ -39,11 +39,22 @@ class SolidColorProgram::Impl
 {
 public:
     Vector3f color;
-    GLint pointSizeLocation;
     GLint colorLocation;
-    GLint colorPerVertexLocation;
+    GLint pointSizeLocation;
     bool isColorChangable;
+
+    Impl();    
+};
+
+
+class SolidColorExProgram::Impl
+{
+public:
+    GLint colorPerVertexLocation;
+    GLint alphaLocation;
+    float alpha;
     bool isVertexColorEnabled;
+    bool alphaFlag;
 
     Impl();    
 };
@@ -141,7 +152,7 @@ public:
         AMBIENT_COLOR,
         EMISSION_COLOR,
         SPECULAR_COLOR,
-        SHININESS,
+        SPECULAR_EXPONENT,
         ALPHA,
         NUM_STATE_FLAGS
     };
@@ -151,7 +162,7 @@ public:
     Vector3f ambientColor;
     Vector3f specularColor;
     Vector3f emissionColor;
-    float shininess;
+    float specularExponent;
     float alpha;
     float minTransparency;
 
@@ -159,7 +170,7 @@ public:
     GLint ambientColorLocation;
     GLint specularColorLocation;
     GLint emissionColorLocation;
-    GLint shininessLocation;
+    GLint specularExponentLocation;
     GLint alphaLocation;
 
     int colorTextureIndex;
@@ -196,9 +207,13 @@ public:
     // For the wireframe overlay rendering
     int viewportWidth, viewportHeight;
     GLint viewportMatrixLocation;
-    int isWireframeEnabledLocation;
+    GLint isWireframeEnabledLocation;
+    GLint wireframeColorLocation;
+    GLint wireframeWidthLocation;
     bool isViewportMatrixInvalidated;
     bool isWireframeEnabled;
+    Vector4f wireframeColor;
+    float wireframeWidth;
     
     // For the shadow casting
     bool isShadowAntiAliasingEnabled;
@@ -301,7 +316,7 @@ bool ShaderProgram::isActive() const
 }
 
 
-void ShaderProgram::setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L)
+void ShaderProgram::setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
 
 }
@@ -348,24 +363,24 @@ void NolightingProgram::initialize()
 }
 
 
-void NolightingProgram::setTransform(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L)
+void NolightingProgram::setTransform(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
     Matrix4f PVM;
     if(L){
-        PVM = (PV * M.matrix() * (*L)).cast<float>();
+        PVM.noalias() = (PV * M.matrix() * (*L)).cast<float>();
     } else {
-        PVM = (PV * M.matrix()).cast<float>();
+        PVM.noalias() = (PV * M.matrix()).cast<float>();
     }
     glUniformMatrix4fv(impl->MVPLocation, 1, GL_FALSE, PVM.data());
 }
 
 
 SolidColorProgram::SolidColorProgram()
-    : NolightingProgram(
+    : SolidColorProgram(
         { { ":/Base/shader/SolidColor.vert", GL_VERTEX_SHADER },
           { ":/Base/shader/SolidColor.frag", GL_FRAGMENT_SHADER } })
 {
-    impl = new Impl;
+
 }
 
 
@@ -380,7 +395,6 @@ SolidColorProgram::Impl::Impl()
 {
     color.setZero();
     isColorChangable = true;
-    isVertexColorEnabled = false;
 }
 
 
@@ -395,9 +409,8 @@ void SolidColorProgram::initialize()
     NolightingProgram::initialize();
 
     auto& glsl = glslProgram();
-    impl->pointSizeLocation = glsl.getUniformLocation("pointSize");
     impl->colorLocation = glsl.getUniformLocation("color");
-    impl->colorPerVertexLocation = glsl.getUniformLocation("colorPerVertex");
+    impl->pointSizeLocation = glsl.getUniformLocation("pointSize");
 }
 
 
@@ -406,16 +419,18 @@ void SolidColorProgram::activate()
     ShaderProgram::activate();
     
     glUniform3fv(impl->colorLocation, 1, impl->color.data());
-
-    if(impl->colorPerVertexLocation >= 0){
-        glUniform1i(impl->colorPerVertexLocation, impl->isVertexColorEnabled);
-    }
 }
 
 
 void SolidColorProgram::setMaterial(const SgMaterial* material)
 {
-    setColor(material->diffuseColor() + material->emissiveColor());
+    SolidColorProgram::setColor(material->diffuseColor() + material->emissiveColor());
+}
+
+
+void SolidColorProgram::setPointSize(float s)
+{
+    glUniform1f(impl->pointSizeLocation, s);
 }
 
 
@@ -427,7 +442,15 @@ void SolidColorProgram::setColor(const Vector3f& color)
             impl->color = color;
         }
     }
-    setVertexColorEnabled(false);
+}
+
+
+void SolidColorProgram::resetColor(const Vector3f& color)
+{
+    if(color != impl->color){
+        glUniform3fv(impl->colorLocation, 1, color.data());
+        impl->color = color;
+    }
 }
 
 
@@ -443,7 +466,79 @@ bool SolidColorProgram::isColorChangable() const
 }
 
 
-void SolidColorProgram::setVertexColorEnabled(bool on)
+SolidColorExProgram::SolidColorExProgram()
+    : SolidColorExProgram(
+        { { ":/Base/shader/SolidColor.vert", GL_VERTEX_SHADER },
+          { ":/Base/shader/SolidColorEx.frag", GL_FRAGMENT_SHADER } })
+{
+
+}
+
+
+SolidColorExProgram::SolidColorExProgram(std::initializer_list<ShaderSource> sources)
+    : SolidColorProgram(sources)
+{
+    setCapability(Transparency);
+    impl = new Impl;
+}
+
+
+SolidColorExProgram::Impl::Impl()
+{
+    isVertexColorEnabled = false;
+}
+    
+
+SolidColorExProgram::~SolidColorExProgram()
+{
+    delete impl;
+}
+
+
+void SolidColorExProgram::initialize()
+{
+    SolidColorProgram::initialize();
+
+    auto& glsl = glslProgram();
+    impl->colorPerVertexLocation = glsl.getUniformLocation("colorPerVertex");
+    impl->alphaLocation = glsl.getUniformLocation("alpha");
+    impl->alphaFlag = false;
+}
+
+
+void SolidColorExProgram::activate()
+{
+    SolidColorProgram::activate();
+
+    if(impl->colorPerVertexLocation >= 0){
+        glUniform1i(impl->colorPerVertexLocation, impl->isVertexColorEnabled);
+    }
+    glUniform1f(impl->alphaLocation, impl->alpha);
+    impl->alphaFlag = false;
+}
+
+
+void SolidColorExProgram::setMaterial(const SgMaterial* material)
+{
+    SolidColorExProgram::setColor(material->diffuseColor() + material->emissiveColor());
+
+    float a = 1.0f - material->transparency();
+    if(!impl->alphaFlag || impl->alpha != a){
+        glUniform1f(impl->alphaLocation, a);
+        impl->alpha = a;
+        impl->alphaFlag = true;
+    }
+}
+
+
+void SolidColorExProgram::setColor(const Vector3f& color)
+{
+    SolidColorProgram::setColor(color);
+    SolidColorExProgram::setVertexColorEnabled(false);
+}
+
+
+void SolidColorExProgram::setVertexColorEnabled(bool on)
 {
     if(on != impl->isVertexColorEnabled){
         if(impl->colorPerVertexLocation >= 0){
@@ -454,11 +549,59 @@ void SolidColorProgram::setVertexColorEnabled(bool on)
 }
 
 
-void SolidColorProgram::setPointSize(float s)
+ThickLineProgram::ThickLineProgram()
+    : SolidColorExProgram(
+        { { ":/Base/shader/SolidColor.vert", GL_VERTEX_SHADER },
+          { ":/Base/shader/ThickLine.geom", GL_GEOMETRY_SHADER },
+          { ":/Base/shader/SolidColorEx.frag", GL_FRAGMENT_SHADER } })
 {
-    glUniform1f(impl->pointSizeLocation, s);
+    impl = new Impl;
 }
 
+
+ThickLineProgram::~ThickLineProgram()
+{
+    delete impl;
+}
+
+    
+void ThickLineProgram::initialize()
+{
+    SolidColorExProgram::initialize();
+
+    impl->lineWidth = 1.0f;
+
+    auto& glsl = glslProgram();
+    impl->lineWidthLocation = glsl.getUniformLocation("lineWidth");
+    impl->viewportSizeLocation = glsl.getUniformLocation("viewportSize");
+    glsl.use();
+}
+
+
+void ThickLineProgram::activate()
+{
+    SolidColorExProgram::activate();
+
+    glUniform1f(impl->lineWidthLocation, impl->lineWidth);
+
+    if(impl->isViewportSizeInvalidated){
+        glUniform2f(impl->viewportSizeLocation, impl->viewportWidth, impl->viewportHeight);
+    }
+}
+
+
+void ThickLineProgram::setViewportSize(int width, int height)
+{
+    impl->viewportWidth = width;
+    impl->viewportHeight = height;
+    impl->isViewportSizeInvalidated = true;
+}
+
+
+void ThickLineProgram::setLineWidth(float width)
+{
+    impl->lineWidth = width;
+}
 
 
 SolidPointProgram::SolidPointProgram()
@@ -522,7 +665,7 @@ void SolidPointProgram::setProjectionMatrix(const Matrix4& P)
 
 
 void SolidPointProgram::setTransform
-(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L)
+(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
     const Affine3f VM = (V * M).cast<float>();
     glUniformMatrix4fv(impl->modelViewMatrixLocation, 1, GL_FALSE, VM.data());
@@ -537,58 +680,36 @@ void SolidPointProgram::setViewportSize(int width, int height)
 }
 
 
-ThickLineProgram::ThickLineProgram()
+OutlineProgram::OutlineProgram()
     : SolidColorProgram(
-        { { ":/Base/shader/SolidColor.vert", GL_VERTEX_SHADER },
-          { ":/Base/shader/ThickLine.geom", GL_GEOMETRY_SHADER },
+        { { ":/Base/shader/Outline.vert", GL_VERTEX_SHADER },
           { ":/Base/shader/SolidColor.frag", GL_FRAGMENT_SHADER } })
 {
-    impl = new Impl;
+    setColorChangable(false);
 }
 
 
-ThickLineProgram::~ThickLineProgram()
-{
-    delete impl;
-}
-
-    
-void ThickLineProgram::initialize()
+void OutlineProgram::initialize()
 {
     SolidColorProgram::initialize();
 
-    impl->lineWidth = 1.0f;
-
-    auto& glsl = glslProgram();
-    impl->lineWidthLocation = glsl.getUniformLocation("lineWidth");
-    impl->viewportSizeLocation = glsl.getUniformLocation("viewportSize");
-    glsl.use();
+    normalMatrixLocation = glslProgram().getUniformLocation("normalMatrix");
 }
 
 
-void ThickLineProgram::activate()
+void OutlineProgram::setTransform
+(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
-    SolidColorProgram::activate();
+    NolightingProgram::setTransform(PV, V, M, L);
 
-    glUniform1f(impl->lineWidthLocation, impl->lineWidth);
-
-    if(impl->isViewportSizeInvalidated){
-        glUniform2f(impl->viewportSizeLocation, impl->viewportWidth, impl->viewportHeight);
-    }
+    const Matrix3f N = (V.linear() * M.linear()).cast<float>();
+    glUniformMatrix3fv(normalMatrixLocation, 1, GL_FALSE, N.data());
 }
 
 
-void ThickLineProgram::setViewportSize(int width, int height)
+void OutlineProgram::setLineWidth(float /* width */)
 {
-    impl->viewportWidth = width;
-    impl->viewportHeight = height;
-    impl->isViewportSizeInvalidated = true;
-}
 
-
-void ThickLineProgram::setLineWidth(float width)
-{
-    impl->lineWidth = width;
 }
 
 
@@ -658,7 +779,7 @@ void MinimumLightingProgram::activate()
     
 
 void MinimumLightingProgram::setTransform
-(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L)
+(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
     Matrix4f PVM;
     if(L){
@@ -680,7 +801,7 @@ int MinimumLightingProgram::maxNumLights() const
 
 
 bool MinimumLightingProgram::setLight
-(int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting)
+(int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting)
 {
     if(index >= impl->maxNumLights){
         return false;
@@ -785,7 +906,7 @@ int BasicLightingProgram::maxNumLights() const
 
 
 bool BasicLightingProgram::setLight
-(int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting)
+(int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting)
 {
     if(index >= impl->maxNumLights){
         return false;
@@ -884,7 +1005,7 @@ void MaterialLightingProgram::Impl::initialize(GLSLProgram& glsl)
     ambientColorLocation = glsl.getUniformLocation("ambientColor");
     specularColorLocation = glsl.getUniformLocation("specularColor");
     emissionColorLocation = glsl.getUniformLocation("emissionColor");
-    shininessLocation = glsl.getUniformLocation("shininess");
+    specularExponentLocation = glsl.getUniformLocation("specularExponent");
     alphaLocation = glsl.getUniformLocation("alpha");
 
     isTextureEnabledLocation = glsl.getUniformLocation("isTextureEnabled");
@@ -950,11 +1071,11 @@ void MaterialLightingProgram::Impl::setMaterial(const SgMaterial* material)
         stateFlag[SPECULAR_COLOR] = true;
     }
 
-    float s = 127.0f * material->shininess() + 1.0f;
-    if(!stateFlag[SHININESS] || shininess != s){
-        glUniform1f(shininessLocation, s);
-        shininess = s;
-        stateFlag[SHININESS] = true;
+    float e = material->specularExponent();
+    if(!stateFlag[SPECULAR_EXPONENT] || specularExponent != e){
+        glUniform1f(specularExponentLocation, e);
+        specularExponent = e;
+        stateFlag[SPECULAR_EXPONENT] = true;
     }
 
     float transparency = std::max(material->transparency(), minTransparency);
@@ -1017,6 +1138,8 @@ FullLightingProgram::Impl::Impl(FullLightingProgram* self)
     viewportWidth = 1000;
     viewportHeight = 1000;
     isWireframeEnabled = false;
+    wireframeColor << 0.4f, 0.4f, 0.4f, 0.8f;
+    wireframeWidth = 0.5f;
 
     isShadowAntiAliasingEnabled = false;
     shadowMapTextureTopIndex = 10;
@@ -1086,6 +1209,8 @@ void FullLightingProgram::Impl::initialize(GLSLProgram& glsl)
     viewportMatrixLocation = glsl.getUniformLocation("viewportMatrix");
     isViewportMatrixInvalidated = true;
     isWireframeEnabledLocation = glsl.getUniformLocation("isWireframeEnabled");
+    wireframeColorLocation = glsl.getUniformLocation("wireframeColor");
+    wireframeWidthLocation = glsl.getUniformLocation("wireframeWidth");
 
     numShadowsLocation = glsl.getUniformLocation("numShadows");
     shadowInfos.resize(maxNumShadows);
@@ -1189,7 +1314,7 @@ void FullLightingProgram::Impl::activate(GLSLProgram& glsl)
 
 
 bool FullLightingProgram::setLight
-(int index, const SgLight* light, const Affine3& T, const Affine3& view, bool shadowCasting)
+(int index, const SgLight* light, const Isometry3& T, const Isometry3& view, bool shadowCasting)
 {
     bool result = MaterialLightingProgram::setLight(index, light, T, view, shadowCasting);
 
@@ -1206,7 +1331,7 @@ bool FullLightingProgram::setLight
 
 
 void FullLightingProgram::setTransform
-(const Matrix4& PV, const Affine3& V, const Affine3& M, const Matrix4* L)
+(const Matrix4& PV, const Isometry3& V, const Affine3& M, const Matrix4* L)
 {
     const Affine3f VM = (V * M).cast<float>();
     const Matrix3f N = VM.linear();
@@ -1237,10 +1362,23 @@ void FullLightingProgram::setTransform
 }
 
 
-void FullLightingProgram::setWireframeEnabled(bool on)
+void FullLightingProgram::enableWireframe(const Vector4f& color, float width)
 {
-    if(on != impl->isWireframeEnabled){
-        impl->isWireframeEnabled = on;
+    if(!impl->isWireframeEnabled || color != impl->wireframeColor || width != impl->wireframeWidth){
+        impl->isWireframeEnabled = true;
+        impl->wireframeColor = color;
+        impl->wireframeWidth = width;
+        if(isActive()){
+            impl->updateShaderWireframeState();
+        }
+    }
+}
+
+
+void FullLightingProgram::disableWireframe()
+{
+    if(impl->isWireframeEnabled){
+        impl->isWireframeEnabled = false;
         if(isActive()){
             impl->updateShaderWireframeState();
         }
@@ -1270,6 +1408,10 @@ void FullLightingProgram::Impl::updateShaderWireframeState()
         isViewportMatrixInvalidated = false;
     }
     glUniform1i(isWireframeEnabledLocation, isWireframeEnabled);
+    if(isWireframeEnabled){
+        glUniform4fv(wireframeColorLocation, 1, wireframeColor.data());
+        glUniform1f(wireframeWidthLocation, wireframeWidth);
+    }
 }
 
 
@@ -1314,9 +1456,9 @@ void FullLightingProgram::setNumShadows(int n)
 }
 
 
-ShadowMapProgram& FullLightingProgram::shadowMapProgram()
+ShadowMapProgram* FullLightingProgram::shadowMapProgram()
 {
-    return impl->shadowMapProgram;
+    return &impl->shadowMapProgram;
 }
 
 
@@ -1327,7 +1469,7 @@ void FullLightingProgram::getShadowMapSize(int& width, int& height) const
 }
 
 
-SgCamera* FullLightingProgram::getShadowMapCamera(SgLight* light, Affine3& io_T)
+SgCamera* FullLightingProgram::getShadowMapCamera(SgLight* light, Isometry3& io_T)
 {
     SgCamera* camera = 0;
     bool hasDirection = false;

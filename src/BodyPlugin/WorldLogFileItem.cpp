@@ -4,21 +4,41 @@
 */
 
 #include "WorldLogFileItem.h"
+#include "SimulatorItem.h"
+#include "SubSimulatorItem.h"
+#include "ControllerItem.h"
+#include "BodyItemFileIO.h"
+#include <cnoid/MainWindow>
 #include <cnoid/ItemManager>
+#include <cnoid/MenuManager>
+#include <cnoid/ProjectManager>
 #include <cnoid/WorldItem>
 #include <cnoid/BodyItem>
+#include <cnoid/SceneItem>
+#include <cnoid/SceneItemFileIO>
+#include <cnoid/FolderItem>
+#include <cnoid/ItemTreeView>
+#include <cnoid/MessageView>
+#include <cnoid/TimeBar>
 #include <cnoid/TimeSyncItemEngine>
 #include <cnoid/PutPropertyFunction>
+#include <cnoid/FileDialog>
 #include <cnoid/Archive>
 #include <cnoid/UTF8>
 #include <cnoid/stdx/filesystem>
+#include <fmt/format.h>
 #include <QDateTime>
+#include <QMessageBox>
 #include <fstream>
 #include <stack>
+#include <map>
+#include <regex>
 #include "gettext.h"
 
 using namespace std;
 using namespace cnoid;
+using fmt::format;
+namespace filesystem = stdx::filesystem;
 
 namespace {
 
@@ -162,7 +182,7 @@ public:
         p.x() = readFloat();
         p.y() = readFloat();
         p.z() = readFloat();
-        Quat& q = position.rotation();
+        Quaternion& q = position.rotation();
         q.w() = readFloat();
         q.x() = readFloat();
         q.y() = readFloat();
@@ -279,7 +299,7 @@ public:
         writeFloat(p.x());
         writeFloat(p.y());
         writeFloat(p.z());
-        const Quat& q = position.rotation();
+        const Quaternion& q = position.rotation();
         writeFloat(q.w());
         writeFloat(q.x());
         writeFloat(q.y());
@@ -351,7 +371,9 @@ class WorldLogFileEngine : public TimeSyncItemEngine
 {
 public:
     WorldLogFileItemPtr logItem;
-    WorldLogFileEngine(WorldLogFileItem* item){
+    WorldLogFileEngine(WorldLogFileItem* item)
+        : TimeSyncItemEngine(item)
+    {
         logItem = item;
     }
     virtual bool onTimeChanged(double time) {
@@ -359,20 +381,22 @@ public:
     }
 };
 
+typedef map<ItemPtr, ItemPtr> ItemToItemMap;
 
-TimeSyncItemEngine* createWorldLogFileEngine(Item* sourceItem)
+struct ArchiveInfo
 {
-    if(WorldLogFileItem* logItem = dynamic_cast<WorldLogFileItem*>(sourceItem)){
-        return new WorldLogFileEngine(logItem);
-    }
-    return 0;
-}
+    ItemToItemMap orgItemToArchiveItemMap;
+    filesystem::path archiveDirPath;
+    BodyItemBodyFileIO* bodyFileIO;
+    SceneItemStdSceneFileExporter* stdSceneFileExporter;
+    map<string, int> baseNameCounterMap;
+};
 
 }
 
 namespace cnoid {
 
-class WorldLogFileItemImpl
+class WorldLogFileItem::Impl
 {
 public:
     WorldLogFileItem* self;
@@ -415,9 +439,9 @@ public:
     ScopedConnection worldSubTreeChangedConnection;
     bool isBodyInfoUpdateNeeded;
     
-    WorldLogFileItemImpl(WorldLogFileItem* self);
-    WorldLogFileItemImpl(WorldLogFileItem* self, WorldLogFileItemImpl& org);
-    ~WorldLogFileItemImpl();
+    Impl(WorldLogFileItem* self);
+    Impl(WorldLogFileItem* self, Impl& org);
+    ~Impl();
     bool setLogFile(const std::string& name, bool isLoading = false);
     string getActualFilename();
     void updateBodyInfos();
@@ -441,6 +465,11 @@ public:
     void beginFrameOutput(double time);
     void outputDeviceState(DeviceState* state);
     void exchangeDeviceStateCacheArrays();
+    void openDialogToSelectDirectoryToSavePlaybackArchive();
+    void saveProjectAsPlaybackArchive(const string& filename);
+    int createArchiveItemMap(Item* item, ArchiveInfo& info);
+    ItemPtr createArchiveModelItem(Item* modelItem, ArchiveInfo& info, bool isBodyItem);
+    int replaceWithArchiveItems(Item* item, ItemToItemMap& orgItemToArchiveItemMap);
 };
 
 }
@@ -457,17 +486,32 @@ void WorldLogFileItem::initializeClass(ExtensionManager* ext)
             return item->impl->setLogFile(filename, true);
         });
 
-    ext->timeSyncItemEngineManger().addEngineFactory(createWorldLogFileEngine);    
+    ItemTreeView::instance()->customizeContextMenu<WorldLogFileItem>(
+        [](WorldLogFileItem* item, MenuManager& menuManager, ItemFunctionDispatcher menuFunction){
+            menuManager.setPath("/");
+            menuManager.addItem(_("Save project as log playback archive"))->sigTriggered().connect(
+                [item](){ item->impl->openDialogToSelectDirectoryToSavePlaybackArchive(); });
+            menuManager.setPath("/");
+            menuManager.addSeparator();
+            menuFunction.dispatchAs<Item>(item);
+        });
+
+    TimeSyncItemEngineManager::instance()
+        ->registerFactory<WorldLogFileItem, WorldLogFileEngine>(
+            [](WorldLogFileItem* item, WorldLogFileEngine* engine0){
+                return engine0 ? engine0 : new WorldLogFileEngine(item);
+            });
 }
 
 
 WorldLogFileItem::WorldLogFileItem()
 {
-    impl = new WorldLogFileItemImpl(this);
+    impl = new Impl(this);
+    setName("WorldLogFile");
 }
 
 
-WorldLogFileItemImpl::WorldLogFileItemImpl(WorldLogFileItem* self)
+WorldLogFileItem::Impl::Impl(WorldLogFileItem* self)
     : self(self),
       writeBuf(ofs),
       readBuf(ifs),
@@ -482,11 +526,11 @@ WorldLogFileItemImpl::WorldLogFileItemImpl(WorldLogFileItem* self)
 WorldLogFileItem::WorldLogFileItem(const WorldLogFileItem& org)
     : Item(org)
 {
-    impl = new WorldLogFileItemImpl(this, *org.impl);
+    impl = new Impl(this, *org.impl);
 }
 
 
-WorldLogFileItemImpl::WorldLogFileItemImpl(WorldLogFileItem* self, WorldLogFileItemImpl& org)
+WorldLogFileItem::Impl::Impl(WorldLogFileItem* self, Impl& org)
     : self(self),
       writeBuf(ofs),
       readBuf(ifs),
@@ -504,7 +548,7 @@ WorldLogFileItem::~WorldLogFileItem()
 }
 
 
-WorldLogFileItemImpl::~WorldLogFileItemImpl()
+WorldLogFileItem::Impl::~Impl()
 {
 
 }
@@ -535,7 +579,7 @@ bool WorldLogFileItem::setLogFile(const std::string& filename)
 }
 
 
-bool WorldLogFileItemImpl::setLogFile(const std::string& filename, bool isLoading)
+bool WorldLogFileItem::Impl::setLogFile(const std::string& filename, bool isLoading)
 {
     self->updateFileInformation(filename, "CNOID-WORLD-LOG");
     bool loaded = readTopHeader();
@@ -543,17 +587,35 @@ bool WorldLogFileItemImpl::setLogFile(const std::string& filename, bool isLoadin
 }
 
 
-string WorldLogFileItemImpl::getActualFilename()
+void WorldLogFileItem::setTimeStampSuffixEnabled(bool on)
+{
+    impl->isTimeStampSuffixEnabled = on;
+}
+
+
+bool WorldLogFileItem::isTimeStampSuffixEnabled() const
+{
+    return impl->isTimeStampSuffixEnabled;
+}
+
+
+string WorldLogFileItem::Impl::getActualFilename()
 {
     if(isTimeStampSuffixEnabled && recordingStartTime.isValid()){
-        stdx::filesystem::path filepath(fromUTF8(self->filePath()));
+        filesystem::path filepath(fromUTF8(self->filePath()));
         string suffix = recordingStartTime.toString("-yyyy-MM-dd-hh-mm-ss").toStdString();
         string fname = filepath.stem().string() + suffix;
         fname += filepath.extension().string();
-        return toUTF8((filepath.parent_path() / fname).string());
+        return toUTF8((filepath.parent_path() / fname).generic_string());
     } else {
         return self->filePath();
     }
+}
+
+
+void WorldLogFileItem::setRecordingFrameRate(double rate)
+{
+    impl->recordingFrameRate = rate;
 }
 
 
@@ -563,7 +625,7 @@ double WorldLogFileItem::recordingFrameRate() const
 }
 
 
-void WorldLogFileItemImpl::updateBodyInfos()
+void WorldLogFileItem::Impl::updateBodyInfos()
 {
     bodyInfos.clear();
     
@@ -588,7 +650,7 @@ void WorldLogFileItemImpl::updateBodyInfos()
 }
 
 
-void WorldLogFileItem::onPositionChanged()
+void WorldLogFileItem::onTreePathChanged()
 {
     WorldItem* worldItem = findOwnerItem<WorldItem>();
     if(!worldItem){
@@ -603,13 +665,13 @@ void WorldLogFileItem::onPositionChanged()
 }
 
 
-void WorldLogFileItemImpl::onWorldSubTreeChanged()
+void WorldLogFileItem::Impl::onWorldSubTreeChanged()
 {
     isBodyInfoUpdateNeeded = true;
 }
 
 
-bool WorldLogFileItemImpl::readTopHeader()
+bool WorldLogFileItem::Impl::readTopHeader()
 {
     bool result = false;
     
@@ -624,7 +686,7 @@ bool WorldLogFileItemImpl::readTopHeader()
         ifs.close();
     }
     string fname = fromUTF8(getActualFilename());
-    if(stdx::filesystem::exists(fname)){
+    if(filesystem::exists(fname)){
         ifs.open(fname.c_str(), ios::in | ios::binary);
         if(ifs.is_open()){
             readBuf.clear();
@@ -649,7 +711,7 @@ bool WorldLogFileItemImpl::readTopHeader()
 }
 
 
-bool WorldLogFileItemImpl::readFrameHeader(int pos)
+bool WorldLogFileItem::Impl::readFrameHeader(int pos)
 {
     isCurrentFrameDataLoaded = false;
     
@@ -679,7 +741,7 @@ bool WorldLogFileItemImpl::readFrameHeader(int pos)
 }
         
         
-bool WorldLogFileItemImpl::seek(double time)
+bool WorldLogFileItem::Impl::seek(double time)
 {
     isOverRange = false;
 
@@ -722,7 +784,7 @@ bool WorldLogFileItemImpl::seek(double time)
 }
 
 
-bool WorldLogFileItemImpl::loadCurrentFrameData()
+bool WorldLogFileItem::Impl::loadCurrentFrameData()
 {
     ifs.seekg(currentReadFramePos + frameHeaderSize);
     readBuf.clear();
@@ -741,7 +803,7 @@ bool WorldLogFileItem::recallStateAtTime(double time)
 }
 
 
-bool WorldLogFileItemImpl::recallStateAtTime(double time)
+bool WorldLogFileItem::Impl::recallStateAtTime(double time)
 {
     if(!seek(time)){
         return false;
@@ -786,7 +848,7 @@ bool WorldLogFileItemImpl::recallStateAtTime(double time)
 }
 
 
-void WorldLogFileItemImpl::readBodyState(BodyInfo* bodyInfo, double time)
+void WorldLogFileItem::Impl::readBodyState(BodyInfo* bodyInfo, double time)
 {
     int endPos = readBuf.readNextBlockPos();
     bool updated = false;
@@ -828,7 +890,7 @@ void WorldLogFileItemImpl::readBodyState(BodyInfo* bodyInfo, double time)
 }
 
 
-int WorldLogFileItemImpl::readLinkPositions(Body* body)
+int WorldLogFileItem::Impl::readLinkPositions(Body* body)
 {
     int endPos = readBuf.readNextBlockPos();
     int size = readBuf.readShort();
@@ -844,7 +906,7 @@ int WorldLogFileItemImpl::readLinkPositions(Body* body)
 }
 
 
-int WorldLogFileItemImpl::readJointPositions(Body* body)
+int WorldLogFileItem::Impl::readJointPositions(Body* body)
 {
     int endPos = readBuf.readNextBlockPos();
     int size = readBuf.readShort();
@@ -857,7 +919,7 @@ int WorldLogFileItemImpl::readJointPositions(Body* body)
 }
 
 
-void WorldLogFileItemImpl::readDeviceStates(BodyInfo* bodyInfo, double time)
+void WorldLogFileItem::Impl::readDeviceStates(BodyInfo* bodyInfo, double time)
 {
     const int endPos = readBuf.readNextBlockPos();
     Body* body = bodyInfo->body;
@@ -882,7 +944,7 @@ void WorldLogFileItemImpl::readDeviceStates(BodyInfo* bodyInfo, double time)
 }
 
 
-void WorldLogFileItemImpl::readDeviceState(DeviceInfo& devInfo, Device* device, ReadBuf& buf, int size)
+void WorldLogFileItem::Impl::readDeviceState(DeviceInfo& devInfo, Device* device, ReadBuf& buf, int size)
 {
     const int stateSize = device->stateSize();
     if(stateSize <= size){
@@ -898,7 +960,7 @@ void WorldLogFileItemImpl::readDeviceState(DeviceInfo& devInfo, Device* device, 
 }
 
 
-void WorldLogFileItemImpl::readLastDeviceState(DeviceInfo& devInfo, Device* device)
+void WorldLogFileItem::Impl::readLastDeviceState(DeviceInfo& devInfo, Device* device)
 {
     size_t pos = readBuf.readSeekOffset();
     if(pos == devInfo.lastStateSeekPos){
@@ -937,7 +999,7 @@ void WorldLogFileItem::clearOutput()
 }
 
 
-void WorldLogFileItemImpl::clearOutput()
+void WorldLogFileItem::Impl::clearOutput()
 {
     bodyNames.clear();
 
@@ -958,14 +1020,14 @@ void WorldLogFileItemImpl::clearOutput()
 }
 
 
-void WorldLogFileItemImpl::reserveSizeHeader()
+void WorldLogFileItem::Impl::reserveSizeHeader()
 {
     sizeHeaderStack.push(writeBuf.size());
     writeBuf.writeSeekOffset(0);
 }
 
 
-void WorldLogFileItemImpl::fixSizeHeader()
+void WorldLogFileItem::Impl::fixSizeHeader()
 {
     if(!sizeHeaderStack.empty()){
         writeBuf.writeSeekOffset(sizeHeaderStack.top(), writeBuf.size() - (sizeHeaderStack.top() + sizeof(int)));
@@ -996,7 +1058,7 @@ void WorldLogFileItem::endHeaderOutput()
 }
 
 
-void WorldLogFileItemImpl::endHeaderOutput()
+void WorldLogFileItem::Impl::endHeaderOutput()
 {
     fixSizeHeader();
     writeBuf.flush();
@@ -1021,7 +1083,7 @@ void WorldLogFileItem::beginFrameOutput(double time)
 }
 
 
-void WorldLogFileItemImpl::beginFrameOutput(double time)
+void WorldLogFileItem::Impl::beginFrameOutput(double time)
 {
     size_t pos = writeBuf.seekPos();
     
@@ -1082,7 +1144,7 @@ void WorldLogFileItem::outputDeviceState(DeviceState* state)
 }
 
 
-void WorldLogFileItemImpl::outputDeviceState(DeviceState* state)
+void WorldLogFileItem::Impl::outputDeviceState(DeviceState* state)
 {
     DeviceStateCache* cache = nullptr;
         
@@ -1136,7 +1198,7 @@ void WorldLogFileItem::endFrameOutput()
 }
 
 
-void WorldLogFileItemImpl::exchangeDeviceStateCacheArrays()
+void WorldLogFileItem::Impl::exchangeDeviceStateCacheArrays()
 {
     int i = 1 - currentDeviceStateCacheArrayIndex;
     pCurrentDeviceStateCacheArray = &deviceStateCacheArrays[i];
@@ -1162,8 +1224,7 @@ void WorldLogFileItem::doPutProperties(PutPropertyFunction& putProperty)
 
 bool WorldLogFileItem::store(Archive& archive)
 {
-    archive.writeRelocatablePath("filename", filePath());
-    archive.write("format", fileFormat());
+    archive.writeFileInformation(this);
     archive.write("timeStampSuffix", impl->isTimeStampSuffixEnabled);
     archive.write("recordingFrameRate", impl->recordingFrameRate);
     return true;
@@ -1174,11 +1235,274 @@ bool WorldLogFileItem::restore(const Archive& archive)
 {
     archive.read("timeStampSuffix", impl->isTimeStampSuffixEnabled);
     archive.read("recordingFrameRate", impl->recordingFrameRate);
+
+    std::string filename;
+    if(archive.read({ "file", "filename" }, filename)){
+        impl->setLogFile(archive.resolveRelocatablePath(filename));
+    }
+    return true;
+}
+
+
+void WorldLogFileItem::Impl::openDialogToSelectDirectoryToSavePlaybackArchive()
+{
+    FileDialog dialog;
+    dialog.setWindowTitle(_("Save project as log playback archive"));
+    dialog.setViewMode(QFileDialog::List);
+    dialog.setFileMode(QFileDialog::AnyFile);
+    dialog.setLabelText(QFileDialog::Accept, _("Save"));
+    dialog.setLabelText(QFileDialog::Reject, _("Cancel"));
+    dialog.updatePresetDirectories();
+
+    QStringList filters;
+    filters << _("Project files (*.cnoid)");
+    filters << _("Any files (*)");
+    dialog.setNameFilters(filters);
+
+    auto logfile = toUTF8(filesystem::path(fromUTF8(getActualFilename())).stem().generic_string());
+    if(!logfile.empty()){
+        dialog.selectFile(QString("%1-log.cnoid").arg(logfile.c_str()));
+    }
+        
+    if(dialog.exec()){
+        auto filenames = dialog.selectedFiles();
+        string filename(filenames.at(0).toStdString());
+        if(!filename.empty()){
+            QString message(_("The current project will be replaced with a new project for the log playback. "
+                              "Do you want to continue?"));
+            auto button = QMessageBox::warning(
+                MainWindow::instance(), _("Project replacement"), message, QMessageBox::Ok | QMessageBox::Cancel);
+            if(button == QMessageBox::Ok){
+                saveProjectAsPlaybackArchive(filename);
+            }
+        }
+    }
+}
+
+
+void WorldLogFileItem::Impl::saveProjectAsPlaybackArchive(const string& projectFile)
+{
+    auto worldItem = self->findOwnerItem<WorldItem>();
+    if(!worldItem){
+        showWarningDialog(format(_("The world item of {0} is not found."), self->displayName()));
+        return;
+    }
+
+    ArchiveInfo info;
+
+    info.bodyFileIO = dynamic_cast<BodyItemBodyFileIO*>(BodyItem::bodyFileIO());
+    if(!info.bodyFileIO){
+        return;
+    }
+    info.stdSceneFileExporter =
+        dynamic_cast<SceneItemStdSceneFileExporter*>(SceneItem::stdSceneFileExporter());
+    if(!info.stdSceneFileExporter){
+        return;
+    }
+
+    stdx::error_code ec;
+
+    auto logFilePath = filesystem::absolute(fromUTF8(getActualFilename()), ec);
+    if(!filesystem::exists(logFilePath ,ec)){
+        showWarningDialog(format(_("Log file of {0} does not exist."), self->displayName()));
+        return;
+    }
+
+    auto mv = MessageView::instance();
+    mv->putln(_("Creating the project for the log playback ..."));
+    mv->flush();
     
-    std::string filename, formatId;
-    if(archive.readRelocatablePath("filename", filename)){
-        impl->setLogFile(filename);
+    auto projectFilePath = filesystem::absolute(fromUTF8(projectFile), ec);
+    if(ec){
+        return;
+    }
+    if(!projectFilePath.has_extension()){
+        projectFilePath += ".cnoid";
+    }
+        
+    info.archiveDirPath = projectFilePath.parent_path() / projectFilePath.stem();
+    filesystem::create_directories(info.archiveDirPath, ec);
+    if(ec){
+        showWarningDialog(format(_("Archive directory \"{0}\" cannot be created: {1}"),
+                                 info.archiveDirPath.string(), ec.message()));
+        return;
+    }
+
+    info.bodyFileIO->bodyWriter()->setExtModelFileMode(StdBodyWriter::ReplaceWithObjModelFiles);
+    
+    if(createArchiveItemMap(worldItem, info) > 0){
+
+        filesystem::copy_file(
+            logFilePath, info.archiveDirPath / logFilePath.filename(),
+#if __cplusplus > 201402L            
+            filesystem::copy_options::overwrite_existing,
+#else
+            filesystem::copy_option::overwrite_if_exists,
+#endif
+            ec);
+        if(ec){
+            showWarningDialog(
+                format(_("Log file \"{0}\" cannot be copied to \"{1}\": {2}"),
+                       toUTF8(logFilePath.filename().string()),
+                       toUTF8(info.archiveDirPath.string()),
+                       ec.message()));
+            return;
+        }
+        setLogFile(toUTF8((info.archiveDirPath / logFilePath.filename()).generic_string()));
+        isTimeStampSuffixEnabled = false;
+
+        auto rootItem = RootItem::instance();
+        info.orgItemToArchiveItemMap[rootItem] = rootItem;
+        info.orgItemToArchiveItemMap[worldItem] = worldItem;
+        info.orgItemToArchiveItemMap[self] = self;
+
+        if(replaceWithArchiveItems(rootItem, info.orgItemToArchiveItemMap)){
+            TimeBar::instance()->setTime(0.0);
+            self->setSelected(true);
+            ProjectManager::instance()->saveProject(toUTF8(projectFilePath.string()));
+        }
+    }
+}
+
+
+int WorldLogFileItem::Impl::createArchiveItemMap(Item* item, ArchiveInfo& info)
+{
+    int numModelItems = 0;
+    for(auto childItem = item->childItem(); childItem; childItem = childItem->nextItem()){
+        ItemPtr archiveChildItem;
+        bool isBodyItem = false;
+        ItemPtr modelItem = dynamic_cast<BodyItem*>(childItem);
+        if(modelItem){
+            isBodyItem = true;
+        } else {
+            modelItem = dynamic_cast<SceneItem*>(childItem);
+        }
+        if(modelItem){
+            auto archiveModelItem = createArchiveModelItem(modelItem, info, isBodyItem);
+            if(!archiveModelItem){
+                return -1;
+            }
+            ++numModelItems;
+            archiveChildItem = archiveModelItem;
+        }
+        int numSubTreeModelItems = createArchiveItemMap(childItem, info);
+        if(numSubTreeModelItems < 0){ // error
+            return -1;
+        }
+        numModelItems += numSubTreeModelItems;
+        if(archiveChildItem){
+            info.orgItemToArchiveItemMap[childItem] = archiveChildItem;
+        }
+    }
+    return numModelItems;
+}
+
+
+ItemPtr WorldLogFileItem::Impl::createArchiveModelItem(Item* modelItem, ArchiveInfo& info, bool isBodyItem)
+{
+    ItemPtr archiveModelItem;
+    
+    // Replace space and symbol characters in the filename string
+    string baseName = regex_replace(modelItem->name(), regex("\\s"), "_");
+    baseName = regex_replace(baseName, regex("[\\W]"), "_");
+
+    // Check and avoid the duplication of the model directory names
+    auto emplaced = info.baseNameCounterMap.emplace(baseName, 1);
+    if(baseName.empty() || !emplaced.second){
+        auto& counter = emplaced.first->second;
+        if(!baseName.empty()){
+            ++counter;
+        }
+        string baseNameWithId;
+        while(true){
+            baseNameWithId = format("{0}-{1}", baseName, counter++);
+            if(info.baseNameCounterMap.find(baseNameWithId) == info.baseNameCounterMap.end()){
+                baseName = baseNameWithId;
+                break;
+            }
+        }
+    }
+
+    string nativeBaseName = fromUTF8(baseName);
+    filesystem::path modelDirPath = info.archiveDirPath / nativeBaseName;
+    stdx::error_code ec;
+
+    filesystem::create_directories(modelDirPath, ec);
+    if(ec){
+        MessageView::instance()->putln(
+            format(_("Directory \"{0}\" cannot be created: {1}."),
+                   toUTF8(modelDirPath.filename().string()), ec.message()),
+            MessageView::Error);
+    } else {
+        archiveModelItem = modelItem->duplicate();
+        auto filePath = modelDirPath / nativeBaseName;
+        bool saved = false;
+        if(isBodyItem){
+            filePath += ".body"; // Is this necessary?
+            saved = info.bodyFileIO->saveItem(archiveModelItem, toUTF8(filePath.string()));
+        } else {
+            filePath += ".scen"; // Is this necessary?
+            saved = info.stdSceneFileExporter->saveItem(archiveModelItem, toUTF8(filePath.string()));
+        }
+        if(!saved){
+            archiveModelItem.reset();
+        }
+    }
+    return archiveModelItem;
+}
+
+
+int WorldLogFileItem::Impl::replaceWithArchiveItems(Item* item, ItemToItemMap& orgItemToArchiveItemMap)
+{
+    int numValidItems = 0;
+    bool keptOrReplaced = false;
+    ItemPtr archiveItem;
+    
+    auto p = orgItemToArchiveItemMap.find(item);
+
+    if(p != orgItemToArchiveItemMap.end()){
+        archiveItem = p->second;
+        if(archiveItem != item){
+            if(archiveItem->replace(item)){
+                item = archiveItem;
+            }
+        }
     }
     
-    return true;
+    // Child items must be preserved in advance because each item may be replaced 
+    vector<ItemPtr> childItems;
+    for(auto childItem = item->childItem(); childItem; childItem = childItem->nextItem()){
+        childItems.push_back(childItem);
+    }
+    for(auto& childItem : childItems){
+        numValidItems += replaceWithArchiveItems(childItem, orgItemToArchiveItemMap);
+    }
+
+    if(!archiveItem){
+        if(!item->isTemporal() &&
+           !item->isSubItem() &&
+           item->filePath().empty() &&
+           !dynamic_cast<SimulatorItem*>(item) &&
+           !dynamic_cast<SubSimulatorItem*>(item) &&
+           !dynamic_cast<ControllerItem*>(item))
+        {
+            archiveItem = item;
+        }
+    }
+    if(archiveItem){
+        ++numValidItems;
+    }
+
+    if(numValidItems == 0){
+        item->removeFromParentItem();
+
+    } else if(!archiveItem){
+        archiveItem = new FolderItem;
+        archiveItem->setName(item->displayName());
+        archiveItem->replace(item);
+    }
+
+    item->setSelected(false);
+
+    return numValidItems;
 }

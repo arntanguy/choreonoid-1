@@ -5,7 +5,8 @@
 
 #include <cnoid/Device>
 #include <cnoid/ValueTree>
-#include <cnoid/YAMLBodyLoader>
+#include <cnoid/StdBodyLoader>
+#include <cnoid/StdBodyWriter>
 #include <cnoid/YAMLReader>
 #include <cnoid/SceneDevice>
 #include <cnoid/SceneDrawables>
@@ -41,10 +42,10 @@ struct AGXWireDeviceDesc
 class AGXWireDevice : private AGXWireDeviceDesc, public Device
 {
 public:
-    static bool createAGXWireDevice(YAMLBodyLoader& loader, Mapping& node);
+    static bool createAGXWireDevice(StdBodyLoader* loader, const Mapping* node);
     AGXWireDevice(const AGXWireDeviceDesc& desc, Mapping* info);
     AGXWireDevice(const AGXWireDevice& org, bool copyStateOnly = false);
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const AGXWireDevice& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -87,15 +88,15 @@ private:
 };
 typedef ref_ptr<AGXWire> AGXWirePtr;
 
-bool AGXWireDevice::createAGXWireDevice(YAMLBodyLoader&loader, Mapping& node)
+bool AGXWireDevice::createAGXWireDevice(StdBodyLoader* loader, const Mapping* node)
 {
-    MappingPtr info = node.cloneMapping();
+    MappingPtr info = node->cloneMapping();
 
     // Wire
     AGXWireDeviceDesc desc;
     AGXWireDevicePtr wireDevice = new AGXWireDevice(desc, info);
 
-    return loader.readDevice(wireDevice, node);
+    return loader->readDevice(wireDevice, node);
 }
 
 AGXWireDevice::AGXWireDevice(const AGXWireDeviceDesc& desc, Mapping* info) :
@@ -110,7 +111,7 @@ AGXWireDevice::AGXWireDevice(const AGXWireDevice& org, bool copyStateOnly) :
     copyStateFrom(org);
 }
 
-const char*AGXWireDevice::typeName()
+const char*AGXWireDevice::typeName() const
 {
     return "AGXWireDevice";
 }
@@ -257,6 +258,7 @@ public:
     void update();
 private:
     AGXWireDevice* m_wireDevice;
+    SgUpdate sgUpdate;
 };
 
 SceneDevice* SceneWireDevice::createSceneWireDevice(Device* device)
@@ -277,21 +279,20 @@ void SceneWireDevice::update()
     if(m_wireDevice->getWireNodeStates().size() <= 0) return;
     MeshGenerator meshGenerator;
     const double& radius = m_wireDevice->getWireRadius();
-    const Position::TranslationPart& link_p = m_wireDevice->link()->p();
+    const Isometry3::TranslationPart& link_p = m_wireDevice->link()->p();
     const Matrix3& link_attitude_inv = m_wireDevice->link()->R().inverse();
     const int& numNodes = (int)m_wireDevice->getWireNodeStates().size();
     for(size_t i = 0; i < numNodes - 1; ++i){
         const WireNodeState& node1 = m_wireDevice->getWireNodeStates()[i];
         const WireNodeState& node2 = m_wireDevice->getWireNodeStates()[i + 1];
         SgPosTransformPtr sgWireNode = new SgPosTransform;
-        addChild(sgWireNode, true);
 
         // Add shape
         Vector3 dir = node2.position.operator-(node1.position);
         double length = dir.norm();
         auto shape = new SgShape;
         shape->setMesh(meshGenerator.generateCapsule(radius, length));
-        sgWireNode->addChild(shape, true);
+        sgWireNode->addChild(shape);
 
         // Set transform
         Vector3 pos = node2.position.operator+(node1.position) * 0.5;
@@ -304,13 +305,15 @@ void SceneWireDevice::update()
         nx.normalize();
         const Vector3 nz = nx.cross(ny);
 
-        Position p;
-        p.setIdentity();
-        p.translation() = pos - link_p;
-        p.linear().col(0) = nx;
-        p.linear().col(1) = ny;
-        p.linear().col(2) = nz;
-        sgWireNode->setTransform(link_attitude_inv * p);
+        Isometry3 T;
+        T.setIdentity();
+        T.translation() = pos - link_p;
+        T.linear().col(0) = nx;
+        T.linear().col(1) = ny;
+        T.linear().col(2) = nz;
+        sgWireNode->setTransform(link_attitude_inv * T);
+
+        addChild(sgWireNode, sgUpdate);
     }
 }
 
@@ -365,13 +368,13 @@ AGXWire::AGXWire(AGXWireDevice* device, AGXBody* agxBody) :
     m_wire = AGXObjectFactory::createWire(wireDesc);
 
     {   // set Material
-		string matName = "";
-		agx::Material* mat = nullptr;
-		if(wireDeviceInfo.read("materialName", matName)){
+        string matName = "";
+        agx::Material* mat = nullptr;
+        if(wireDeviceInfo.read("materialName", matName)){
             mat = sim->getMaterialManager()->getMaterial(matName);	
-		}
+        }
         if(mat == nullptr){
-            mat = sim->getMaterialManager()->getMaterial(Material::name(0));
+            mat = sim->getMaterialManager()->getMaterial(Material::nameOfId(0));
         }
         double tmpMatValue;
         if(wireDeviceInfo.read("wireYoungsModulusStretch", tmpMatValue)){
@@ -467,7 +470,10 @@ AGXWire::AGXWire(AGXWireDevice* device, AGXBody* agxBody) :
                     agxWire::ILinkNode::ConnectionProperties* cp = iLinkNode->getConnectionProperties();
                     cp->setTwistStiffness(getILinkNodeValue("twistStiffness", cp->getTwistStiffness()));
                     cp->setBendStiffness(getILinkNodeValue("bendStiffness", cp->getBendStiffness()));
-                    iLinkNode->setSuperBendReplacedWithBend(getILinkNodeValue("superBendReplacedWithBend", iLinkNode->getSuperBendReplacedWithBend()));
+                    bool superBendReplacedWithBend;
+                    if(wireNodeInfo.read("superBendReplacedWithBend", superBendReplacedWithBend)){
+                        iLinkNode->setSuperBendReplacedWithBend(superBendReplacedWithBend);
+                    }
                     m_wire->setEnableCollisions(wireLinkBody, false);
                 }
             }
@@ -499,15 +505,26 @@ void AGXWire::updateWireNodeStates()
     m_device->notifyStateChange();
 }
 
+
+bool writeAGXWireDevice(StdBodyWriter* writer, Mapping* info, const AGXWireDevice* device)
+{
+    info->insert(device->info());
+    return true;
+}
+    
+
 /////////////////////////////////////////////////////////////////////////
 // Register Device
 struct AGXWireDeviceRegistration
 {
     AGXWireDeviceRegistration(){
-        cnoid::YAMLBodyLoader::addNodeType("AGXWireDevice", AGXWireDevice::createAGXWireDevice);
-        SceneDevice::registerSceneDeviceFactory<AGXWireDevice>(SceneWireDevice::createSceneWireDevice);
-        if(AGXObjectFactory::checkModuleEnalbled("AgX-Wires")){
-        }else {
+        cnoid::StdBodyLoader::registerNodeType(
+            "AGXWireDevice", AGXWireDevice::createAGXWireDevice);
+        cnoid::StdBodyWriter::registerDeviceWriter<AGXWireDevice>(
+            "AGXWireDevice", writeAGXWireDevice);
+        SceneDevice::registerSceneDeviceFactory<AGXWireDevice>(
+            SceneWireDevice::createSceneWireDevice);
+        if(!AGXObjectFactory::checkModuleEnalbled("AgX-Wires")){
             std::cout << "Please check you have AgX-Wires module license."
             "AGXWireDevice should not work." << std::endl;
         }

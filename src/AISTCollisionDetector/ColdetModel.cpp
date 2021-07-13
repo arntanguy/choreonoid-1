@@ -286,7 +286,7 @@ bool ColdetModelInternalModel::build()
 }
 
 
-void ColdetModel::setPosition(const Position& T)
+void ColdetModel::setPosition(const Isometry3& T)
 {
     transform->Set((float)T(0,0), (float)T(1,0), (float)T(2,0), 0.0f,
                    (float)T(0,1), (float)T(1,1), (float)T(2,1), 0.0f,
@@ -448,7 +448,7 @@ void ColdetModelInternalModel::extractNeghiborTriangles()
         ret &= extractNeighborTriangle(neighbors, edgeToExistingTriangleMap, i, triangle[2], triangle[0]);
     }
 
-#ifdef CNOID_DEBUG
+#ifndef NDEBUG
     if(!ret)
         cout << "Warning : Three or more triangles are defined for a edge." << endl;
 #endif

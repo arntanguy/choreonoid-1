@@ -10,7 +10,6 @@
 #include <cnoid/BodyLoader>
 #include <cnoid/BodyItem>
 #include <sdf/sdf.hh>
-#include <OGRE/OgreRoot.h>
 #include <memory>
 #include <iostream>
 #include <boost/algorithm/string.hpp>
@@ -26,18 +25,18 @@ AbstractBodyLoaderPtr sdfBodyLoaderFactory()
     return make_shared<SDFBodyLoader>();
 }
 
-class UrdfFileIO : public ItemFileIOBase<BodyItem>
+class UrdfFileIO : public ItemFileIoBase<BodyItem>
 {
     unique_ptr<SDFBodyLoader> loader;
 
 public:
     UrdfFileIO()
-        : ItemFileIOBase<BodyItem>("URDF", Load)
+        : ItemFileIoBase<BodyItem>("URDF", Load)
     {
         setCaption(_("ROS / Gazebo model"));
         setFileTypeCaption(_("URDF"));
         setExtensions({ "urdf", "xacro" });
-        addFormatIdAlias("GAZEBO-MODEL"); // for the backward compatibility
+        addFormatAlias("GAZEBO-MODEL"); // for the backward compatibility
         setInterfaceLevel(Conversion);
     }
 
@@ -51,18 +50,18 @@ public:
     }
 };
 
-class SdfFileIO : public ItemFileIOBase<BodyItem>
+class SdfFileIO : public ItemFileIoBase<BodyItem>
 {
     unique_ptr<SDFBodyLoader> loader;
 
 public:
     SdfFileIO()
-        : ItemFileIOBase<BodyItem>("SDF", Load)
+        : ItemFileIoBase<BodyItem>("SDF", Load)
     {
         setCaption(_("ROS / Gazebo model"));
         setFileTypeCaption(_("SDF"));
         setExtensions({ "sdf", "xacro" });
-        addFormatIdAlias("GAZEBO-MODEL"); // for the backward compatibility
+        addFormatAlias("GAZEBO-MODEL"); // for the backward compatibility
         setInterfaceLevel(Conversion);
     }
 
@@ -79,8 +78,6 @@ public:
 
 class SDFPlugin : public Plugin
 {
-    Ogre::Root* ogreRoot;
-
 public:
     SDFPlugin() : Plugin("SDF")
     {
@@ -94,24 +91,16 @@ public:
         BodyLoader::registerLoader("urdf", sdfBodyLoaderFactory);
 
         auto& im = itemManager();
-        im.registerFileIO<BodyItem>(new UrdfFileIO);
-        im.registerFileIO<BodyItem>(new SdfFileIO);
+        im.addFileIO<BodyItem>(new UrdfFileIO);
+        im.addFileIO<BodyItem>(new SdfFileIO);
 
         addModelSearchPath("GAZEBO_MODEL_PATH");
         addModelSearchPath("ROS_PACKAGE_PATH");
         addModelSearchPath("HOME");
 
-        ogreRoot = new Ogre::Root();
-
         return true;
     }
         
-    virtual bool finalize()
-    {
-        delete ogreRoot;
-        return true;
-    }
-
     void addModelSearchPath(const char *envname)
     {
         std::list<std::string> paths;
@@ -119,7 +108,7 @@ public:
         char *p;
 
         if (envname != NULL && (p = getenv(envname)) != NULL) {
-            if (envname != "HOME") {
+            if (strcmp(envname, "HOME") != 0){
                 boost::split(paths, p, boost::is_any_of(":"));
                 for(auto& path : paths){
                     if (path != "") {

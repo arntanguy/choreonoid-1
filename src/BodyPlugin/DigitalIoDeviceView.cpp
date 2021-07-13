@@ -77,6 +77,8 @@ public:
 }
 
 
+namespace {
+
 IoDeviceModel::IoDeviceModel(QObject* parent)
     : QAbstractTableModel(parent)
 {
@@ -286,6 +288,8 @@ void CustomizedItemDelegate::setModelData
     }
 }
 
+}
+
 
 void DigitalIoDeviceView::initializeClass(ExtensionManager* ext)
 {
@@ -327,6 +331,7 @@ DigitalIoDeviceView::Impl::Impl(DigitalIoDeviceView* self)
     setSelectionMode(QAbstractItemView::SingleSelection);
     setTabKeyNavigation(true);
     setCornerButtonEnabled(false);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setEditTriggers(
         QAbstractItemView::DoubleClicked |

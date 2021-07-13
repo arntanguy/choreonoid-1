@@ -16,6 +16,8 @@ public:
     PositionTagListWidget(QWidget* parent = nullptr);
     void setTagGroupItem(PositionTagGroupItem* item);
     int currentTagIndex() const;
+    void setCurrentTagIndex(int tagIndex);
+    const std::vector<int>& selectedTagIndices() const;
     void removeSelectedTags();
 
     SignalProxy<void(const std::vector<int>& selected)> sigTagSelectionChanged();
@@ -27,6 +29,7 @@ protected:
     virtual void keyPressEvent(QKeyEvent* event) override;
     virtual void mousePressEvent(QMouseEvent* event) override;
     virtual void selectionChanged(const QItemSelection& selected, const QItemSelection& deselected) override;
+    virtual void dropEvent(QDropEvent *event) override;
 
 private:
     class Impl;

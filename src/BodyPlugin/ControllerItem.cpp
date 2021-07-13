@@ -4,6 +4,7 @@
 */
 
 #include "ControllerItem.h"
+#include "ControllerLogItem.h"
 #include <cnoid/ItemManager>
 #include <cnoid/PutPropertyFunction>
 #include <cnoid/Archive>
@@ -45,22 +46,9 @@ bool ControllerItem::isActive() const
 }
 
 
-bool ControllerItem::isNoDelayMode() const
-{
-    return isNoDelayMode_;
-}
-
-
-bool ControllerItem::setNoDelayMode(bool on)
+void ControllerItem::setNoDelayMode(bool on)
 {
     isNoDelayMode_ = on;
-    return on;
-}
-
-
-const std::string& ControllerItem::optionString() const
-{
-    return optionString_;
 }
 
 
@@ -70,15 +58,51 @@ void ControllerItem::setSimulatorItem(SimulatorItem* item)
 }
 
 
+double ControllerItem::timeStep() const
+{
+    return simulatorItem_ ? simulatorItem_->worldTimeStep() : 0.0;
+}
+
+
 bool ControllerItem::initialize(ControllerIO* io)
 {
     return true;
 }
 
 
+ControllerLogItem* ControllerItem::createLogItem()
+{
+    return new ControllerLogItem;
+}
+
+
 bool ControllerItem::start()
 {
     return true;
+}
+
+
+void ControllerItem::input()
+{
+
+}
+
+
+bool ControllerItem::control()
+{
+    return false;
+}
+
+
+void ControllerItem::log()
+{
+
+}
+
+
+void ControllerItem::output()
+{
+
 }
 
 

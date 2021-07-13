@@ -11,31 +11,28 @@
 namespace cnoid {
 
 class Link;
-class ConstraintForceSolverImpl;
-class WorldBase;
+class DyWorldBase;
 class CollisionDetector;
 class ContactMaterial;
 class MaterialTable;
 	
 class CNOID_EXPORT ConstraintForceSolver
 {
-    ConstraintForceSolverImpl* impl;
-		
 public:
-    ConstraintForceSolver(WorldBase& world);
+    ConstraintForceSolver(DyWorldBase& world);
     ~ConstraintForceSolver();
 		
     void setCollisionDetector(CollisionDetector* detector);
     CollisionDetector* collisionDetector();
 
+    void setBodyCollisionDetectionMode(
+        int bodyIndex, bool isBodyToBodyCollisionEnabled, bool isSelfCollisionDetectionEnabled);
+
     void setMaterialTable(MaterialTable* table);
 
-    void setFriction(double staticFriction, double slipFliction);
-    double staticFriction() const;
-    double slipFriction() const;
-
-    void setSelfCollisionDetectionEnabled(int bodyIndex, bool on);
-    bool isSelfCollisionDetectionEnabled(int bodyIndex) const;
+    void setFrictionCoefficientRange(double minFriction, double maxFriction);
+    double minFrictionCoefficient() const;
+    double maxFrictionCoefficient() const;
 
     void setContactCullingDistance(double thresh);
     double contactCullingDistance() const;
@@ -57,6 +54,8 @@ public:
     double contactCorrectionVelocityRatio();
 
     void set2Dmode(bool on);
+
+    [[deprecated("This function does nothing. Set Link::LinkContactState to Link::sensingMode from a controller.")]]
     void enableConstraintForceOutput(bool on);
 
     void initialize(void);
@@ -72,6 +71,10 @@ public:
     
     void registerCollisionHandler(const std::string& name, CollisionHandler handler);
     bool unregisterCollisionHandler(const std::string& name);
+
+private:
+    class Impl;
+    Impl* impl;
 };
 
 };

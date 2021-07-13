@@ -5,6 +5,7 @@
 
 #include "SceneItem.h"
 #include "ItemManager.h"
+#include "GeneralSceneFileImporterBase.h"
 #include "Archive.h"
 #include "PutPropertyFunction.h"
 #include <cnoid/SceneLoader>
@@ -17,25 +18,40 @@ using namespace cnoid;
 
 namespace {
 
-bool loadScene(SceneItem* item, const std::string& filename, std::ostream& os)
+class GeneralSceneFileImporter : public GeneralSceneFileImporterBase
 {
-    static SceneLoader* loader = 0;
-    if(!loader){
-        loader = new SceneLoader;
-        loader->setMessageSink(mvout(true));
+public:
+    GeneralSceneFileImporter()
+    {
+        setCaption(_("Scene"));
+        setFileTypeCaption(_("Scene / Mesh"));
+
+        addFormatAlias("AVAILABLE-SCENE-FILE");
+        addFormatAlias("VRML-FILE");
+        addFormatAlias("STL-FILE");
     }
-    auto scene = loader->load(filename);
-    if(scene){
-        auto group = new SgInvariantGroup;
-        group->addChild(scene);
-        auto topNode = item->topNode();
+    
+    virtual Item* createItem() override
+    {
+        return new SceneItem;
+    }
+    
+    virtual bool load(Item* item, const std::string& filename) override
+    {
+        SgNode* scene = loadScene(filename);
+        if(!scene){
+            return false;
+        }
+        auto sceneItem = static_cast<SceneItem*>(item);
+        auto topNode = sceneItem->topNode();
         topNode->clearChildren();
-        topNode->addChild(group);
-        item->setLightweightRenderingEnabled(item->isLightweightRenderingEnabled());
+        topNode->addChild(scene);
+        if(sceneItem->isLightweightRenderingEnabled()){
+            sceneItem->setLightweightRenderingEnabled(true);
+        }
         return true;
     }
-    return false;
-}
+};
 
 }
 
@@ -44,29 +60,9 @@ void SceneItem::initializeClass(ExtensionManager* ext)
 {
     static bool initialized = false;
     if(!initialized){
-        ext->itemManager().registerClass<SceneItem>(N_("SceneItem"));
-
-        ext->itemManager().addLoader<SceneItem>(
-            _("Scene"), "AVAILABLE-SCENE-FILE", SceneLoader::availableFileExtensions,
-            [&](SceneItem* item, const std::string& filename, std::ostream& os, Item* parentItem){
-                return ::loadScene(item, filename, os);
-            },
-            ItemManager::PRIORITY_CONVERSION);
-
-        ext->itemManager().addLoader<SceneItem>(
-            "VRML", "VRML-FILE", "wrl",
-            [&](SceneItem* item, const std::string& filename, std::ostream& os, Item* parentItem){
-                return ::loadScene(item, filename, os);
-            },
-            ItemManager::PRIORITY_COMPATIBILITY);
-
-        ext->itemManager().addLoader<SceneItem>(
-            "Stereolithography (STL)", "STL-FILE", "stl",
-            [&](SceneItem* item, const std::string& filename, std::ostream& os, Item* parentItem){
-                return ::loadScene(item, filename, os);
-            },
-            ItemManager::PRIORITY_COMPATIBILITY);
-
+        auto im = &ext->itemManager();
+        im->registerClass<SceneItem>(N_("SceneItem"));
+        registerSceneItemFileIoSet(im);
         initialized = true;
     }
 }
@@ -113,9 +109,23 @@ SgNode* SceneItem::getScene()
 }
 
 
+void SceneItem::setTranslation(const Vector3& translation)
+{
+    topNode_->setTranslation(translation);
+    topNode_->notifyUpdate();
+}
+
+
 void SceneItem::setTranslation(const Vector3f& translation)
 {
     topNode_->setTranslation(translation);
+    topNode_->notifyUpdate();
+}
+
+
+void SceneItem::setRotation(const AngleAxis& rotation)
+{
+    topNode_->setRotation(rotation);
     topNode_->notifyUpdate();
 }
 
@@ -208,12 +218,14 @@ bool SceneItem::restore(const Archive& archive)
         if(archive.read("angle_unit", unit) && unit == "degree"){
             hasRot = readDegreeAngleAxis(archive, "rotation", rot);
         } else { // for the backward compatibility
-            hasRot = readAngleAxis(archive, "rotation", rot);
+            hasRot = readRadianAngleAxis(archive, "rotation", rot);
         }
         if(hasRot){
             topNode_->setRotation(rot);
         }
-        archive.read("lightweight_rendering", isLightweightRenderingEnabled_);
+        if(archive.get("lightweight_rendering", false)){
+            setLightweightRenderingEnabled(true);
+        }
         return true;
     }
     return false;

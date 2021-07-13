@@ -11,7 +11,7 @@
 #include "GLSceneRenderer.h"
 #include <cnoid/EigenArchive>
 #include <cnoid/SceneWidget>
-#include <cnoid/SceneWidgetEditable>
+#include <cnoid/SceneWidgetEventHandler>
 #include <cnoid/SceneDrawables>
 #include <cnoid/SceneCameras>
 #include <cnoid/SceneMarkers>
@@ -27,7 +27,7 @@ namespace {
 
 class ScenePointSet;
 
-class ScenePointSet : public SgPosTransform, public SceneWidgetEditable
+class ScenePointSet : public SgPosTransform, public SceneWidgetEventHandler
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -44,7 +44,7 @@ public:
     ScopedConnection eraserModeMenuItemConnection;
     bool isEditable_;
 
-    Signal<void(const Affine3& T)> sigOffsetTransformChanged;
+    Signal<void(const Isometry3& T)> sigOffsetPositionChanged;
     
     Signal<void()> sigAttentionPointsChanged;
     SgGroupPtr attentionPointMarkerGroup;
@@ -66,10 +66,10 @@ public:
     bool isEditable() const { return isEditable_; }
     void setEditable(bool on) { isEditable_ = on; }
 
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual bool onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager) override;
-    void onContextMenuRequestInEraserMode(const SceneWidgetEvent& event, MenuManager& menuManager);
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual bool onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager) override;
+    void onContextMenuRequestInEraserMode(SceneWidgetEvent* event, MenuManager* menuManager);
     void onRegionFixed(const PolyhedralRegion& region);
 };
 
@@ -122,7 +122,7 @@ static bool loadPCD(PointSetItem* item, const std::string& filename, std::ostrea
 static bool saveAsPCD(PointSetItem* item, const std::string& filename, std::ostream& os)
 {
     try {
-        cnoid::savePCD(item->pointSet(), filename, item->offsetTransform());
+        cnoid::savePCD(item->pointSet(), filename, item->offsetPosition());
         return true;
     } catch (boost::exception& ex) {
         if(std::string const * message = boost::get_error_info<error_info_message>(ex)){
@@ -142,8 +142,10 @@ void PointSetItem::initializeClass(ExtensionManager* ext)
         im.addCreationPanel<PointSetItem>();
         im.addLoaderAndSaver<PointSetItem>(
             _("Point Cloud (PCD)"), "PCD-FILE", "pcd",
-            [](PointSetItem* item, const std::string& filename, std::ostream& os, Item*){ return ::loadPCD(item, filename, os); },
-            [](PointSetItem* item, const std::string& filename, std::ostream& os, Item*){ return ::saveAsPCD(item, filename, os); },
+            [](PointSetItem* item, const std::string& filename, std::ostream& os, Item*){
+                return ::loadPCD(item, filename, os); },
+            [](PointSetItem* item, const std::string& filename, std::ostream& os, Item*){
+                return ::saveAsPCD(item, filename, os); },
             ItemManager::PRIORITY_CONVERSION);
         
         initialized = true;
@@ -206,7 +208,8 @@ bool PointSetItem::setName(const std::string& name)
 {
     impl->scene->setName(name);
     impl->pointSet->setName(name);
-    return Item::setName(name);
+    Item::setName(name);
+    return true;
 }
 
 
@@ -235,43 +238,45 @@ SgPointSet* PointSetItem::pointSet()
 }
 
 
-const Affine3& PointSetItem::offsetTransform() const
+const Isometry3& PointSetItem::offsetPosition() const
 {
     return impl->scene->T();
 }
 
 
-void PointSetItem::setOffsetTransform(const Affine3& T)
+void PointSetItem::setOffsetPosition(const Isometry3& T)
 {
     impl->scene->setPosition(T);
 }
 
 
-SignalProxy<void(const Affine3& T)> PointSetItem::sigOffsetTransformChanged()
+SignalProxy<void(const Isometry3& T)> PointSetItem::sigOffsetPositionChanged()
 {
-    return impl->scene->sigOffsetTransformChanged;
+    return impl->scene->sigOffsetPositionChanged;
 }
 
 
-void PointSetItem::notifyOffsetTransformChange()
+void PointSetItem::notifyOffsetPositionChange(bool doNotifyScene)
 {
-    impl->scene->sigOffsetTransformChanged(impl->scene->T());
-    impl->scene->notifyUpdate();
+    impl->scene->sigOffsetPositionChanged(impl->scene->T());
+    if(doNotifyScene){
+        impl->scene->notifyUpdate(impl->scene->update.withAction(SgUpdate::Modified));
+    }
     Item::notifyUpdate();
 }
 
 
 SgPointSet* PointSetItem::getTransformedPointSet() const
 {
-    SgPointSet* transformed = new SgPointSet();
+    SgPointSet* transformed = new SgPointSet;
     SgVertexArray& points = *transformed->getOrCreateVertices();
     SgVertexArray* orgPoints = impl->pointSet->vertices();
     if(orgPoints){
         const int n = orgPoints->size();
         points.resize(n);
-        const Affine3f T = offsetTransform().cast<Affine3f::Scalar>();
+        const Isometry3& T = offsetPosition();
         for(int i=0; i < n; ++i){
-            points[i] = T * (*orgPoints)[i];
+            points[i] = (T * (*orgPoints)[i].cast<Isometry3::Scalar>()).cast<SgVertexArray::Scalar>();
         }
     }
     return transformed;
@@ -424,7 +429,7 @@ void PointSetItem::removePoints(const PolyhedralRegion& region)
 void PointSetItemImpl::removePoints(const PolyhedralRegion& region)
 {
     vector<int> indicesToRemove;
-    const Affine3 T = scene->T();
+    const Isometry3 T = scene->T();
     SgVertexArray orgPoints(*pointSet->vertices());
     const int numOrgPoints = orgPoints.size();
 
@@ -456,7 +461,7 @@ void PointSetItemImpl::removePoints(const PolyhedralRegion& region)
             removeSubElements(*pointSet->colors(), pointSet->colorIndices(), indicesToRemove);
         }
 
-        pointSet->notifyUpdate();
+        pointSet->notifyUpdate(scene->update.withAction(SgUpdate::Modified));
     }
 
     sigPointsInRegionRemoved(region);
@@ -529,9 +534,9 @@ void PointSetItem::doPutProperties(PutPropertyFunction& putProperty)
     putProperty(_("Editable"), isEditable(), [&](bool on){ return impl->onEditableChanged(on); });
     const SgVertexArray* points = impl->pointSet->vertices();
     putProperty(_("Num points"), static_cast<int>(points ? points->size() : 0));
-    putProperty(_("Translation"), str(Vector3(offsetTransform().translation())),
+    putProperty(_("Translation"), str(Vector3(offsetPosition().translation())),
                 [&](const string& value){ return impl->onTranslationPropertyChanged(value); });
-    Vector3 rpy(TO_DEGREE * rpyFromRot(offsetTransform().linear()));
+    Vector3 rpy(TO_DEGREE * rpyFromRot(offsetPosition().linear()));
     putProperty(_("Rotation"), str(rpy), [&](const string& value){ return impl->onRotationPropertyChanged(value);});
 }
 
@@ -553,7 +558,7 @@ bool PointSetItemImpl::onTranslationPropertyChanged(const std::string& value)
     Vector3 p;
     if(toVector3(value, p)){
         scene->setTranslation(p);
-        self->notifyOffsetTransformChange();
+        self->notifyOffsetPositionChange();
         return true;
     }
     return false;
@@ -565,7 +570,7 @@ bool PointSetItemImpl::onRotationPropertyChanged(const std::string& value)
     Vector3 rpy;
     if(toVector3(value, rpy)){
         scene->setRotation(rotFromRpy(TO_RADIAN * rpy));
-        self->notifyOffsetTransformChange();
+        self->notifyOffsetPositionChange();
         return true;
     }
     return false;
@@ -574,22 +579,19 @@ bool PointSetItemImpl::onRotationPropertyChanged(const std::string& value)
 
 bool PointSetItem::store(Archive& archive)
 {
-    ScenePointSet* scene = impl->scene;
-    if(!filePath().empty()){
-        archive.writeRelocatablePath("file", filePath());
-        archive.write("format", fileFormat());
-    }
-    write(archive, "translation", Vector3(scene->translation()));
+    archive.writeFileInformation(this);
 
+    ScenePointSet* scene = impl->scene;
+    write(archive, "translation", Vector3(scene->translation()));
     writeDegreeAngleAxis(archive, "rotation", AngleAxis(scene->rotation()));
     // The following element is used to distinguish the value type from the old one using radian.
     // The old format is deprecated, and writing the following element should be omitted in the future.
     archive.write("angle_unit", "degree");
-
-    archive.write("renderingMode", scene->renderingMode.selectedSymbol());
-    archive.write("pointSize", pointSize());
-    archive.write("voxelSize", scene->voxelSize);
-    archive.write("isEditable", isEditable());
+    archive.write("rendering_mode", scene->renderingMode.selectedSymbol());
+    archive.write("point_size", pointSize());
+    archive.write("voxel_size", scene->voxelSize);
+    archive.write("is_editable", isEditable());
+    
     return true;
 }
 
@@ -615,20 +617,28 @@ bool PointSetItem::restore(const Archive& archive)
     }
     
     string symbol;
-    if(archive.read("renderingMode", symbol)){
+    if(archive.read({ "rendering_mode", "renderingMode" }, symbol)){
         impl->setRenderingMode(scene->renderingMode.index(symbol));
     }
-    scene->setPointSize(archive.get("pointSize", pointSize()));
-    scene->setVoxelSize(archive.get("voxelSize", voxelSize()));
-    setEditable(archive.get("isEditable", isEditable()));
-    
+    scene->setPointSize(archive.get({ "point_size", "pointSize" }, pointSize()));
+    scene->setVoxelSize(archive.get({ "voxel_size", "voxelSize" }, voxelSize()));
+    setEditable(archive.get({ "is_editable", "isEditable" }, isEditable()));
+
     std::string filename, formatId;
-    if(archive.readRelocatablePath("file", filename) && archive.read("format", formatId)){
+    if(archive.read("file", filename) && archive.read("format", formatId)){
+        filename = archive.resolveRelocatablePath(filename);
+        if(filename.empty()){
+            return false; // Invalid relocatable path
+        }
         return load(filename, archive.currentParentItem(), formatId);
     }
+    
+    // Restoration succeeds when there is no associated file information
     return true;
 }
 
+
+namespace {
 
 ScenePointSet::ScenePointSet(PointSetItemImpl* pointSetItemImpl)
     : weakPointSetItem(pointSetItemImpl->self),
@@ -650,7 +660,8 @@ ScenePointSet::ScenePointSet(PointSetItemImpl* pointSetItemImpl)
     regionMarker->sigRegionFixed().connect(
         [&](const PolyhedralRegion& region){ onRegionFixed(region); });
     regionMarker->sigContextMenuRequest().connect(
-        [&](const SceneWidgetEvent& event, MenuManager& manager){ onContextMenuRequestInEraserMode(event, manager); });
+        [&](SceneWidgetEvent* event, MenuManager* manager){
+            onContextMenuRequestInEraserMode(event, manager); });
 
     isEditable_ = false;
 }
@@ -786,7 +797,7 @@ void ScenePointSet::updateVisualization(bool updateContents)
         }
         invariant->addChild(voxels);
     }
-    addChild(invariant, true);
+    addChild(invariant, update);
 
     clearAttentionPoints(true);
 }
@@ -890,7 +901,7 @@ void ScenePointSet::updateVoxels()
 }
 
 
-bool ScenePointSet::onButtonPressEvent(const SceneWidgetEvent& event)
+bool ScenePointSet::onButtonPressEvent(SceneWidgetEvent* event)
 {
     if(!isEditable_){
         return false;
@@ -898,13 +909,13 @@ bool ScenePointSet::onButtonPressEvent(const SceneWidgetEvent& event)
     
     bool processed = false;
     
-    if(event.button() == Qt::LeftButton){
-        if(event.modifiers() & Qt::ControlModifier){
-            if(!removeAttentionPoint(event.point(), 0.01, true)){
-                addAttentionPoint(event.point(), true);
+    if(event->button() == Qt::LeftButton){
+        if(event->modifiers() & Qt::ControlModifier){
+            if(!removeAttentionPoint(event->point(), 0.01, true)){
+                addAttentionPoint(event->point(), true);
             }
         } else {
-            setAttentionPoint(event.point(), true);
+            setAttentionPoint(event->point(), true);
         }
         processed = true;
     }
@@ -913,22 +924,22 @@ bool ScenePointSet::onButtonPressEvent(const SceneWidgetEvent& event)
 }
 
 
-bool ScenePointSet::onPointerMoveEvent(const SceneWidgetEvent& event)
+bool ScenePointSet::onPointerMoveEvent(SceneWidgetEvent* event)
 {
     return false;
 }
 
 
-bool ScenePointSet::onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager)
+bool ScenePointSet::onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager)
 {
     if(isEditable_){
-        menuManager.addItem(_("PointSet: Clear Attention Points"))->sigTriggered().connect(
+        menuManager->addItem(_("PointSet: Clear Attention Points"))->sigTriggered().connect(
             [&](){ clearAttentionPoints(true); });
 
         if(!regionMarker->isEditing()){
-            SceneWidget* sceneWidget = event.sceneWidget();
+            SceneWidget* sceneWidget = event->sceneWidget();
             eraserModeMenuItemConnection.reset(
-                menuManager.addItem(_("PointSet: Start Eraser Mode"))->sigTriggered().connect(
+                menuManager->addItem(_("PointSet: Start Eraser Mode"))->sigTriggered().connect(
                     [&, sceneWidget](){ regionMarker->startEditing(sceneWidget); }));
         }
         return true;
@@ -937,10 +948,10 @@ bool ScenePointSet::onContextMenuRequest(const SceneWidgetEvent& event, MenuMana
 }
 
 
-void ScenePointSet::onContextMenuRequestInEraserMode(const SceneWidgetEvent&, MenuManager& menuManager)
+void ScenePointSet::onContextMenuRequestInEraserMode(SceneWidgetEvent*, MenuManager* menuManager)
 {
     eraserModeMenuItemConnection.reset(
-        menuManager.addItem(_("PointSet: Exit Eraser Mode"))->sigTriggered().connect(
+        menuManager->addItem(_("PointSet: Exit Eraser Mode"))->sigTriggered().connect(
             [&](){ regionMarker->finishEditing(); }));
 }
 
@@ -951,4 +962,6 @@ void ScenePointSet::onRegionFixed(const PolyhedralRegion& region)
     if(item){
         item->removePoints(region);
     }
+}
+
 }

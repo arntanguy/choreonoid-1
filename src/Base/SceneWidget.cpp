@@ -7,7 +7,7 @@
 #include "ToolBarArea.h"
 #include "GL1SceneRenderer.h"
 #include "GLSLSceneRenderer.h"
-#include "SceneWidgetEditable.h"
+#include "SceneWidgetEventHandler.h"
 #include "InteractiveCameraTransform.h"
 #include "MainWindow.h"
 #include "Buttons.h"
@@ -45,6 +45,7 @@
 #include <QPainter>
 #include <fmt/format.h>
 #include <set>
+#include <iostream>
 #include "gettext.h"
 
 #ifdef _WIN32
@@ -65,39 +66,15 @@ const int NUM_SHADOWS = 2;
 
 enum { FLOOR_GRID = 0, XZ_GRID = 1, YZ_GRID = 2 };
 
-Signal<void()> sigVSyncModeChanged;
-
 bool isLowMemoryConsumptionMode;
 Signal<void(bool on)> sigLowMemoryConsumptionModeChanged;
 
-class EditableExtractor : public PolymorphicSceneNodeFunctionSet
-{
-public:
-    vector<SgNode*> editables;
+QLabel* sharedIndicatorLabel = nullptr;
 
-    int numEditables() const { return editables.size(); }
-    SgNode* editableNode(int index) { return editables[index]; }
-    SceneWidgetEditable* editable(int index) { return dynamic_cast<SceneWidgetEditable*>(editables[index]); }
-
-    EditableExtractor(){
-        setFunction<SgGroup>(
-            [&](SgNode* node){
-                auto group = static_cast<SgGroup*>(node);
-                if(dynamic_cast<SceneWidgetEditable*>(group)){
-                    editables.push_back(group);
-                }
-                for(auto child : *group){
-                    dispatch(child);
-                }
-            });
-        updateDispatchTable();
-    }
-
-    void apply(SgNode* node) {
-        editables.clear();
-        dispatch(node);
-    }
-};
+Signal<void(SceneWidget* instance)> sigSceneWidgetCreated;
+Signal<void(SceneWidget* requester)> sigModeSyncRequest;
+bool isEditModeInModeSync = false;
+bool isHighlightingEnabledInModeSync = false;
 
 class ConfigDialog : public Dialog
 {
@@ -197,9 +174,23 @@ public:
         }
     }
 };
-            
-Signal<void(SceneWidget*)> sigSceneWidgetCreated;
 
+
+struct EditableNodeInfo
+{
+    SgNodePtr node;
+    SceneWidgetEventHandler* handler;
+    EditableNodeInfo() : handler(nullptr) { }
+    EditableNodeInfo(SgNode* node, SceneWidgetEventHandler* handler)
+        : node(node), handler(handler) { }
+    bool operator<(const EditableNodeInfo& rhs) const { return handler < rhs.handler; };
+    bool operator==(const EditableNodeInfo& rhs) const { return handler == rhs.handler; }
+    bool operator!=(const EditableNodeInfo& rhs) const { return handler != rhs.handler; }
+    explicit operator bool() const { return handler != nullptr; }
+    void clear(){ node.reset(); handler = nullptr; }
+};
+
+            
 }
 
 namespace cnoid {
@@ -212,7 +203,6 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     SceneWidget* self;
-    ostream& os;
 
     SceneWidgetRootPtr sceneRoot;
     SgUnpickableGroupPtr systemGroup;
@@ -221,11 +211,10 @@ public:
     GLSceneRenderer* renderer;
     GLSLSceneRenderer* glslRenderer;
     GLuint prevDefaultFramebufferObject;
+    bool isRendering;
+    bool needToUpdatePreprocessedNodeTree;
     bool needToClearGLOnFrameBufferChange;
-    LazyCaller extractPreprocessedNodesLater;
-    SgUpdate modified;
-    SgUpdate added;
-    SgUpdate removed;
+    SgUpdate sgUpdate;
 
     InteractiveCameraTransformPtr interactiveCameraTransform;
     InteractiveCameraTransformPtr builtinCameraTransform;
@@ -244,9 +233,13 @@ public:
 
     bool needToUpdateViewportInformation;
     bool isEditMode;
+    bool isHighlightingEnabled;
+    bool isModeSyncEnabled;
+    ScopedConnection modeSyncConnection;
 
-    Selection viewpointControlMode;
-    bool isFirstPersonMode() const { return (viewpointControlMode.which() != SceneWidget::THIRD_PERSON_MODE); }
+    Selection viewpointOperationMode;
+    bool isFirstPersonMode() const {
+        return (viewpointOperationMode.which() != ThirdPersonMode); }
         
     enum DragMode { NO_DRAGGING, ABOUT_TO_EDIT, EDITING, VIEW_ROTATION, VIEW_TRANSLATION, VIEW_ZOOM } dragMode;
 
@@ -256,13 +249,13 @@ public:
                 dragMode == VIEW_ZOOM);
     }
 
-    set<SceneWidgetEditable*> editableEntities;
-
-    typedef vector<SceneWidgetEditable*> EditablePath;
-    EditablePath pointedEditablePath;
-    SceneWidgetEditable* lastMouseMovedEditable;
-    EditablePath focusedEditablePath;
-    SceneWidgetEditable* focusedEditable;
+    typedef list<vector<EditableNodeInfo>> EditableArrayList;
+    EditableArrayList tmpEditableArrays;
+    EditableArrayList::iterator pCurrentTmpEditableArray;
+    vector<EditableNodeInfo> pointedEditablePath;
+    EditableNodeInfo lastMouseMovedEditable;
+    EditableNodeInfo focusedEditable;
+    vector<EditableNodeInfo> focusedEditablePath;
 
     QCursor defaultCursor;
     QCursor editModeCursor;
@@ -270,7 +263,7 @@ public:
     double orgMouseX;
     double orgMouseY;
     Vector3 orgPointedPos;
-    Affine3 orgCameraPosition;
+    Isometry3 orgCameraPosition;
     double orgOrthoCameraHeight;
     Vector3 cameraViewChangeCenter;
         
@@ -283,11 +276,12 @@ public:
     Vector3 lastClickedPoint;
     int mousePressX;
     int mousePressY;
+    QMouseEvent* lastMouseMoveEvent;
 
-    SceneWidgetEditable* activeCustomModeHandler;
+    SceneWidgetEventHandler* activeCustomModeHandler;
     int activeCustomModeId;
 
-    bool collisionLinesVisible;
+    bool collisionLineVisibility;
 
     ref_ptr<CoordinateAxesOverlay> coordinateAxesOverlay;
 
@@ -304,10 +298,9 @@ public:
     bool isFPSTestCanceled;
 
     ConfigDialog* config;
-    QLabel* indicatorLabel;
 
     MenuManager menuManager;
-    Signal<void(const SceneWidgetEvent& event, MenuManager& menuManager)> sigContextMenuRequest;
+    Signal<void(SceneWidgetEvent* event, MenuManager* menuManager)> sigContextMenuRequest;
 
     Signal<void(bool isFocused)> sigWidgetFocusChanged;
     Signal<void()> sigAboutToBeDestroyed;
@@ -320,13 +313,18 @@ public:
     Impl(SceneWidget* self);
     ~Impl();
 
-    void onVSyncModeChanged();
+    void onModeSyncRequest(SceneWidget* requester);
     void onLowMemoryConsumptionModeChanged(bool on);
     void tryToResumeNormalRendering();
     void updateGrids();
     SgLineSet* createGrid(int index);
 
     void onSceneGraphUpdated(const SgUpdate& update);
+    void extractEditablesInSubTree(SgNode* node, vector<EditableNodeInfo>& editables);
+    void checkAddedEditableNodes(SgNode* node);
+    void checkRemovedEditableNodes(SgNode* node);
+    void warnRecursiveEditableNodeSetChange();
+    
     virtual void initializeGL() override;
     virtual void resizeGL(int width, int height) override;
     virtual void paintGL() override;
@@ -342,16 +340,14 @@ public:
     void showGridColorDialog(int index);
     void showDefaultColorDialog();
 
-    void updateCurrentCamera();
-    void setCurrentCameraPath(const std::vector<std::string>& simplifiedPathStrings);
-    void onCamerasChanged();
     void onCurrentCameraChanged();
 
     void onTextureToggled(bool on);
     void onLineWidthChanged(double width);
     void onPointSizeChanged(double width);
-    void setPolygonDisplayElements(int elementFlags);
-    void setCollisionLinesVisible(bool on);
+    void setVisiblePolygonElements(int elementFlags);
+    int visiblePolygonElements() const;
+    void setCollisionLineVisibility(bool on);
     void onFieldOfViewChanged(double fov);
     void onClippingDepthChanged();
     void onSmoothShadingToggled(bool on);
@@ -359,13 +355,11 @@ public:
     void onNormalVisualizationChanged();
 
     void resetCursor();
-    void setEditMode(bool on);
+    void setEditMode(bool on, bool doAdvertise);
     void toggleEditMode();
-    void advertiseSceneModeChange();
+    void advertiseSceneModeChange(bool doModeSyncRequest);
+    void advertiseSceneModeChangeInSubTree(SgNode* node);
     void viewAll();
-
-    void onEntityAdded(SgNode* node);
-    void onEntityRemoved(SgNode* node);
 
     void showPickingImageWindow();
     void onUpsideDownToggled(bool on);
@@ -376,11 +370,10 @@ public:
     void updateLatestEventPath(bool forceFullPicking = false);
     void updateLastClickedPoint();
         
-    SceneWidgetEditable* applyFunction(
-        EditablePath& editablePath, std::function<bool(SceneWidgetEditable* editable)> function);
-    bool setFocusToEditablePath(EditablePath& editablePath);
-    bool setFocusToPointedEditablePath(SceneWidgetEditable* targetEditable);
-    void clearFocusToEditables();
+    EditableNodeInfo applyEditableFunction(
+        vector<EditableNodeInfo>& editablePath, std::function<bool(SceneWidgetEventHandler* editable)> function);
+    bool setFocusToEditablePath(vector<EditableNodeInfo>& editablePath);
+    bool setFocusToPointedEditablePath(const EditableNodeInfo& targetEditable);
 
     virtual void keyPressEvent(QKeyEvent* event) override;
     virtual void keyReleaseEvent(QKeyEvent* event) override;
@@ -395,7 +388,7 @@ public:
     virtual void focusInEvent(QFocusEvent* event) override;
     virtual void focusOutEvent(QFocusEvent* event) override;
 
-    Affine3 getNormalizedCameraTransform(const Affine3& T);
+    Isometry3 getNormalizedCameraTransform(const Isometry3& T);
     void startViewChange();
     void startViewRotation();
     void dragViewRotation();
@@ -430,33 +423,32 @@ public:
 
 void SceneWidget::initializeClass(ExtensionManager* ext)
 {
-    // OpenGL vsync setting
-    Mapping* glConfig = AppConfig::archive()->openMapping("OpenGL");
-    auto& mm = ext->menuManager();
-
+    Mapping* glConfig = AppConfig::archive()->openMapping("open_gl");
+    
     bool isVSyncEnabled = (glConfig->get("vsync", 0) > 0);
+    auto& mm = ext->menuManager();
     auto vsyncItem = mm.setPath("/Options/OpenGL").addCheckItem(_("Vertical sync"));
     vsyncItem->setChecked(isVSyncEnabled);
     vsyncItem->sigToggled().connect([&](bool on){ Impl::onOpenGLVSyncToggled(on, true); });
-    Impl::onOpenGLVSyncToggled(isVSyncEnabled, false);
 
     isLowMemoryConsumptionMode = glConfig->get("lowMemoryConsumption", false);
     auto memoryItem = mm.addCheckItem(_("Low GPU memory consumption mode"));
     memoryItem->setChecked(isLowMemoryConsumptionMode);
     memoryItem->sigToggled().connect([&](bool on){ Impl::onLowMemoryConsumptionModeChanged(on, true); });
-    Impl::onLowMemoryConsumptionModeChanged(isVSyncEnabled, false);
+    Impl::onLowMemoryConsumptionModeChanged(isLowMemoryConsumptionMode, false);
 }
 
 
 void SceneWidget::Impl::onOpenGLVSyncToggled(bool on, bool doConfigOutput)
 {
-    auto format = QSurfaceFormat::defaultFormat();
-    format.setSwapInterval(on ? 1 : 0);
-    QSurfaceFormat::setDefaultFormat(format);
-    sigVSyncModeChanged();
-
+    /*
+      When the menu check item on the OpenGL vertical sync is toggled, the state is
+      just saved into the config file and the application must be restarted to
+      update the vsync state because it is impossible to change the state of the existing
+      QOpenGLWidgets.
+    */
     if(doConfigOutput){
-        Mapping* glConfig = AppConfig::archive()->openMapping("OpenGL");
+        Mapping* glConfig = AppConfig::archive()->openMapping("open_gl");
         glConfig->write("vsync", (on ? 1 : 0));
     }
 }
@@ -467,8 +459,8 @@ void SceneWidget::Impl::onLowMemoryConsumptionModeChanged(bool on, bool doConfig
     sigLowMemoryConsumptionModeChanged(on);
 
     if(doConfigOutput){
-        Mapping* glConfig = AppConfig::archive()->openMapping("OpenGL");
-        glConfig->write("lowMemoryConsumption", on);
+        Mapping* glConfig = AppConfig::archive()->openMapping("open_gl");
+        glConfig->write("low_memory_consumption", on);
     }
 }
 
@@ -529,7 +521,6 @@ SceneWidget::SceneWidget(QWidget* parent)
 SceneWidget::Impl::Impl(SceneWidget* self)
     : QOpenGLWidget(self),
       self(self),
-      os(MessageView::mainInstance()->cout()),
       sceneRoot(new SceneWidgetRoot(self)),
       systemGroup(sceneRoot->systemGroup),
       emitSigStateChangedLater(std::ref(sigStateChanged)),
@@ -548,23 +539,24 @@ SceneWidget::Impl::Impl(SceneWidget* self)
         glslRenderer->setLowMemoryConsumptionMode(isLowMemoryConsumptionMode);
     }
         
-    renderer->setOutputStream(os);
+    renderer->setOutputStream(MessageView::instance()->cout(false));
     renderer->enableUnusedResourceCheck(true);
-    renderer->sigRenderingRequest().connect([&](){ update(); });
-    renderer->sigCamerasChanged().connect([&](){ onCamerasChanged(); });
     renderer->sigCurrentCameraChanged().connect([&](){ onCurrentCameraChanged(); });
+    renderer->setCurrentCameraAutoRestorationMode(true);
     self->sigObjectNameChanged().connect([this](string name){ renderer->setName(name); });
+
     sceneRoot->sigUpdated().connect([this](const SgUpdate& update){ onSceneGraphUpdated(update); });
+    tmpEditableArrays.emplace_back();
+    pCurrentTmpEditableArray = tmpEditableArrays.begin();
 
     scene = renderer->scene();
     prevDefaultFramebufferObject = 0;
+    isRendering = false;
+
+    needToUpdatePreprocessedNodeTree = true;
+    renderer->setFlagVariableToUpdatePreprocessedNodeTree(needToUpdatePreprocessedNodeTree);
+
     needToClearGLOnFrameBufferChange = false;
-
-    extractPreprocessedNodesLater.setFunction([&](){ renderer->extractPreprocessedNodes(); });
-
-    modified.setAction(SgUpdate::MODIFIED);
-    added.setAction(SgUpdate::ADDED);
-    removed.setAction(SgUpdate::REMOVED);
 
     for(auto& color : gridColor){
     	color << 0.9f, 0.9f, 0.9f, 1.0f;
@@ -575,28 +567,30 @@ SceneWidget::Impl::Impl(SceneWidget* self)
     
     needToUpdateViewportInformation = true;
     isEditMode = false;
-    viewpointControlMode.resize(2);
-    viewpointControlMode.setSymbol(SceneWidget::THIRD_PERSON_MODE, "thirdPerson");
-    viewpointControlMode.setSymbol(SceneWidget::FIRST_PERSON_MODE, "firstPerson");
-    viewpointControlMode.select(SceneWidget::THIRD_PERSON_MODE);
+    isHighlightingEnabled = false;
+    isModeSyncEnabled = false;
+    viewpointOperationMode.resize(2);
+    viewpointOperationMode.setSymbol(ThirdPersonMode, "thirdPerson");
+    viewpointOperationMode.setSymbol(FirstPersonMode, "firstPerson");
+    viewpointOperationMode.select(ThirdPersonMode);
     dragMode = NO_DRAGGING;
     defaultCursor = self->cursor();
     editModeCursor = QCursor(Qt::PointingHandCursor);
 
-    lastMouseMovedEditable = nullptr;
-    focusedEditable = nullptr;
-
     latestEvent.sceneWidget_ = self;
     lastClickedPoint.setZero();
+    lastMouseMoveEvent = nullptr;
 
     activeCustomModeHandler = nullptr;
     activeCustomModeId = 0;
-    
-    indicatorLabel = new QLabel;
-    indicatorLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    QFont font = indicatorLabel->font();
-    font.setFixedPitch(true);
-    indicatorLabel->setFont(font);
+
+    if(!sharedIndicatorLabel){
+        sharedIndicatorLabel = new QLabel;
+        sharedIndicatorLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        QFont font = sharedIndicatorLabel->font();
+        font.setFixedPitch(true);
+        sharedIndicatorLabel->setFont(font);
+    }
 
     builtinCameraTransform = new InteractiveCameraTransform;
     builtinCameraTransform->setTransform(
@@ -637,7 +631,7 @@ SceneWidget::Impl::Impl(SceneWidget* self)
 
     updateDefaultLights();
 
-    collisionLinesVisible = false;
+    collisionLineVisibility = false;
 
     coordinateAxesOverlay = new CoordinateAxesOverlay;
     activateSystemNode(coordinateAxesOverlay, config->coordinateAxesCheck.isChecked());
@@ -652,7 +646,6 @@ SceneWidget::Impl::Impl(SceneWidget* self)
 
     isDoingFPSTest = false;
 
-    sigVSyncModeChanged.connect([&](){ onVSyncModeChanged(); });
     sigLowMemoryConsumptionModeChanged.connect(
         [&](bool on){ onLowMemoryConsumptionModeChanged(on); });
 
@@ -670,24 +663,39 @@ SceneWidget::~SceneWidget()
 SceneWidget::Impl::~Impl()
 {
     delete renderer;
-    delete indicatorLabel;
     delete config;
 
+    if(lastMouseMoveEvent){
+        delete lastMouseMoveEvent;
+    }
     if(pickingImageWindow){
         delete pickingImageWindow;
     }
 }
 
 
-void SceneWidget::Impl::onVSyncModeChanged()
+void SceneWidget::setModeSyncEnabled(bool on)
 {
-    /**
-       We want to change the swap interval value when the vsync configuration is changed.
-       However, resetting the format is not valied for the QOpenGLWidget instance that
-       has been initialized.
-       To change the swap interval, the QOpenGLWiget instance must probably be recreated.
-    */
-    //setFormat(QSurfaceFormat::defaultFormat());
+    if(on != impl->isModeSyncEnabled){
+        impl->isModeSyncEnabled = on;
+        if(on){
+            impl->modeSyncConnection =
+                sigModeSyncRequest.connect(
+                    [this](SceneWidget* requester){ impl->onModeSyncRequest(requester); });
+            impl->isEditMode = isEditModeInModeSync;
+            impl->isHighlightingEnabled = isHighlightingEnabledInModeSync;
+        } else {
+            impl->modeSyncConnection.disconnect();
+        }
+    }
+}
+
+
+void SceneWidget::Impl::onModeSyncRequest(SceneWidget* requester)
+{
+    isHighlightingEnabled = requester->isHighlightingEnabled();
+    setEditMode(requester->isEditMode(), false);
+    advertiseSceneModeChange(false);
 }
 
 
@@ -724,27 +732,27 @@ SceneRenderer* SceneWidget::renderer()
 }
 
 
-/**
-   Draw the scene immediately.
-   \note This function is only used to force rendering when testing rendering performance, etc.
-*/
-void SceneWidget::draw()
+void SceneWidget::renderScene(bool doImmediately)
 {
-    impl->repaint();
-    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents|QEventLoop::ExcludeSocketNotifiers);
+    if(doImmediately){
+        impl->repaint();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents|QEventLoop::ExcludeSocketNotifiers);
+    } else {
+        impl->update();
+    }
 }
 
 
 QWidget* SceneWidget::indicator()
 {
-    return impl->indicatorLabel;
+    return sharedIndicatorLabel;
 }
 
 
 void SceneWidget::Impl::initializeGL()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::initializeGL()" << endl;
+        cout << "SceneWidget::Impl::initializeGL()" << endl;
     }
 
     renderer->setDefaultFramebufferObject(defaultFramebufferObject());
@@ -757,7 +765,8 @@ void SceneWidget::Impl::initializeGL()
             }
         }
     } else {
-        os << "OpenGL initialization failed." << endl;
+        MessageView::instance()->putln(
+            _("OpenGL initialization failed."), MessageView::Error);
         // This view shoulbe be disabled when the glew initialization is failed.
     }
 }
@@ -766,47 +775,138 @@ void SceneWidget::Impl::initializeGL()
 void SceneWidget::Impl::resizeGL(int width, int height)
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::resizeGL()" << endl;
+        cout << "SceneWidget::Impl::resizeGL()" << endl;
     }
     needToUpdateViewportInformation = true;
 }
 
 
-void SceneWidget::Impl::onSceneGraphUpdated(const SgUpdate& update)
+void SceneWidget::Impl::onSceneGraphUpdated(const SgUpdate& sgUpdate)
 {
-    SgNode* node = dynamic_cast<SgNode*>(update.path().front());
-
-    if(node && (update.action() & (SgUpdate::ADDED | SgUpdate::REMOVED))){
-        EditableExtractor extractor;
-        extractor.apply(node);
-        const int numEditables = extractor.numEditables();
-
-        if(update.action() & SgUpdate::ADDED){
-            for(int i=0; i < numEditables; ++i){
-                SceneWidgetEditable* editable = extractor.editable(i);
-                editableEntities.insert(editable);
-                editable->onSceneModeChanged(latestEvent);
+    if(sgUpdate.hasAction(SgUpdate::Added | SgUpdate::Removed)){
+        if(sgUpdate.action() & SgUpdate::Added){
+            if(auto node = sgUpdate.path().front()->toNode()){
+                checkAddedEditableNodes(node);
             }
-        } else if(update.action() & SgUpdate::REMOVED){
-            for(int i=0; i < numEditables; ++i){
-                SceneWidgetEditable* editable = extractor.editable(i);
-                if(editable == lastMouseMovedEditable){
-                    lastMouseMovedEditable->onPointerLeaveEvent(latestEvent);
-                    lastMouseMovedEditable = nullptr;
-                }
-                bool isEntityFocused = false;
-                for(size_t i=0; i < focusedEditablePath.size(); ++i){
-                    if(editable == focusedEditablePath[i]){
-                        isEntityFocused = true;
-                    }
-                }
-                if(isEntityFocused){
-                    clearFocusToEditables();
-                }
-                editableEntities.erase(editable);
+        } else if(sgUpdate.action() & SgUpdate::Removed){
+            if(auto node = sgUpdate.path().front()->toNode()){
+                checkRemovedEditableNodes(node);
             }
         }
+        needToUpdatePreprocessedNodeTree = true;        
     }
+
+    if(!isRendering){
+        QOpenGLWidget::update();
+    }
+}
+
+
+void SceneWidget::Impl::extractEditablesInSubTree(SgNode* node, vector<EditableNodeInfo>& editables)
+{
+    if(node->hasAttribute(SgObject::Operable)){
+        if(auto editable = dynamic_cast<SceneWidgetEventHandler*>(node)){
+            editables.emplace_back(node, editable);
+        }
+    }
+    if(auto group = node->toGroupNode()){
+        for(auto& child : *group){
+            extractEditablesInSubTree(child, editables);
+        }
+    }
+}
+
+
+void SceneWidget::Impl::checkAddedEditableNodes(SgNode* node)
+{
+    if(pCurrentTmpEditableArray != tmpEditableArrays.begin()){
+        warnRecursiveEditableNodeSetChange();
+    }
+    
+    auto& addedEditables = *pCurrentTmpEditableArray;
+    extractEditablesInSubTree(node, addedEditables);
+
+    if(!addedEditables.empty()){
+
+        ++pCurrentTmpEditableArray;
+        if(pCurrentTmpEditableArray == tmpEditableArrays.end()){
+            tmpEditableArrays.emplace_back();
+            pCurrentTmpEditableArray = tmpEditableArrays.end();
+            --pCurrentTmpEditableArray;
+        }
+
+        for(auto& editable : addedEditables){
+            editable.handler->onSceneModeChanged(&latestEvent);
+        }
+        addedEditables.clear();
+
+        --pCurrentTmpEditableArray;
+    }
+}
+
+
+void SceneWidget::Impl::checkRemovedEditableNodes(SgNode* node)
+{
+    if(pCurrentTmpEditableArray != tmpEditableArrays.begin()){
+        warnRecursiveEditableNodeSetChange();
+    }
+    
+    auto& removedEditables = *pCurrentTmpEditableArray;
+    extractEditablesInSubTree(node, removedEditables);
+
+    if(!removedEditables.empty()){
+
+        ++pCurrentTmpEditableArray;
+        if(pCurrentTmpEditableArray == tmpEditableArrays.end()){
+            tmpEditableArrays.emplace_back();
+            pCurrentTmpEditableArray = tmpEditableArrays.end();
+            --pCurrentTmpEditableArray;
+        }
+
+        list<EditableNodeInfo> editablesToClearFocus;
+        for(auto& editable : removedEditables){
+            if(editable == lastMouseMovedEditable){
+                lastMouseMovedEditable.handler->onPointerLeaveEvent(&latestEvent);
+                lastMouseMovedEditable.clear();
+            }
+            if(!focusedEditablePath.empty()){
+                auto iter = focusedEditablePath.begin();
+                while(iter != focusedEditablePath.end()){
+                    auto& focused = *iter;
+                    if(focused == editable){
+                        iter = focusedEditablePath.erase(iter);
+                        editablesToClearFocus.push_back(focused);
+                    } else {
+                        ++iter;
+                    }
+                }
+            }
+            if(focusedEditablePath.empty() && !lastMouseMovedEditable){
+                break;
+            }
+        }
+
+        for(auto& editable : editablesToClearFocus){
+            editable.handler->onFocusChanged(&latestEvent, false);
+        }
+
+        removedEditables.clear();
+
+        --pCurrentTmpEditableArray;
+    }
+}
+    
+
+void SceneWidget::Impl::warnRecursiveEditableNodeSetChange()
+{
+    string message;
+    auto name = self->objectName().toStdString();
+    if(name.empty()){
+        message = _("Recursive editable node set change on a scene widget.");
+    } else {
+        message = fmt::format(_("Recursive editable node set change on scene widget {0}."), name);
+    }
+    MessageView::instance()->putln(message, MessageView::Warning);
 }
 
 
@@ -814,13 +914,11 @@ void SceneWidget::Impl::paintGL()
 {
     if(TRACE_FUNCTIONS){
         static int counter = 0;
-        os << "SceneWidget::Impl::paintGL() " << counter++ << endl;
+        cout << "SceneWidget::Impl::paintGL() " << counter++ << endl;
     }
 
     auto newFramebuffer = defaultFramebufferObject();
     if(newFramebuffer != prevDefaultFramebufferObject){
-        renderer->setDefaultFramebufferObject(newFramebuffer);
-
         /**
            For NVIDIA GPUs, GLSLSceneRenderer may not be able to render properly
            when the placement or some other configurations of QOpenGLWidget used
@@ -836,9 +934,13 @@ void SceneWidget::Impl::paintGL()
         */
         if(needToClearGLOnFrameBufferChange && prevDefaultFramebufferObject > 0){
             renderer->clearGL();
-            os << fmt::format(_("The OpenGL resources of {0} has been cleared."),
-                              self->objectName().toStdString()) << endl;
+            MessageView::instance()->putln(
+                fmt::format(_("The OpenGL resources of {0} has been cleared."),
+                            self->objectName().toStdString()));
         }
+
+        // The default FBO must be updated after the clearGL function
+        renderer->setDefaultFramebufferObject(newFramebuffer);
         
         prevDefaultFramebufferObject = newFramebuffer;
     }
@@ -866,7 +968,9 @@ void SceneWidget::Impl::paintGL()
         timerToRenderNormallyAfterInteractiveCameraPositionChange.stop();
     }
 
+    isRendering = true;
     renderer->render();
+    isRendering = false;
 
     if(fpsTimer.isActive()){
         renderFPS();
@@ -944,11 +1048,17 @@ void SceneWidget::Impl::onFPSTestButtonClicked()
 
 void SceneWidget::Impl::doFPSTest()
 {
+    if(!isBuiltinCameraCurrent){
+        showWarningDialog(
+            _("FPS test cannot be executed because the current camera is not a built-in interactive camera."));
+        return;
+    }
+    
     isDoingFPSTest = true;
     isFPSTestCanceled = false;
     
     const Vector3 p = lastClickedPoint;
-    const Affine3 C = builtinCameraTransform->T();
+    const Isometry3 C = builtinCameraTransform->T();
 
     QElapsedTimer timer;
     timer.start();
@@ -976,11 +1086,13 @@ void SceneWidget::Impl::doFPSTest()
     fps = numFrames / time;
     fpsCounter = 0;
 
-    builtinCameraTransform->setTransform(C);
     update();
 
     QMessageBox::information(config, _("FPS Test Result"),
                              QString(_("FPS: %1 frames / %2 [s] = %3")).arg(numFrames).arg(time).arg(fps));
+
+    builtinCameraTransform->setTransform(C);
+    update();
 
     isDoingFPSTest = false;
 }
@@ -1006,7 +1118,26 @@ SignalProxy<void()> SceneWidget::sigStateChanged() const
 
 void SceneWidget::setEditMode(bool on)
 {
-    impl->setEditMode(on);
+    impl->setEditMode(on, true);
+}
+
+
+void SceneWidget::Impl::setEditMode(bool on, bool doAdvertise)
+{
+    if(on != isEditMode){
+        isEditMode = on;
+        resetCursor();
+        sharedIndicatorLabel->clear();
+        if(doAdvertise){
+            advertiseSceneModeChange(true);
+        }
+    }
+}
+
+
+void SceneWidget::Impl::toggleEditMode()
+{
+    setEditMode(!isEditMode, true);
 }
 
 
@@ -1016,26 +1147,52 @@ bool SceneWidget::isEditMode() const
 }
 
 
-void SceneWidget::Impl::setEditMode(bool on)
+void SceneWidget::Impl::advertiseSceneModeChange(bool doModeSyncRequest)
 {
-    if(on != isEditMode){
-        isEditMode = on;
-        resetCursor();
-        indicatorLabel->clear();
-
-        if(!isEditMode){
-            for(size_t i=0; i < focusedEditablePath.size(); ++i){
-                focusedEditablePath[i]->onFocusChanged(latestEvent, false);
-            }
+    if(!isEditMode){
+        // Clear focus
+        for(auto& editable : focusedEditablePath){
+            editable.handler->onFocusChanged(&latestEvent, false);
         }
-        advertiseSceneModeChange();
     }
+    
+    if(activeCustomModeHandler){
+        activeCustomModeHandler->onSceneModeChanged(&latestEvent);
+    }
+    
+    advertiseSceneModeChangeInSubTree(sceneRoot);
+    
+    if(isEditMode){
+        for(auto& element : focusedEditablePath){
+            element.handler->onFocusChanged(&latestEvent, true);
+        }
+        if(lastMouseMoveEvent){
+            mouseMoveEvent(lastMouseMoveEvent);
+        }
+    }
+    
+    if(doModeSyncRequest && isModeSyncEnabled){
+        isEditModeInModeSync = isEditMode;
+        isHighlightingEnabledInModeSync = isHighlightingEnabled;
+        ::sigModeSyncRequest(self);
+    }
+
+    emitSigStateChangedLater();
 }
 
 
-void SceneWidget::Impl::toggleEditMode()
+void SceneWidget::Impl::advertiseSceneModeChangeInSubTree(SgNode* node)
 {
-    setEditMode(!isEditMode);
+    if(node->hasAttribute(SgObject::Operable)){
+        if(auto editable = dynamic_cast<SceneWidgetEventHandler*>(node)){
+            editable->onSceneModeChanged(&latestEvent);
+        }
+    }
+    if(auto group = node->toGroupNode()){
+        for(auto& child : *group){
+            advertiseSceneModeChangeInSubTree(child);
+        }
+    }
 }
 
 
@@ -1046,7 +1203,7 @@ int SceneWidget::issueUniqueCustomModeId()
 }
 
 
-void SceneWidget::activateCustomMode(SceneWidgetEditable* modeHandler, int modeId)
+void SceneWidget::activateCustomMode(SceneWidgetEventHandler* modeHandler, int modeId)
 {
     auto prevHandler = impl->activeCustomModeHandler;
     impl->activeCustomModeHandler = modeHandler;
@@ -1055,17 +1212,17 @@ void SceneWidget::activateCustomMode(SceneWidgetEditable* modeHandler, int modeI
     if(modeHandler != prevHandler){
         impl->resetCursor();
         if(prevHandler){
-            prevHandler->onSceneModeChanged(impl->latestEvent);
+            prevHandler->onSceneModeChanged(&impl->latestEvent);
         }
         if(modeHandler){
-            modeHandler->onSceneModeChanged(impl->latestEvent);
+            modeHandler->onSceneModeChanged(&impl->latestEvent);
         }
         impl->sigStateChanged();
     }
 }
 
 
-SceneWidgetEditable* SceneWidget::activeCustomModeHandler()
+SceneWidgetEventHandler* SceneWidget::activeCustomModeHandler()
 {
     return impl->activeCustomModeHandler;
 }
@@ -1077,7 +1234,7 @@ int SceneWidget::activeCustomMode() const
 }
 
 
-void SceneWidget::deactivateCustomMode(SceneWidgetEditable* modeHandler)
+void SceneWidget::deactivateCustomMode(SceneWidgetEventHandler* modeHandler)
 {
     if(!modeHandler || modeHandler == impl->activeCustomModeHandler){
         activateCustomMode(nullptr, 0);
@@ -1085,28 +1242,9 @@ void SceneWidget::deactivateCustomMode(SceneWidgetEditable* modeHandler)
 }
 
 
-void SceneWidget::Impl::advertiseSceneModeChange()
+SceneWidgetEvent* SceneWidget::latestEvent()
 {
-   if(activeCustomModeHandler){
-       activeCustomModeHandler->onSceneModeChanged(latestEvent);
-   }
-   set<SceneWidgetEditable*>::iterator p;
-   for(p = editableEntities.begin(); p != editableEntities.end(); ++p){
-       SceneWidgetEditable* editable = *p;
-       editable->onSceneModeChanged(latestEvent);
-   }
-   if(isEditMode){
-       for(size_t i=0; i < focusedEditablePath.size(); ++i){
-           focusedEditablePath[i]->onFocusChanged(latestEvent, true);
-       }
-   }
-   emitSigStateChangedLater();
-}
-
-
-const SceneWidgetEvent& SceneWidget::latestEvent() const
-{
-    return impl->latestEvent;
+    return &impl->latestEvent;
 }
 
 
@@ -1116,16 +1254,16 @@ Vector3 SceneWidget::lastClickedPoint() const
 }
 
 
-void SceneWidget::setViewpointControlMode(ViewpointControlMode mode)
+void SceneWidget::setViewpointOperationMode(ViewpointOperationMode mode)
 {
-    impl->viewpointControlMode.select(mode);
+    impl->viewpointOperationMode.select(mode);
     impl->emitSigStateChangedLater();
 }
 
 
-SceneWidget::ViewpointControlMode SceneWidget::viewpointControlMode() const
+SceneWidget::ViewpointOperationMode SceneWidget::viewpointOperationMode() const
 {
-    return static_cast<SceneWidget::ViewpointControlMode>(impl->viewpointControlMode.which());
+    return static_cast<ViewpointOperationMode>(impl->viewpointOperationMode.which());
 }
 
 
@@ -1153,22 +1291,23 @@ void SceneWidget::Impl::viewAll()
     const double a = renderer->aspectRatio();
     double length = (a >= 1.0) ? (top - bottom) : (right - left);
     
-    Affine3& T = interactiveCameraTransform->T();
+    Isometry3& T = interactiveCameraTransform->T();
     T.translation() +=
         (bbox.center() - T.translation())
         + T.rotation() * Vector3(0, 0, 2.0 * radius * builtinPersCamera->nearClipDistance() / length);
 
 
-    if(SgOrthographicCamera* ortho = dynamic_cast<SgOrthographicCamera*>(renderer->currentCamera())){
+    if(auto ortho = dynamic_cast<SgOrthographicCamera*>(renderer->currentCamera())){
         if(a >= 1.0){
             ortho->setHeight(radius * 2.0);
         } else {
             ortho->setHeight(radius * 2.0 / a);
         }
-        ortho->notifyUpdate(modified);
-    }
+        ortho->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
 
-    interactiveCameraTransform->notifyUpdate(modified);
+    } else {
+        interactiveCameraTransform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
+    }
 }
 
 
@@ -1230,7 +1369,10 @@ void SceneWidget::Impl::updateLatestEventPath(bool forceFullPicking)
     const int r = devicePixelRatio();
     int px = r * latestEvent.x();
     int py = r * latestEvent.y();
+
+    isRendering = true;
     bool picked = renderer->pick(px, py);
+    isRendering = false;
 
     if(isPickingVisualizationEnabled){
         Image image;
@@ -1250,11 +1392,9 @@ void SceneWidget::Impl::updateLatestEventPath(bool forceFullPicking)
         latestEvent.pixelSizeRatio_ = renderer->projectedPixelSizeRatio(latestEvent.point_);
         latestEvent.nodePath_ = renderer->pickedNodePath();
 
-        SgNodePath& path = latestEvent.nodePath_;
-        for(size_t i=0; i < path.size(); ++i){
-            SceneWidgetEditable* editable = dynamic_cast<SceneWidgetEditable*>(path[i]);
-            if(editable){
-                pointedEditablePath.push_back(editable);
+        for(auto& node : latestEvent.nodePath_){
+            if(auto editable = dynamic_cast<SceneWidgetEventHandler*>(node)){
+                pointedEditablePath.emplace_back(node, editable);
             }
         }
     }
@@ -1276,22 +1416,20 @@ void SceneWidget::Impl::updateLastClickedPoint()
    \return The editable object with which the given function is actually applied (the function returns true.)
    If there are no functions which returns true, null object is returned.
 */
-SceneWidgetEditable* SceneWidget::Impl::applyFunction
-(EditablePath& editablePath, std::function<bool(SceneWidgetEditable* editable)> function)
+EditableNodeInfo SceneWidget::Impl::applyEditableFunction
+(vector<EditableNodeInfo>& editablePath, std::function<bool(SceneWidgetEventHandler* editable)> function)
 {
-    SceneWidgetEditable* targetEditable = nullptr;
-    for(EditablePath::reverse_iterator p = editablePath.rbegin(); p != editablePath.rend(); ++p){
-        SceneWidgetEditable* editable = *p;
-        if(function(editable)){
-            targetEditable = editable;
-            break;
+    for(auto p = editablePath.rbegin(); p != editablePath.rend(); ++p){
+        auto& editableNode = *p;
+        if(function(editableNode.handler)){
+            return editableNode;
         }
     }
-    return targetEditable;
+    return EditableNodeInfo(); // null
 }
     
 
-bool SceneWidget::Impl::setFocusToEditablePath(EditablePath& editablePath)
+bool SceneWidget::Impl::setFocusToEditablePath(vector<EditableNodeInfo>& editablePath)
 {
     if(editablePath.empty()){
         return false;
@@ -1306,11 +1444,14 @@ bool SceneWidget::Impl::setFocusToEditablePath(EditablePath& editablePath)
         }
     }
 
-    for(size_t i=indexOfFirstEditableToChangeFocus; i < focusedEditablePath.size(); ++i){
-        focusedEditablePath[i]->onFocusChanged(latestEvent, false);
+    focusedEditable.clear();
+    vector<EditableNodeInfo> tmpPath(focusedEditablePath);
+
+    for(size_t i=indexOfFirstEditableToChangeFocus; i < tmpPath.size(); ++i){
+        tmpPath[i].handler->onFocusChanged(&latestEvent, false);
     }
     for(size_t i=indexOfFirstEditableToChangeFocus; i < editablePath.size(); ++i){
-        editablePath[i]->onFocusChanged(latestEvent, true);
+        editablePath[i].handler->onFocusChanged(&latestEvent, true);
     }
     focusedEditablePath = editablePath;
     focusedEditable = editablePath.back();
@@ -1319,44 +1460,27 @@ bool SceneWidget::Impl::setFocusToEditablePath(EditablePath& editablePath)
 }
 
 
-bool SceneWidget::Impl::setFocusToPointedEditablePath(SceneWidgetEditable* targetEditable)
+bool SceneWidget::Impl::setFocusToPointedEditablePath(const EditableNodeInfo& targetEditable)
 {
     if(targetEditable){
-        EditablePath path;
-        for(size_t i=0; i < pointedEditablePath.size(); ++i){
-            SceneWidgetEditable* editable = pointedEditablePath[i];
-            path.push_back(editable);
-            if(editable == targetEditable){
+        vector<EditableNodeInfo> path;
+        for(auto& element : pointedEditablePath){
+            path.push_back(element);
+            if(element == targetEditable){
                 return setFocusToEditablePath(path);
             }
         }
     }
-
-    // No editable is pointed
-    // The following command is disabled because keeping the focus seems better.
-    // clearFocusToEditables();
-    
     return false;
-}
-
-
-void SceneWidget::Impl::clearFocusToEditables()
-{
-    for(size_t i=0; i < focusedEditablePath.size(); ++i){
-        focusedEditablePath[i]->onFocusChanged(latestEvent, false);
-    }
-    focusedEditablePath.clear();
-    focusedEditable = nullptr;
 }
 
 
 bool SceneWidget::setSceneFocus(const SgNodePath& path)
 {
-    SceneWidget::Impl::EditablePath editablePath;
-    for(size_t i=0; i < path.size(); ++i){
-        SceneWidgetEditable* editable = dynamic_cast<SceneWidgetEditable*>(path[i]);
-        if(editable){
-            editablePath.push_back(editable);
+    vector<EditableNodeInfo> editablePath;
+    for(auto& node : path){
+        if(auto editable = dynamic_cast<SceneWidgetEventHandler*>(node)){
+            editablePath.emplace_back(node, editable);
         }
     }
     return impl->setFocusToEditablePath(editablePath);
@@ -1366,7 +1490,7 @@ bool SceneWidget::setSceneFocus(const SgNodePath& path)
 void SceneWidget::Impl::keyPressEvent(QKeyEvent* event)
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::keyPressEvent()" << endl;
+        cout << "SceneWidget::Impl::keyPressEvent()" << endl;
     }
 
     /*
@@ -1382,9 +1506,11 @@ void SceneWidget::Impl::keyPressEvent(QKeyEvent* event)
     bool handled = false;
 
     if(isEditMode){
-        handled = applyFunction(
-            focusedEditablePath,
-            [&](SceneWidgetEditable* editable){ return editable->onKeyPressEvent(latestEvent); });
+        if(applyEditableFunction(
+               focusedEditablePath,
+               [&](SceneWidgetEventHandler* editable){ return editable->onKeyPressEvent(&latestEvent); })){
+            handled = true;
+        }
     }
 
     if(!handled){
@@ -1394,28 +1520,14 @@ void SceneWidget::Impl::keyPressEvent(QKeyEvent* event)
             toggleEditMode();
             handled = true;
             break;
-            
-        case Qt::Key_Z:
-            if(event->modifiers() & Qt::ControlModifier){
-                if(event->modifiers() & Qt::ShiftModifier){
-                    handled = applyFunction(
-                        focusedEditablePath,
-                        [&](SceneWidgetEditable* editable){ return editable->onRedoRequest(); });
-                } else {
-                    handled = applyFunction(
-                        focusedEditablePath,
-                        [&](SceneWidgetEditable* editable){ return editable->onUndoRequest(); });
-                }
-            }
-            break;
-            
+
         case Qt::Key_1:
-            self->setViewpointControlMode(SceneWidget::FIRST_PERSON_MODE);
+            self->setViewpointOperationMode(FirstPersonMode);
             handled = true;
             break;
             
         case Qt::Key_3:
-            self->setViewpointControlMode(SceneWidget::THIRD_PERSON_MODE);
+            self->setViewpointOperationMode(ThirdPersonMode);
             handled = true;
             break;
             
@@ -1441,7 +1553,7 @@ void SceneWidget::Impl::keyPressEvent(QKeyEvent* event)
 void SceneWidget::Impl::keyReleaseEvent(QKeyEvent* event)
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::keyReleaseEvent()" << endl;
+        cout << "SceneWidget::Impl::keyReleaseEvent()" << endl;
     }
 
     /*
@@ -1465,7 +1577,7 @@ void SceneWidget::Impl::keyReleaseEvent(QKeyEvent* event)
         
     } else if(isEditMode){
         if(focusedEditable){
-            handled = focusedEditable->onKeyReleaseEvent(latestEvent);
+            handled = focusedEditable.handler->onKeyReleaseEvent(&latestEvent);
         }
     }
 
@@ -1478,7 +1590,7 @@ void SceneWidget::Impl::keyReleaseEvent(QKeyEvent* event)
 void SceneWidget::Impl::mousePressEvent(QMouseEvent* event)
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::mousePressEvent()" << endl;
+        cout << "SceneWidget::Impl::mousePressEvent()" << endl;
     }
     
     updateLatestEvent(event);
@@ -1492,13 +1604,13 @@ void SceneWidget::Impl::mousePressEvent(QMouseEvent* event)
 
     if(isEditMode && !forceViewMode){
         if(activeCustomModeHandler){
-            handled = activeCustomModeHandler->onButtonPressEvent(latestEvent);
+            handled = activeCustomModeHandler->onButtonPressEvent(&latestEvent);
         }
         if(!handled){
             handled = setFocusToPointedEditablePath(
-                applyFunction(
+                applyEditableFunction(
                     pointedEditablePath,
-                    [&](SceneWidgetEditable* editable){ return editable->onButtonPressEvent(latestEvent); }));
+                    [&](SceneWidgetEventHandler* editable){ return editable->onButtonPressEvent(&latestEvent); }));
             if(handled){
                 dragMode = ABOUT_TO_EDIT;
             }
@@ -1530,13 +1642,13 @@ void SceneWidget::Impl::mouseDoubleClickEvent(QMouseEvent* event)
     bool handled = false;
     if(isEditMode){
         if(activeCustomModeHandler){
-            handled = activeCustomModeHandler->onDoubleClickEvent(latestEvent);
+            handled = activeCustomModeHandler->onDoubleClickEvent(&latestEvent);
         }
         if(!handled){
             handled = setFocusToPointedEditablePath(
-                applyFunction(
+                applyEditableFunction(
                     pointedEditablePath,
-                    [&](SceneWidgetEditable* editable){ return editable->onDoubleClickEvent(latestEvent); }));
+                    [&](SceneWidgetEventHandler* editable){ return editable->onDoubleClickEvent(&latestEvent); }));
         }
     }
     if(!handled){
@@ -1544,11 +1656,11 @@ void SceneWidget::Impl::mouseDoubleClickEvent(QMouseEvent* event)
 
         if(isEditMode){
             setFocusToPointedEditablePath(
-                applyFunction(
+                applyEditableFunction(
                     pointedEditablePath,
-                    [&](SceneWidgetEditable* editable){
-                        if(editable->onButtonPressEvent(latestEvent)){
-                            return editable->onButtonReleaseEvent(latestEvent);
+                    [&](SceneWidgetEventHandler* editable){
+                        if(editable->onButtonPressEvent(&latestEvent)){
+                            return editable->onButtonReleaseEvent(&latestEvent);
                         }
                         return false;
                     }));
@@ -1565,14 +1677,14 @@ void SceneWidget::Impl::mouseReleaseEvent(QMouseEvent* event)
 
     if(isEditMode){
         if(activeCustomModeHandler){
-            handled = activeCustomModeHandler->onButtonReleaseEvent(latestEvent);
+            handled = activeCustomModeHandler->onButtonReleaseEvent(&latestEvent);
         }
     }
     if(!handled){
         if(isEditMode && (dragMode == ABOUT_TO_EDIT || dragMode == EDITING)){
             if(focusedEditable){
                 updateLatestEventPath();
-                focusedEditable->onButtonReleaseEvent(latestEvent);
+                focusedEditable.handler->onButtonReleaseEvent(&latestEvent);
             }
         }
         dragMode = NO_DRAGGING;
@@ -1598,7 +1710,7 @@ void SceneWidget::Impl::mouseMoveEvent(QMouseEvent* event)
                 }
             }
             if(dragMode == EDITING){
-                focusedEditable->onPointerMoveEvent(latestEvent);
+                focusedEditable.handler->onPointerMoveEvent(&latestEvent);
             }
             handled = true;
         }
@@ -1627,26 +1739,37 @@ void SceneWidget::Impl::mouseMoveEvent(QMouseEvent* event)
         updateLatestEventPath();
         
         if(activeCustomModeHandler){
-            handled = activeCustomModeHandler->onPointerMoveEvent(latestEvent);
+            handled = activeCustomModeHandler->onPointerMoveEvent(&latestEvent);
         }
         if(!handled && isEditMode){
-            SceneWidgetEditable* mouseMovedEditable =
-                applyFunction(
+            auto mouseMovedEditable =
+                applyEditableFunction(
                     pointedEditablePath,
-                    [&](SceneWidgetEditable* editable){ return editable->onPointerMoveEvent(latestEvent); });
+                    [&](SceneWidgetEventHandler* editable){ return editable->onPointerMoveEvent(&latestEvent); });
 
             if(mouseMovedEditable){
+                handled = true;
+
+                /**
+                   The following code changes the input focus to this scene widget if the mouse pointer
+                   is pointing an editable scene object and the event is processed by it.
+                   This is sometimes convenient for operating the object with key inputs because it can
+                   omit the operation to click the view or the object first. However, changing the focus
+                   without clicking a view does not conform to the usual GUI operation style and can be
+                   confusing. Thus the focus change should not be enabled.
+                */
+                /*
                 if(!QWidget::hasFocus()){
                     QWidget::setFocus(Qt::MouseFocusReason);
                 }
-                handled = true;
+                */
             }
             if(lastMouseMovedEditable != mouseMovedEditable){
                 if(!mouseMovedEditable){
                     resetCursor();
                 }
                 if(lastMouseMovedEditable){
-                    lastMouseMovedEditable->onPointerLeaveEvent(latestEvent);
+                    lastMouseMovedEditable.handler->onPointerLeaveEvent(&latestEvent);
                 }
                 lastMouseMovedEditable = mouseMovedEditable;
             }
@@ -1654,16 +1777,28 @@ void SceneWidget::Impl::mouseMoveEvent(QMouseEvent* event)
     }
 
     if(!handled){
-        static string f1(_("Global Position: ({0:.3f} {1:.3f} {2:.3f})"));
-        static string f2(_("Object: {0}, Global Position: ({1:.3f} {2:.3f} {3:.3f})"));
-        const Vector3& p = latestEvent.point();
-        string name = findObjectNameFromNodePath(latestEvent.nodePath());
-        if(name.empty()){
-            updateIndicator(fmt::format(f1, p.x(), p.y(), p.z()));
+        if(latestEvent.nodePath().empty()){
+            updateIndicator("");
         } else {
-            updateIndicator(fmt::format(f2, name, p.x(), p.y(), p.z()));
+            static string f1(_("Global Position: ({0:.3f} {1:.3f} {2:.3f})"));
+            static string f2(_("Object: {0}, Global Position: ({1:.3f} {2:.3f} {3:.3f})"));
+            const Vector3& p = latestEvent.point();
+            string name = findObjectNameFromNodePath(latestEvent.nodePath());
+            if(name.empty()){
+                updateIndicator(fmt::format(f1, p.x(), p.y(), p.z()));
+            } else {
+                updateIndicator(fmt::format(f2, name, p.x(), p.y(), p.z()));
+            }
         }
     }
+
+    if(lastMouseMoveEvent){
+        delete lastMouseMoveEvent;
+    }
+    lastMouseMoveEvent =
+        new QMouseEvent(
+            event->type(), event->localPos(), event->windowPos(), event->screenPos(),
+            event->button(), event->buttons(), event->modifiers());
 }
 
 
@@ -1711,8 +1846,12 @@ void SceneWidget::Impl::findObjectNameFromChildren(SgObject* object, string& nam
 void SceneWidget::Impl::leaveEvent(QEvent* event)
 {
     if(lastMouseMovedEditable){
-        lastMouseMovedEditable->onPointerLeaveEvent(latestEvent);
-        lastMouseMovedEditable = nullptr;
+        lastMouseMovedEditable.handler->onPointerLeaveEvent(&latestEvent);
+        lastMouseMovedEditable.clear();
+    }
+    if(lastMouseMoveEvent){
+        delete lastMouseMoveEvent;
+        lastMouseMoveEvent = nullptr;
     }
 }
 
@@ -1720,27 +1859,27 @@ void SceneWidget::Impl::leaveEvent(QEvent* event)
 void SceneWidget::Impl::wheelEvent(QWheelEvent* event)
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::wheelEvent()" << endl;
-        os << "delta: " << event->delta() << endl;
+        cout << "SceneWidget::Impl::wheelEvent()" << endl;
+        cout << "angleDelta().y(): " << event->angleDelta().y() << endl;
     }
 
     updateLatestEvent(event->x(), event->y(), event->modifiers());
     updateLatestEventPath();
     updateLastClickedPoint();
 
-    const double s = event->delta() / 8.0 / 15.0;
+    const double s = event->angleDelta().y() / 8.0 / 15.0;
     latestEvent.wheelSteps_ = s;
 
     bool handled = false;
     if(isEditMode && !(event->modifiers() & Qt::AltModifier)){
         if(activeCustomModeHandler){
-            handled = activeCustomModeHandler->onScrollEvent(latestEvent);
+            handled = activeCustomModeHandler->onScrollEvent(&latestEvent);
         }
         if(!handled){
             handled = setFocusToPointedEditablePath(
-                applyFunction(
+                applyEditableFunction(
                     pointedEditablePath,
-                    [&](SceneWidgetEditable* editable){ return editable->onScrollEvent(latestEvent); }));
+                    [&](SceneWidgetEventHandler* editable){ return editable->onScrollEvent(&latestEvent); }));
         }
     }    
 
@@ -1792,7 +1931,7 @@ SignalProxy<void()> SceneWidget::sigAboutToBeDestroyed()
 /**
    \note Z axis should always be the upper vertical direciton.
 */
-Affine3 SceneWidget::Impl::getNormalizedCameraTransform(const Affine3& T)
+Isometry3 SceneWidget::Impl::getNormalizedCameraTransform(const Isometry3& T)
 {
     if(!config->restrictCameraRollCheck.isChecked()){
         return T;
@@ -1819,7 +1958,7 @@ Affine3 SceneWidget::Impl::getNormalizedCameraTransform(const Affine3& T)
     }
     y = z.cross(x);
         
-    Affine3 N;
+    Isometry3 N;
     N.linear() << x, y, z;
     N.translation() = T.translation();
     return N;
@@ -1854,7 +1993,7 @@ void SceneWidget::Impl::startViewChange()
 void SceneWidget::Impl::startViewRotation()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::startViewRotation()" << endl;
+        cout << "SceneWidget::Impl::startViewRotation()" << endl;
     }
 
     if(!interactiveCameraTransform){
@@ -1881,7 +2020,7 @@ void SceneWidget::Impl::startViewRotation()
 void SceneWidget::Impl::dragViewRotation()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::dragViewRotation()" << endl;
+        cout << "SceneWidget::Impl::dragViewRotation()" << endl;
     }
 
     if(!interactiveCameraTransform){
@@ -1892,7 +2031,7 @@ void SceneWidget::Impl::dragViewRotation()
     const double dx = latestEvent.x() - orgMouseX;
     const double dy = latestEvent.y() - orgMouseY;
 
-    Affine3 R;
+    Isometry3 R;
     if(config->restrictCameraRollCheck.isChecked()){
         Vector3 up;
         if(config->verticalAxisZRadio.isChecked()){
@@ -1919,7 +2058,7 @@ void SceneWidget::Impl::dragViewRotation()
             orgCameraPosition));
 
     if(latestEvent.modifiers() & Qt::ShiftModifier){
-        Affine3& T = interactiveCameraTransform->T();
+        Isometry3& T = interactiveCameraTransform->T();
         Vector3 rpy = rpyFromRot(T.linear());
         for(int i=0; i < 3; ++i){
             double& a = rpy[i];
@@ -1943,7 +2082,7 @@ void SceneWidget::Impl::dragViewRotation()
 void SceneWidget::Impl::startViewTranslation()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::startViewTranslation()" << endl;
+        cout << "SceneWidget::Impl::startViewTranslation()" << endl;
     }
 
     if(!interactiveCameraTransform){
@@ -1951,7 +2090,7 @@ void SceneWidget::Impl::startViewTranslation()
         return;
     }
 
-    const Affine3& C = interactiveCameraTransform->T();
+    const Isometry3& C = interactiveCameraTransform->T();
 
     if(isFirstPersonMode()){
         viewTranslationRatioX = -0.005;
@@ -1987,7 +2126,7 @@ void SceneWidget::Impl::startViewTranslation()
 void SceneWidget::Impl::dragViewTranslation()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::dragViewTranslation()" << endl;
+        cout << "SceneWidget::Impl::dragViewTranslation()" << endl;
     }
     
     if(!interactiveCameraTransform){
@@ -2011,7 +2150,7 @@ void SceneWidget::Impl::dragViewTranslation()
 void SceneWidget::Impl::startViewZoom()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::startViewZoom()" << endl;
+        cout << "SceneWidget::Impl::startViewZoom()" << endl;
     }
 
     if(!interactiveCameraTransform){
@@ -2033,7 +2172,7 @@ void SceneWidget::Impl::startViewZoom()
 void SceneWidget::Impl::dragViewZoom()
 {
     if(TRACE_FUNCTIONS){
-        os << "SceneWidget::Impl::dragViewZoom()" << endl;
+        cout << "SceneWidget::Impl::dragViewZoom()" << endl;
     }
 
     SgCamera* camera = renderer->currentCamera();
@@ -2042,7 +2181,7 @@ void SceneWidget::Impl::dragViewZoom()
     const double ratio = expf(dy * 0.01);
 
     if(dynamic_cast<SgPerspectiveCamera*>(camera)){
-        const Affine3& C = orgCameraPosition;
+        const Isometry3& C = orgCameraPosition;
         const Vector3 v = SgCamera::direction(C);
 
         if(isFirstPersonMode()){
@@ -2054,12 +2193,12 @@ void SceneWidget::Impl::dragViewZoom()
             interactiveCameraTransform->setTranslation(C.translation() + v * (l0 * (-ratio + 1.0)));
         }
 
+        notifyCameraPositionInteractivelyChanged();
+
     } else if(SgOrthographicCamera* ortho = dynamic_cast<SgOrthographicCamera*>(camera)){
         ortho->setHeight(orgOrthoCameraHeight * ratio);
-        ortho->notifyUpdate(modified);
+        ortho->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
     }
-
-    notifyCameraPositionInteractivelyChanged();
 }
 
 
@@ -2072,7 +2211,7 @@ void SceneWidget::Impl::zoomView(double ratio)
 
     SgCamera* camera = renderer->currentCamera();
     if(dynamic_cast<SgPerspectiveCamera*>(camera)){
-        const Affine3& C = interactiveCameraTransform->T();
+        const Isometry3& C = interactiveCameraTransform->T();
         const Vector3 v = SgCamera::direction(C);
         
         if(isFirstPersonMode()){
@@ -2089,19 +2228,19 @@ void SceneWidget::Impl::zoomView(double ratio)
             interactiveCameraTransform->translation() -= dz * v;
         }
 
-    } else if(SgOrthographicCamera* ortho = dynamic_cast<SgOrthographicCamera*>(camera)){
-        ortho->setHeight(ortho->height() * expf(ratio));
-        ortho->notifyUpdate(modified);
-    }
+        notifyCameraPositionInteractivelyChanged();
 
-    notifyCameraPositionInteractivelyChanged();
+    } else if(auto ortho = dynamic_cast<SgOrthographicCamera*>(camera)){
+        ortho->setHeight(ortho->height() * expf(ratio));
+        ortho->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
+    }
 }
 
 
 void SceneWidget::Impl::notifyCameraPositionInteractivelyChanged()
 {
     isCameraPositionInteractivelyChanged = true;
-    interactiveCameraTransform->notifyUpdate(modified);
+    interactiveCameraTransform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
 }
     
 
@@ -2120,7 +2259,7 @@ void SceneWidget::rotateBuiltinCameraView(double dPitch, double dYaw)
 
 void SceneWidget::Impl::rotateBuiltinCameraView(double dPitch, double dYaw)
 {
-    const Affine3 T = builtinCameraTransform->T();
+    const Isometry3 T = builtinCameraTransform->T();
     builtinCameraTransform->setTransform(
         getNormalizedCameraTransform(
             Translation3(cameraViewChangeCenter) *
@@ -2129,7 +2268,7 @@ void SceneWidget::Impl::rotateBuiltinCameraView(double dPitch, double dYaw)
             Translation3(-cameraViewChangeCenter) *
             T));
 
-    builtinCameraTransform->notifyUpdate(modified);
+    builtinCameraTransform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
 }
 
 
@@ -2141,11 +2280,11 @@ void SceneWidget::translateBuiltinCameraView(const Vector3& dp_local)
 
 void SceneWidget::Impl::translateBuiltinCameraView(const Vector3& dp_local)
 {
-    const Affine3 T = builtinCameraTransform->T();
+    const Isometry3 T = builtinCameraTransform->T();
     builtinCameraTransform->setTransform(
         getNormalizedCameraTransform(
             Translation3(T.linear() * dp_local) * T));
-    builtinCameraTransform->notifyUpdate(modified);
+    builtinCameraTransform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
 }
 
 
@@ -2153,7 +2292,7 @@ void SceneWidget::Impl::showViewModePopupMenu(const QPoint& globalPos)
 {
     menuManager.setNewPopupMenu(self);
     
-    sigContextMenuRequest(latestEvent, menuManager);
+    sigContextMenuRequest(&latestEvent, &menuManager);
 
     menuManager.setPath("/");
     menuManager.addItem(_("Edit Mode")) ->sigTriggered().connect([&](){ toggleEditMode(); });
@@ -2171,27 +2310,27 @@ void SceneWidget::Impl::showEditModePopupMenu(const QPoint& globalPos)
     bool handled = false;
     
     if(activeCustomModeHandler){
-        handled = activeCustomModeHandler->onContextMenuRequest(latestEvent, menuManager);
+        handled = activeCustomModeHandler->onContextMenuRequest(&latestEvent, &menuManager);
     }
 
     if(!handled && !pointedEditablePath.empty()){
-        SceneWidgetEditable* editableToFocus = pointedEditablePath.front();
-        for(EditablePath::reverse_iterator p = pointedEditablePath.rbegin(); p != pointedEditablePath.rend(); ++p){
-            SceneWidgetEditable* editable = *p;
-            handled = editable->onContextMenuRequest(latestEvent, menuManager);
+        auto editableToFocus = pointedEditablePath.front();
+        for(auto p = pointedEditablePath.rbegin(); p != pointedEditablePath.rend(); ++p){
+            auto& editableNode = *p;
+            handled = editableNode.handler->onContextMenuRequest(&latestEvent, &menuManager);
             if(handled){
                 int numItems = menuManager.numItems();
                 if(numItems > prevNumItems){
                     menuManager.addSeparator();
                     prevNumItems = numItems;
-                    editableToFocus = editable;
+                    editableToFocus = editableNode;
                 }
             }
         }
         setFocusToPointedEditablePath(editableToFocus);
     }
 
-    sigContextMenuRequest(latestEvent, menuManager);
+    sigContextMenuRequest(&latestEvent, &menuManager);
     if(menuManager.numItems() > prevNumItems){
         menuManager.addSeparator();
     }
@@ -2219,7 +2358,7 @@ void SceneWidget::showContextMenuAtPointerPosition()
 }
 
 
-SignalProxy<void(const SceneWidgetEvent& event, MenuManager& menuManager)>
+SignalProxy<void(SceneWidgetEvent* event, MenuManager* menuManager)>
 SceneWidget::sigContextMenuRequest()
 {
     return impl->sigContextMenuRequest;
@@ -2272,15 +2411,6 @@ void SceneWidget::Impl::showDefaultColorDialog()
 }
 
 
-void SceneWidget::Impl::updateCurrentCamera()
-{
-    const int index = renderer->currentCameraIndex();
-    if(index >= 0){
-        latestEvent.cameraPath_ = renderer->cameraPath(index);
-    }
-}
-    
-        
 SgPosTransform* SceneWidget::builtinCameraTransform()
 {
     return impl->builtinCameraTransform;
@@ -2311,13 +2441,6 @@ bool SceneWidget::isBuiltinCamera(SgCamera* camera) const
 }
 
 
-void SceneWidget::Impl::setCurrentCameraPath(const std::vector<std::string>& simplifiedPathStrings)
-{
-    renderer->setCurrentCameraPath(simplifiedPathStrings);
-    updateCurrentCamera();
-}
-
-
 InteractiveCameraTransform* SceneWidget::findOwnerInteractiveCameraTransform(int cameraIndex)
 {
     const SgNodePath& path = impl->renderer->cameraPath(cameraIndex);
@@ -2330,19 +2453,17 @@ InteractiveCameraTransform* SceneWidget::findOwnerInteractiveCameraTransform(int
 }
 
 
-void SceneWidget::Impl::onCamerasChanged()
-{
-    updateCurrentCamera();
-}
-
-
 void SceneWidget::Impl::onCurrentCameraChanged()
 {
     interactiveCameraTransform.reset();
     isBuiltinCameraCurrent = false;
     
     SgCamera* current = renderer->currentCamera();
-    if(current){
+
+    if(!current){
+        latestEvent.cameraIndex_ = -1;
+        latestEvent.cameraPath_.clear();
+    } else {
         int index = renderer->currentCameraIndex();
         const SgNodePath& path = renderer->cameraPath(index);
         for(int i = path.size() - 2; i >= 0; --i){
@@ -2352,6 +2473,12 @@ void SceneWidget::Impl::onCurrentCameraChanged()
                 break;
             }
         }
+        latestEvent.cameraIndex_ = index;
+        latestEvent.cameraPath_ = path;
+    }
+
+    if(!isRendering){
+        update();
     }
 }
 
@@ -2377,52 +2504,75 @@ void SceneWidget::Impl::onPointSizeChanged(double size)
 }
 
 
-void SceneWidget::setPolygonDisplayElements(int elementFlags)
+void SceneWidget::setVisiblePolygonElements(int elementFlags)
 {
-    impl->setPolygonDisplayElements(elementFlags);
+    impl->setVisiblePolygonElements(elementFlags);
 }
 
 
-void SceneWidget::Impl::setPolygonDisplayElements(int elementFlags)
+void SceneWidget::Impl::setVisiblePolygonElements(int elementFlags)
 {
-    if(!polygonDrawStyle){
-        polygonDrawStyle = new SgPolygonDrawStyle;
-    }
-    if(elementFlags != polygonDrawStyle->polygonElements()){
+    int currentFlags = visiblePolygonElements();
+    if(elementFlags != currentFlags){
+        if(!polygonDrawStyle){
+            polygonDrawStyle = new SgPolygonDrawStyle;
+        }
         bool notified = false;
         polygonDrawStyle->setPolygonElements(elementFlags);
-        if(elementFlags != SgPolygonDrawStyle::Face){
-            if(!polygonDrawStyle->hasParents()){
-                sceneRoot->removeChild(scene);
-                polygonDrawStyle->addChild(scene);
-                sceneRoot->insertChild(0, polygonDrawStyle, true);
-                notified = true;
-            }
+
+        if(!polygonDrawStyle->hasParents() && elementFlags != SgPolygonDrawStyle::Face){
+            sceneRoot->removeChild(scene);
+            polygonDrawStyle->addChild(scene);
+            SgUpdate tmpUpdate;
+            sceneRoot->insertChild(0, polygonDrawStyle, tmpUpdate);
+            notified = true;
         }
+        
         if(!notified){
-            polygonDrawStyle->notifyUpdate();
+            polygonDrawStyle->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
         }
         emitSigStateChangedLater();
     }
 }
     
 
-int SceneWidget::polygonDisplayElements() const
+int SceneWidget::visiblePolygonElements() const
 {
-    return impl->polygonDrawStyle ? impl->polygonDrawStyle->polygonElements() : SgPolygonDrawStyle::Face;
+    return impl->visiblePolygonElements();
 }
 
 
-void SceneWidget::setCollisionLinesVisible(bool on)
+int SceneWidget::Impl::visiblePolygonElements() const
 {
-    impl->setCollisionLinesVisible(on);
+    return polygonDrawStyle ? polygonDrawStyle->polygonElements() : SgPolygonDrawStyle::Face;
 }
 
 
-void SceneWidget::Impl::setCollisionLinesVisible(bool on)
+void SceneWidget::setHighlightingEnabled(bool on)
 {
-    if(on != collisionLinesVisible){
-        collisionLinesVisible = on;
+    if(on != impl->isHighlightingEnabled){
+        impl->isHighlightingEnabled = on;
+        impl->advertiseSceneModeChange(true);
+    }
+}
+
+
+bool SceneWidget::isHighlightingEnabled() const
+{
+    return impl->isHighlightingEnabled;
+}
+
+
+void SceneWidget::setCollisionLineVisibility(bool on)
+{
+    impl->setCollisionLineVisibility(on);
+}
+
+
+void SceneWidget::Impl::setCollisionLineVisibility(bool on)
+{
+    if(on != collisionLineVisibility){
+        collisionLineVisibility = on;
         renderer->setProperty(SceneRenderer::PropertyKey("collisionLineRatio"), on ? 50.0 : 0.0);
         update();
         emitSigStateChangedLater();
@@ -2430,9 +2580,9 @@ void SceneWidget::Impl::setCollisionLinesVisible(bool on)
 }
 
 
-bool SceneWidget::collisionLinesVisible() const
+bool SceneWidget::collisionLineVisibility() const
 {
-    return impl->collisionLinesVisible;
+    return impl->collisionLineVisibility;
 }
 
 
@@ -2440,7 +2590,7 @@ void SceneWidget::Impl::onFieldOfViewChanged(double fov)
 {
     config->builtinCameraConnections.block();
     builtinPersCamera->setFieldOfView(fov);
-    builtinPersCamera->notifyUpdate(modified);
+    builtinPersCamera->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
     config->builtinCameraConnections.unblock();
 }
 
@@ -2454,8 +2604,9 @@ void SceneWidget::Impl::onClippingDepthChanged()
     builtinPersCamera->setFarClipDistance(zFar);
     builtinOrthoCamera->setNearClipDistance(zNear);
     builtinOrthoCamera->setFarClipDistance(zFar);
-    builtinPersCamera->notifyUpdate(modified);
-    builtinOrthoCamera->notifyUpdate(modified);
+    sgUpdate.setAction(SgUpdate::Modified);
+    builtinPersCamera->notifyUpdate(sgUpdate);
+    builtinOrthoCamera->notifyUpdate(sgUpdate);
     config->builtinCameraConnections.unblock();
 }
 
@@ -2495,7 +2646,7 @@ void SceneWidget::Impl::updateDefaultLights()
 
     renderer->enableFog(config->fogCheck.isChecked());
 
-    worldLight->notifyUpdate(modified);
+    worldLight->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
 }
 
 
@@ -2693,13 +2844,13 @@ void SceneWidget::Impl::setScreenSize(int width, int height)
 
 void SceneWidget::updateIndicator(const std::string& text)
 {
-    impl->indicatorLabel->setText(text.c_str());
+    sharedIndicatorLabel->setText(text.c_str());
 }
 
 
 void SceneWidget::Impl::updateIndicator(const std::string& text)
 {
-    indicatorLabel->setText(text.c_str());
+    sharedIndicatorLabel->setText(text.c_str());
 }
 
 
@@ -2712,8 +2863,22 @@ bool SceneWidget::storeState(Archive& archive)
 bool SceneWidget::Impl::storeState(Archive& archive)
 {
     archive.write("editMode", isEditMode);
-    archive.write("viewpointControlMode", viewpointControlMode.selectedSymbol());
-    archive.write("collisionLines", collisionLinesVisible);
+    archive.write("viewpointOperationMode", viewpointOperationMode.selectedSymbol());
+
+    auto vpeList = archive.createFlowStyleListing("visible_polygon_elements");
+    int vpe = self->visiblePolygonElements();
+    if(vpe & PolygonFace){
+        vpeList->append("face");
+    }
+    if(vpe & PolygonEdge){
+        vpeList->append("edge");
+    }
+    if(vpe & PolygonVertex){
+        vpeList->append("vertex");
+    }
+
+    archive.write("highlighting", isHighlightingEnabled);
+    archive.write("collisionLines", collisionLineVisibility);
 
     config->storeState(archive);
 
@@ -2751,16 +2916,14 @@ bool SceneWidget::Impl::storeState(Archive& archive)
 
 void SceneWidget::Impl::writeCameraPath(Mapping& archive, const std::string& key, int cameraIndex)
 {
-   vector<string> cameraStrings;
-    if(renderer->getSimplifiedCameraPathStrings(cameraIndex, cameraStrings)){
-        if(cameraStrings.size() == 1){
-            archive.write(key, cameraStrings.front());
-        } else {
-            Listing& pathNode = *archive.createListing(key);
-            pathNode.setFlowStyle(true);
-            for(size_t i=0; i < cameraStrings.size(); ++i){
-                pathNode.append(cameraStrings[i]);
-            }
+    vector<string> cameraStrings = renderer->simplifiedCameraPathStrings(cameraIndex);
+    if(cameraStrings.size() == 1){
+        archive.write(key, cameraStrings.front());
+    } else if(cameraStrings.size() >= 2){
+        Listing& pathNode = *archive.createListing(key);
+        pathNode.setFlowStyle(true);
+        for(size_t i=0; i < cameraStrings.size(); ++i){
+            pathNode.append(cameraStrings[i]);
         }
     }
 }
@@ -2787,7 +2950,7 @@ Mapping* SceneWidget::Impl::storeCameraState(int cameraIndex, bool isInteractive
             state->write("far", camera->farClipDistance());
         }
         if(cameraTransform){
-            const Affine3& T = cameraTransform->T();
+            const Isometry3& T = cameraTransform->T();
             write(*state, "eye", T.translation());
             write(*state, "direction", SgCamera::direction(T));
             write(*state, "up", SgCamera::up(T));
@@ -2831,14 +2994,34 @@ bool SceneWidget::Impl::restoreState(const Archive& archive)
 {
     bool doUpdate = false;
 
-    setEditMode(archive.get("editMode", isEditMode));
+    setEditMode(archive.get("editMode", isEditMode), false);
     
     string symbol;
-    if(archive.read("viewpointControlMode", symbol)){
-        self->setViewpointControlMode((SceneWidget::ViewpointControlMode(viewpointControlMode.index(symbol))));
+    if(archive.read("viewpointOperationMode", symbol)){
+        self->setViewpointOperationMode(
+            ViewpointOperationMode(viewpointOperationMode.index(symbol)));
     }
 
-    setCollisionLinesVisible(archive.get("collisionLines", collisionLinesVisible));
+    auto& vpeList = *archive.findListing("visible_polygon_elements");
+    if(vpeList.isValid()){
+        int vpe = 0;
+        for(auto& node : vpeList){
+            const auto& symbol = node->toString();
+            if(symbol == "face"){
+                vpe |= PolygonFace;
+            } else if(symbol == "edge"){
+                vpe |= PolygonEdge;
+            } else if(symbol == "vertex"){
+                vpe |= PolygonVertex;
+            }
+        }
+        if(vpe){
+            setVisiblePolygonElements(vpe);
+        }
+    }
+
+    archive.read("highlighting", isHighlightingEnabled);
+    setCollisionLineVisibility(archive.get("collisionLines", collisionLineVisibility));
     
     config->restoreState(archive);
 
@@ -2891,9 +3074,7 @@ bool SceneWidget::Impl::restoreState(const Archive& archive)
                 builtinOrthoCamera->setFarClipDistance(zFar);
             }
 
-            builtinPersCamera->notifyUpdate();
-            builtinOrthoCamera->notifyUpdate();
-            builtinCameraTransform->notifyUpdate();
+            builtinCameraTransform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
             doUpdate = true;
             
             archive.addPostProcess([&](){ restoreCurrentCamera(cameraData); }, 1);
@@ -2904,6 +3085,8 @@ bool SceneWidget::Impl::restoreState(const Archive& archive)
         updateGrids();
         update();
     }
+
+    advertiseSceneModeChange(true);
 
     return true;
 }
@@ -2936,7 +3119,7 @@ bool SceneWidget::Impl::restoreCameraStates(const Listing& cameraListing, bool i
                     SgPosTransform* transform = dynamic_cast<SgPosTransform*>(cameraPath[j]);
                     if(transform){
                         transform->setPosition(SgCamera::positionLookingFor(eye, direction, up));
-                        transform->notifyUpdate();
+                        transform->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
                     }
                 }
                 updated = true;
@@ -2967,7 +3150,7 @@ bool SceneWidget::Impl::restoreCameraStates(const Listing& cameraListing, bool i
                 updated = true;
             }
             if(updated){
-                camera->notifyUpdate();
+                camera->notifyUpdate(sgUpdate.withAction(SgUpdate::Modified));
             }
 
             if(state.get("isCurrent", false)){
@@ -3088,10 +3271,10 @@ SgLineSet* SceneWidget::Impl::createGrid(int index)
     } while(x < half);
 
     const int n = vertices.size();
-    SgIndexArray& lineVertices = grid->lineVertices();
-    lineVertices.resize(n);
+    SgIndexArray& vertexIndices = grid->lineVertexIndices();
+    vertexIndices.resize(n);
     for(int i=0; i < n; ++i){
-        lineVertices[i] = i;
+        vertexIndices[i] = i;
     }
 
     return grid;
@@ -3101,12 +3284,14 @@ SgLineSet* SceneWidget::Impl::createGrid(int index)
 void SceneWidget::Impl::activateSystemNode(SgNode* node, bool on)
 {
     if(on){
-        systemGroup->addChild(node, true);
+        systemGroup->addChild(node, sgUpdate);
     } else {
-        systemGroup->removeChild(node, true);
+        systemGroup->removeChild(node, sgUpdate);
     }
 }
 
+
+namespace {
 
 ConfigDialog::ConfigDialog(SceneWidget::Impl* impl)
     : sceneWidgetImpl(impl),
@@ -3613,4 +3798,6 @@ void ConfigDialog::restoreState(const Archive& archive)
     fpsTestIterationSpin.setValue(archive.get("fpsTestIteration", fpsTestIterationSpin.value()));
     //fpsCheck.setChecked(archive.get("showFPS", fpsCheck.isChecked()));
     upsideDownCheck.setChecked(archive.get("upsideDown", upsideDownCheck.isChecked()));
+}
+
 }

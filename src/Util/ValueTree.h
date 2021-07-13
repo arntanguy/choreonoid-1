@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <initializer_list>
 #include "exportdecl.h"
 
 namespace cnoid {
@@ -40,7 +41,15 @@ class CNOID_EXPORT ValueNode : public Referenced
 public:
     virtual ValueNode* clone() const;
 
-    enum TypeBit { INVALID_NODE = 0, SCALAR = 1, MAPPING = 2, LISTING = 4, INSERT_LF = 8, APPEND_LF = 16, ANGLE_DEGREE = 32 };
+    enum TypeBit {
+        INVALID_NODE = 0,
+        SCALAR = 1,
+        MAPPING = 2,
+        LISTING = 4,
+        INSERT_LF = 8,
+        APPEND_LF = 16,
+        FORCED_RADIAN_MODE = 32
+    };
 
     bool isValid() const { return typeBits; }
     explicit operator bool() const { return isValid(); }
@@ -50,30 +59,33 @@ public:
 
     int toInt() const;
     double toDouble() const;
-    double toAngle() const;
+    float toFloat() const;
     bool toBool() const;
+    [[deprecated("Check isForcedRadianMode() of the top node.")]]
+    double toAngle() const;
 
     bool isScalar() const { return typeBits & SCALAR; }
     bool isString() const { return typeBits & SCALAR; }
+    bool isCollection() const { return typeBits & (MAPPING | LISTING); }
 
-#ifdef _WIN32
-    const std::string toString() const;
-
-    operator const std::string () const {
-        return toString();
-    }
-#else
     const std::string& toString() const;
-
+    
     operator const std::string& () const {
         return toString();
     }
-#endif
 
-    bool isDegreeMode() const { return typeBits & ANGLE_DEGREE; }
-    void setDegreeMode() { typeBits |= ANGLE_DEGREE; }
+    /**
+       \note If this is true for a top node given to a particular process, all the angle elements
+       contained in the sub tree are foreced to radians. Note that the mode of the nodes except for
+       the top node given to the process do not affect the angle unit.
+    */
+    bool isForcedRadianMode() const { return typeBits & FORCED_RADIAN_MODE; }
+    void setForcedRadianMode(bool on = true) { typeBits |= FORCED_RADIAN_MODE; }
+    [[deprecated("Use 'isForcedRadianMode' to determine the angle unit.")]]
+    bool isDegreeMode() const { return !isForcedRadianMode(); }
+    [[deprecated("Use ''setForcedRadianMode' to specify the angle unit.")]]
+    void setDegreeMode() { setForcedRadianMode(false); }
 
-    //template<typename T> T to() const { return ""; }
     template<typename T> T to() const;
 
     bool isMapping() const { return typeBits & MAPPING; }
@@ -194,7 +206,7 @@ private:
 };
 
 template<> inline double ValueNode::to<double>() const { return toDouble(); }
-template<> inline float ValueNode::to<float>() const { return static_cast<float>(toDouble()); }
+template<> inline float ValueNode::to<float>() const { return toFloat(); }
 template<> inline int ValueNode::to<int>() const { return toInt(); }
 template<> inline std::string ValueNode::to<std::string>() const { return toString(); }
     
@@ -226,6 +238,17 @@ private:
     friend class Listing;
 };
 
+typedef ref_ptr<ScalarNode> ScalarNodePtr;
+
+
+inline const std::string& ValueNode::toString() const
+{
+    if(!isScalar()){
+        throwNotScalrException();
+    }
+    return static_cast<const ScalarNode* const>(this)->stringValue_;
+}
+
 
 class CNOID_EXPORT Mapping : public ValueNode
 {
@@ -250,16 +273,25 @@ public:
     void setFlowStyle(bool isFlowStyle = true) { isFlowStyle_ = isFlowStyle; }
     bool isFlowStyle() const { return isFlowStyle_; }
 
-    void setDoubleFormat(const char* format);
-    const char* doubleFormat() { return doubleFormat_; }
+    void setFloatingNumberFormat(const char* format);
+    const char* floatingNumberFormat() { return floatingNumberFormat_; }
+
+    [[deprecated("Use Mapping::setFloatingNumberFormat")]]
+    void setDoubleFormat(const char* format) { setFloatingNumberFormat(format); }
+    [[deprecated("Use Mapping::floatingNumberFormat")]]
+    const char* doubleFormat() { return floatingNumberFormat(); }
         
     void setKeyQuoteStyle(StringStyle style);
 
     ValueNode* find(const std::string& key) const;
+    ValueNode* find(std::initializer_list<const char*> keys) const;
     Mapping* findMapping(const std::string& key) const;
+    Mapping* findMapping(std::initializer_list<const char*> keys) const;
     Listing* findListing(const std::string& key) const;
+    Listing* findListing(std::initializer_list<const char*> keys) const;
 
     ValueNodePtr extract(const std::string& key);
+    ValueNodePtr extract(std::initializer_list<const char*> keys);
 
     bool extract(const std::string& key, double& out_value);
     bool extract(const std::string& key, std::string& out_value);
@@ -314,6 +346,21 @@ public:
     bool read(const std::string& key, double& out_value) const;
     bool read(const std::string& key, float& out_value) const;
 
+    template<class T>
+    bool read(std::initializer_list<const char*> keys, T& out_value) const {
+        for(auto& key : keys){
+            if(this->read(key, out_value)){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool readAngle(const std::string& key, double& out_angle, const ValueNode* unitAttrNode = nullptr) const;
+    bool readAngle(const std::string& key, float& out_angle, const ValueNode* unitAttrNode = nullptr) const;
+    bool readAngle(std::initializer_list<const char*> keys, double& out_angle, const ValueNode* unitAttrNode = nullptr) const;
+    bool readAngle(std::initializer_list<const char*> keys, float& out_angle, const ValueNode* unitAttrNode = nullptr) const;
+    
     template <class T> T get(const std::string& key) const {
         T value;
         if(read(key, value)){
@@ -325,7 +372,7 @@ public:
     }
     
     template <class T>
-        T get(const std::string& key, const T& defaultValue) const {
+    T get(const std::string& key, const T& defaultValue) const {
         T value;
         if(read(key, value)){
             return value;
@@ -343,15 +390,27 @@ public:
         }
     }
 
-    void write(const std::string &key, const std::string& value, StringStyle stringStyle = PLAIN_STRING);
-    void write(const std::string &key, const char* value, StringStyle stringStyle = PLAIN_STRING){
+    template<class T>
+        T get(std::initializer_list<const char*> keys, const T& defaultValue) const {
+        T value;
+        if(read(keys, value)){
+            return value;
+        } else {
+            return defaultValue;
+        }
+    }
+
+    void write(const std::string& key, const std::string& value, StringStyle stringStyle = PLAIN_STRING);
+    void write(const std::string& key, const char* value, StringStyle stringStyle = PLAIN_STRING){
         write(key, std::string(value), stringStyle);
     }
 
-    void write(const std::string &key, bool value);
-    void write(const std::string &key, int value);
-    void write(const std::string &key, double value);
+    void write(const std::string& key, bool value);
+    void write(const std::string& key, int value);
+    void write(const std::string& key, double value);
     void writePath(const std::string &key, const std::string& value);
+
+    template<class ArrayType> void writeAsListing(const std::string& key, const ArrayType& container);
 
     typedef enum { READ_MODE, WRITE_MODE } AssignMode;
 
@@ -408,7 +467,7 @@ private:
     Container values;
     AssignMode mode;
     int indexCounter;
-    const char* doubleFormat_;
+    const char* floatingNumberFormat_;
     bool isFlowStyle_;
     StringStyle keyStringStyle_;
 
@@ -447,8 +506,13 @@ public:
     void setFlowStyle(bool isFlowStyle = true) { isFlowStyle_ = isFlowStyle; }
     bool isFlowStyle() const { return isFlowStyle_; }
 
-    void setDoubleFormat(const char* format);
-    const char* doubleFormat() { return doubleFormat_; }
+    void setFloatingNumberFormat(const char* format);
+    const char* floatingNumberFormat() { return floatingNumberFormat_; }
+
+    [[deprecated("Use Mapping::setFloatingNumberFormat")]]
+    void setDoubleFormat(const char* format) { setFloatingNumberFormat(format); }
+    [[deprecated("Use Mapping::floatingNumberFormat")]]
+    const char* doubleFormat() { return floatingNumberFormat(); }
 
     ValueNode* front() const {
         return values.front();
@@ -503,19 +567,6 @@ public:
     }
 
     void append(size_t value);
-
-    /**
-       @param maxColumns LF is automatically inserted when the column pos is over maxColumsn
-       @param numValues If numValues is not greater than maxColumns, the initial LF is skipped.
-       This feature is disabled if numValues = 0.
-    */
-    /*
-      void append(size_t value, int maxColumns, int numValues = 0){
-      insertLF(maxColumns, numValues);
-      append(value);
-      }
-    */
-        
     void append(double value);
 
     /**
@@ -558,13 +609,24 @@ private:
     void insertLF(int maxColumns, int numValues);
         
     Container values;
-    const char* doubleFormat_;
+    const char* floatingNumberFormat_;
     bool isFlowStyle_;
     bool doInsertLFBeforeNextElement;
 
     friend class Mapping;
     friend class YAMLReaderImpl;
 };
+
+
+template<class ArrayType>
+void Mapping::writeAsListing(const std::string& key, const ArrayType& container)
+{
+    auto listing = createFlowStyleListing(key);
+    for(auto& value : container){
+        listing->append(value);
+    }
+}
+
 
 typedef ref_ptr<Listing> ListingPtr;
 

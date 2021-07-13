@@ -36,13 +36,13 @@ class CNOID_EXPORT GLSLSceneRenderer : public GLSceneRenderer
 
     virtual const Affine3& currentModelTransform() const override;
     virtual const Matrix4& projectionMatrix() const override;
-    const Affine3& viewTransform() const;
+    const Isometry3& viewTransform() const;
     const Matrix4& viewProjectionMatrix() const;
     Matrix4 modelViewMatrix() const;
     Matrix4 modelViewProjectionMatrix() const;
     virtual double projectedPixelSizeRatio(const Vector3& position) const override;
 
-    void pushShaderProgram(ShaderProgram& program);
+    void pushShaderProgram(ShaderProgram* program);
     void popShaderProgram();
 
     void renderLights(LightingProgram* program);
@@ -50,7 +50,7 @@ class CNOID_EXPORT GLSLSceneRenderer : public GLSceneRenderer
 
     void dispatchToTransparentPhase(
         ReferencedPtr object, int id,
-        const std::function<void(Referenced* object, const Affine3& position, int id)>& renderingFunction);
+        const std::function<void(Referenced* object, const Affine3& modelTransform, int id)>& renderingFunction);
 
     virtual bool initializeGL() override;
     virtual void flushGL() override;
@@ -94,12 +94,10 @@ class CNOID_EXPORT GLSLSceneRenderer : public GLSceneRenderer
     class Impl;
 
 protected:
-    virtual void onSceneGraphUpdated(const SgUpdate& update) override;
     virtual void doRender() override;
     virtual bool doPick(int x, int y) override;
-    virtual void onImageUpdated(SgImage* image) override;
     
-  private:
+private:
     Impl* impl;
 };
 

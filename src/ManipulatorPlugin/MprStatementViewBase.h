@@ -2,42 +2,13 @@
 #define CNOID_MANIPULATOR_PLUGIN_MPR_STATEMENT_VIEW_BASE_H
 
 #include <cnoid/View>
-#include <QWidget>
 #include "exportdecl.h"
 
 namespace cnoid {
 
 class Archive;
-class MprStatement;
 class MprProgramViewBase;
-class MprProgramItemBase;
-
-class CNOID_EXPORT MprStatementPanel : public QWidget
-{
-public:
-    MprStatementPanel();
-    ~MprStatementPanel();
-    
-    virtual void onActivated() = 0;
-    virtual void onDeactivated();
-    virtual void onStatementUpdated();
-
-    MprProgramItemBase* currentProgramItem();
-
-    template<class StatementType> StatementType* currentStatement(){
-        return dynamic_cast<StatementType*>(getCurrentStatement());
-    }
-    MprStatement* currentStatement(){
-        return getCurrentStatement();
-    }
-
-private:
-    class Impl;
-    Impl* impl;
-    MprStatement* getCurrentStatement();
-    friend class MprStatementViewBase;
-};
-
+class MprStatementPanel;
 
 class CNOID_EXPORT MprStatementViewBase : public cnoid::View
 {
@@ -47,7 +18,6 @@ public:
 
     virtual void onActivated() override;
     virtual void onDeactivated() override;
-
     virtual bool storeState(Archive& archive) override;
     virtual bool restoreState(const Archive& archive) override;
 

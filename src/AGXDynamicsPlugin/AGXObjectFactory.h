@@ -8,6 +8,10 @@ namespace cnoid{
 
 const double DEFAULT_GRAVITY_ACCELERATION = 9.80665;
 
+class Link;
+class LinkRigidBody;
+typedef agx::ref_ptr<LinkRigidBody> LinkRigidBodyRef;
+
 struct AGXSimulationDesc
 {
     AGXSimulationDesc(){
@@ -38,7 +42,6 @@ struct AGXMaterialDesc
         name = default_name();
         density = 1000.0;
         youngsModulus = 4.0E8;
-        poissonRatio = 0.3;
         viscosity = 0.5;
         spookDamping = 0.075;
         roughness = 0.416667;
@@ -55,7 +58,6 @@ struct AGXMaterialDesc
     agx::String name;
     agx::Real density;              // [kg/m^3]
     agx::Real youngsModulus;        // stiffness[Pa]
-    agx::Real poissonRatio;
 
     // Below are override when ContactMaterials are used.
     agx::Real viscosity;            // relation to restitution. compliace.
@@ -415,7 +417,7 @@ public:
     static agx::MaterialRef createMaterial(const AGXMaterialDesc& desc);
     static agx::ContactMaterialRef createContactMaterial(agx::Material* const matA, agx::Material* const matB, const AGXContactMaterialDesc& desc);
     static agx::ContactMaterialRef createContactMaterial(const AGXContactMaterialDesc& desc, agxSDK::MaterialManager* const mgr);
-    static agx::RigidBodyRef createRigidBody(const AGXRigidBodyDesc& desc);
+    static LinkRigidBodyRef createLinkRigidBody(const AGXRigidBodyDesc& desc, Link* link);
     static agxCollide::GeometryRef createGeometry(const AGXGeometryDesc& desc);
     static agxCollide::ShapeRef createShape(const AGXShapeDesc& desc);
     static agx::ConstraintRef createConstraint(const AGXConstraintDesc& desc);

@@ -3,7 +3,8 @@ Changes since 1.7.0:
 * Removed the typedefs with suffix 'Ptr' for the smart pointer types using std::shared_ptr
 * Introduced BodyHandler. BodyCustomizer is deprecated.
 * Introduced JointPathConfigurationHandler
-* Removed the python plugins and wrappers implemented with boost.python
+* Removed the Python plugins and bindings implemented with boost.python
+* Improve the Python bindings implemented with pybind11
 * Separated the OpenRTM modules from the main source tree
 * Separated the OpenHRP modules and GrxUI plugin from the main source tree
 * Removed ScenarioPlugin
@@ -17,9 +18,11 @@ Changes since 1.7.0:
 * Added the Universal Robots UR robot models
 * Fixed the WRS2018 tunnel models
 * The Eigen library contained in the thirdparty directory is used by default on Windows
+* Supported Ubuntu 20.04
 * Supported Visual C++ 2019
-* Supported Ubuntu 19.04
-* Add LinkPositionView and LocationView
+* Supported Clang
+* Add LocationView and LinkPositionView
+* The location of an object in the scene can be locked if necessary
 * Coordinate system for editing model positions can be selected on the location view and the link position view
 * Modified the default material colors
 * Fixed a bug in picking objects on SceneView when a high DPI display is used
@@ -43,13 +46,28 @@ Changes since 1.7.0:
 * Arranged the cmake files for building programs outside the Choreonoid source
 * The transparency of a body shown in the scene view can be modified as a property of the corresponding BodyItem
 * Improved file dialogs
-* Removed RobotAccessPlugin and Hrpsys31Plugin
+* Removed RobotAccessPlugin and Hrpsys31Plugin. The plugins are now availabe at https://github.com/choreonoid/robot-access-plugin
 * Fix the default layout of the main window
 * Replaced LinkSelectionView with LinkDeviceListView, which can list the devices of a target body
 * Improved loading a new project when there is an existing project
 * Made the internal link attitudes same as the original model descriptions
 * Fixed the GLSL renderer to render casting shadows correctly using Radeon GPUs
-* Introduced new tool bar icons
+* Updated the tool bar icons
+* Implemented the vertex rendering mode and the solid-wireframe rendering mode
+* Improved the highlight style of selected / focused objects in the scene
+* Improved the API on the joint type and the joint actuation mode.
+* Made it possible to use free joints for links other than root links in the simulation by AISTSimulatorItem
+* Added the API on getting the contact states from a dynamics engine
+* Made AISTSimulator to be able to simulate models with non-root free joints
+* Supported the standard scene file format in loading and exporting body shapes
+* Supported the OBJ mesh file format in loading and exporting body shapes
+* Added BodyContactPointLoggerItem to visualize the information on the contacts against a target body during simulation
+* Added a function to write a body file
+* Added MaterialTableItem
+* Introduce snake case keys into data files
+* Improve Undo/Redo functions with the unified edit history
+
+* Improve WorldLogFileItem to provide a function to create a log playback project
 
 Choreonoid 1.7.0 released on May 8, 2019
 ========================================

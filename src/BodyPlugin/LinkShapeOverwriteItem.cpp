@@ -6,7 +6,7 @@
 #include <cnoid/SceneGraph>
 #include <cnoid/SceneDrawables>
 #include <cnoid/SceneNodeExtractor>
-#include <cnoid/YAMLSceneReader>
+#include <cnoid/StdSceneReader>
 #include <cnoid/StdSceneWriter>
 #include <cnoid/PositionDragger>
 #include <cnoid/SceneUtil>
@@ -30,11 +30,10 @@ public:
     LinkShapeOverwriteItem::Impl* impl;
 
     LinkShapeLocation(LinkShapeOverwriteItem::Impl* impl);
-    virtual int getType() const override;
-    virtual Position getLocation() const override;
-    virtual void setLocation(const Position& T) override;
+    virtual Isometry3 getLocation() const override;
+    virtual bool setLocation(const Isometry3& T) override;
     virtual Item* getCorrespondingItem() override;
-    virtual LocationProxyPtr getParentLocationProxy() override;
+    virtual LocationProxyPtr getParentLocationProxy() const override;
     virtual SignalProxy<void()> sigLocationChanged() override;
 };
 
@@ -187,7 +186,7 @@ bool LinkShapeOverwriteItem::Impl::overwriteLinkShape
 
     if(existingNodePath.empty()){
         if(newNodePath.empty()){
-            offsetTransform->setPosition(Affine3::Identity());
+            offsetTransform->setPosition(Isometry3::Identity());
             shapeNode.reset();
         } else {
             extractShapeNodes(newNodePath);
@@ -208,7 +207,8 @@ bool LinkShapeOverwriteItem::Impl::overwriteLinkShape
     }
 
     link->clearShapeNodes();
-    link->addShapeNode(offsetTransform, true);
+    SgTmpUpdate update;
+    link->addShapeNode(offsetTransform, update);
 
     bodyItemConnection =
         bodyItem->sigKinematicStateChanged().connect(
@@ -229,7 +229,7 @@ void LinkShapeOverwriteItem::Impl::extractShapeNodes(SgNodePath& nodePath)
     int directPathTopIndex = nodePath.size() - 1;
     offsetTransform.reset();
     for(int i = nodePath.size() - 2; i >= 0; --i){
-        auto group = nodePath[i]->toGroup();
+        auto group = nodePath[i]->toGroupNode();
         if(group->numChildren() >= 2){
             break;
         }
@@ -240,7 +240,7 @@ void LinkShapeOverwriteItem::Impl::extractShapeNodes(SgNodePath& nodePath)
         offsetTransform = new SgPosTransform;
         SgNode* child = nodePath[directPathTopIndex];
         if(directPathTopIndex > 0){
-            auto parent = nodePath[directPathTopIndex - 1]->toGroup();
+            auto parent = nodePath[directPathTopIndex - 1]->toGroupNode();
             parent->moveChildrenTo(offsetTransform);
             parent->addChild(offsetTransform);
         } else {
@@ -272,13 +272,13 @@ void LinkShapeOverwriteItem::setShapeNode(SgShape* shapeNode)
 }
 
 
-Position LinkShapeOverwriteItem::shapeOffset() const
+Isometry3 LinkShapeOverwriteItem::shapeOffset() const
 {
     return impl->offsetTransform->T();
 }
 
 
-void LinkShapeOverwriteItem::setShapeOffset(const Position& T)
+void LinkShapeOverwriteItem::setShapeOffset(const Isometry3& T)
 {
     impl->offsetTransform->setPosition(T);
     impl->offsetTransform->notifyUpdate();
@@ -320,30 +320,28 @@ LocationProxyPtr LinkShapeOverwriteItem::getLocationProxy()
 }
 
 
+namespace {
+
 LinkShapeLocation::LinkShapeLocation(LinkShapeOverwriteItem::Impl* impl)
-    : impl(impl)
+    : LocationProxy(OffsetLocation),
+      impl(impl)
 {
     setEditable(false);
 }
     
 
-int LinkShapeLocation::getType() const
-{
-    return OffsetLocation;
-}
-
-
-Position LinkShapeLocation::getLocation() const
+Isometry3 LinkShapeLocation::getLocation() const
 {
     return impl->offsetTransform->T();
 }
 
 
-void LinkShapeLocation::setLocation(const Position& T)
+bool LinkShapeLocation::setLocation(const Isometry3& T)
 {
     impl->offsetTransform->setPosition(T);
     impl->offsetTransform->notifyUpdate();
     impl->self->notifyUpdate();
+    return true;
 }
 
 
@@ -353,7 +351,7 @@ Item* LinkShapeLocation::getCorrespondingItem()
 }
 
 
-LocationProxyPtr LinkShapeLocation::getParentLocationProxy()
+LocationProxyPtr LinkShapeLocation::getParentLocationProxy() const
 {
     return impl->self->bodyItem()->getLocationProxy();
 }
@@ -362,6 +360,8 @@ LocationProxyPtr LinkShapeLocation::getParentLocationProxy()
 SignalProxy<void()> LinkShapeLocation::sigLocationChanged()
 {
     return impl->sigOffsetChanged;
+}
+
 }
 
 
@@ -381,7 +381,7 @@ void LinkShapeOverwriteItem::Impl::updateLinkOriginMarker()
             PositionDragger::TranslationAxes, PositionDragger::PositiveOnlyHandle);
         originMarker->setDragEnabled(false);
         originMarker->setOverlayMode(true);
-        originMarker->setFixedPixelSizeMode(true, 64.0);
+        originMarker->setPixelSize(96, 3);
         originMarker->setDisplayMode(PositionDragger::DisplayInEditMode);
     }
     if(link){
@@ -400,20 +400,21 @@ void LinkShapeOverwriteItem::doPutProperties(PutPropertyFunction& putProperty)
 bool LinkShapeOverwriteItem::store(Archive& archive)
 {
     if(impl->link){
-        if(!impl->link->isBodyRoot()){
+        if(!impl->link->isRoot()){
             archive.write("link", impl->link->name());
         }
         StdSceneWriter sceneWriter;
         sceneWriter.setFilePathVariableProcessor(archive.filePathVariableProcessor());
 
-        string uri;
+        string uri, absoluteUri;
         auto mesh = impl->shapeNode->mesh();
         if(mesh){
             if(mesh->uri() == bodyItem()->filePath()){
                 uri = mesh->uri();
+                absoluteUri = mesh->absoluteUri();
                 // The uri of the mesh is temporarily cleared to omit the description of the mesh node
                 // so that the redundant mesh loading can be avoided in restoring the overwriting.
-                mesh->setUri("");
+                mesh->clearUri();
             }
         }
         
@@ -422,7 +423,7 @@ bool LinkShapeOverwriteItem::store(Archive& archive)
         }
         
         if(!uri.empty()){
-            mesh->setUri(uri);
+            mesh->setUri(uri, absoluteUri);
         }
     }
     
@@ -455,10 +456,10 @@ bool LinkShapeOverwriteItem::restore(const Archive& archive)
     SgNodePtr restoredShape;
     auto node = archive.find("overwrite_shape");
     if(node->isValid()){
-        YAMLSceneReader sceneReader;
+        StdSceneReader sceneReader;
         sceneReader.setFilePathVariableProcessor(archive.filePathVariableProcessor());
-        sceneReader.setAngleUnit(YAMLSceneReader::DEGREE);
-        restoredShape = sceneReader.readNode(*node->toMapping());
+        sceneReader.setAngleUnit(StdSceneReader::DEGREE);
+        restoredShape = sceneReader.readNode(node->toMapping());
     }
 
     return impl->overwriteLinkShape(bodyItem, link, restoredShape, nullptr);

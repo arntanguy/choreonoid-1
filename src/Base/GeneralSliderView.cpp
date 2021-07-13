@@ -4,12 +4,14 @@
 
 #include "GeneralSliderView.h"
 #include <cnoid/ViewManager>
+#include <cnoid/Signal>
 #include <cnoid/LazyCaller>
 #include <cnoid/SpinBox>
 #include <cnoid/Slider>
 #include <QLabel>
 #include <QGridLayout>
 #include <QScrollArea>
+#include <unordered_map>
 #include <mutex>
 #include <algorithm>
 #include <cmath>
@@ -20,45 +22,56 @@ using namespace cnoid;
 
 namespace {
 
-GeneralSliderView* instance = nullptr;
-
 // slider resolution
-const double resolution = 1000000.0;
+const double resolution = 100000.0;
 
-class SliderUnit : public Referenced, public GeneralSliderView::Slider
+class SliderUnit : public Referenced
 {
 public:
-    GeneralSliderViewImpl* viewImpl;
-    mutable std::mutex valueMutex;
-    mutable std::mutex callbackMutex;
-    double value_;
-    function<void(double value)> callback;
-    string owner;
+    GeneralSliderView::Impl* viewImpl;
+    int refCount;
+
+    mutable std::mutex sliderMutex;
+    double value;
+    string name;
     QLabel nameLabel;
     DoubleSpinBox spin;
     QLabel lowerLimitLabel;
     cnoid::Slider slider;
     QLabel upperLimitLabel;
 
+    Signal<void(double value)> sigValueChanged;
+    mutable std::mutex signalMutex;
+
     SliderUnit(
-        GeneralSliderViewImpl* viewImpl, const string& owner, const string& name,
+        GeneralSliderView::Impl* viewImpl, const string& name,
         double lower, double upper, int precision);
     ~SliderUnit();
-    virtual double value() const override;
-    virtual void setValue(double value, bool doSync) override;
-    void doSetValue(double v);
-    virtual void setCallback(std::function<void(double value)> callback) override;
     void onSliderValueChanged(double v);
     void onSpinValueChanged(double v);
 };
 
 typedef ref_ptr<SliderUnit> SliderUnitPtr;
 
+class SliderOwner : public GeneralSliderView::Slider
+{
+public:
+    SliderUnitPtr sliderUnit;
+    Connection connection;
+
+    SliderOwner(SliderUnit* sliderUnit);
+    virtual ~SliderOwner();
+    virtual double value() const override;
+    virtual void setValue(double value, bool doSync) override;
+    void doSetValue(double value);
+    virtual void setCallback(std::function<void(double value)> callback) override;
+};
+
 }
 
 namespace cnoid {
 
-class GeneralSliderViewImpl
+class GeneralSliderView::Impl
 {
 public:
     GeneralSliderView* self;
@@ -66,34 +79,36 @@ public:
     QWidget sliderGridBase;
     QGridLayout sliderGrid;
     vector<SliderUnitPtr> sliders;
+    unordered_map<string, SliderUnitPtr> sliderMap;
     std::mutex slidersMutex;
 
-    GeneralSliderViewImpl(GeneralSliderView* self);
-    ~GeneralSliderViewImpl();
+    Impl(GeneralSliderView* self);
+    ~Impl();
     void getOrCreateSlider(
-        const std::string& owner, const std::string& name,
-        double lower, double upper, int precision, GeneralSliderView::Slider*& out_slider);
+        const std::string& name, double lower, double upper, int precision, SliderUnit*& out_slider);
     void attachSlider(SliderUnit* unit, int row);
-    void removeSlider(GeneralSliderView::Slider* slider);
-    void removeSliders(const std::string& owner);
+    void removeSlider(SliderUnit* slider);
+    void removeSliderMain(SliderUnit* slider);
     void updateSliderGrid();
 };
 
 }
 
 
+namespace {
+
 SliderUnit::SliderUnit
-(GeneralSliderViewImpl* viewImpl, const string& owner, const string& name,
- double lower, double upper, int precision)
+(GeneralSliderView::Impl* viewImpl, const string& name, double lower, double upper, int precision)
     : viewImpl(viewImpl),
-      owner(owner),
+      refCount(0),
+      name(name),
       nameLabel(&viewImpl->sliderGridBase),
       spin(&viewImpl->sliderGridBase),
       lowerLimitLabel(&viewImpl->sliderGridBase),
       slider(Qt::Horizontal, &viewImpl->sliderGridBase),
       upperLimitLabel(&viewImpl->sliderGridBase)
 {
-    value_ = 0.0;
+    value = 0.0;
     
     nameLabel.setAlignment(Qt::AlignCenter);
     nameLabel.setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -140,57 +155,20 @@ SliderUnit::~SliderUnit()
 }
 
 
-double SliderUnit::value() const
-{
-    std::lock_guard<std::mutex> lock(valueMutex);
-    return value_;
-}
-
-
-void SliderUnit::setValue(double v, bool doSync)
-{
-    if(doSync){
-        callSynchronously([this, v](){ doSetValue(v); });
-    } else {
-        callFromMainThread([this, v](){ doSetValue(v); });
-    }
-}
-
-
-void SliderUnit::doSetValue(double v)
-{
-    std::lock_guard<std::mutex> lock(valueMutex);
-    if(v != value_){
-        value_ = v;
-        slider.blockSignals(true);
-        spin.blockSignals(true);
-        spin.setValue(v);
-        slider.setValue(v * resolution);
-        spin.blockSignals(false);
-        slider.blockSignals(false);
-    }
-}
-
-
-void SliderUnit::setCallback(std::function<void(double value)> callback)
-{
-    std::lock_guard<std::mutex> lock(callbackMutex);
-    this->callback = callback;
-}
-
-
 void SliderUnit::onSliderValueChanged(double v)
 {
-    {
-        std::lock_guard<std::mutex> lock(valueMutex);
-        value_ = v / resolution;
+    double tmpValue;
+   {
+        std::lock_guard<std::mutex> lock(sliderMutex);
+        value = v / resolution;
         spin.blockSignals(true);
-        spin.setValue(value_);
+        spin.setValue(value);
         spin.blockSignals(false);
-    }
-    {
-        std::lock_guard<std::mutex> lock(callbackMutex);
-        callback(v);
+        tmpValue = value;
+   }
+   {
+       std::lock_guard<std::mutex> lock(signalMutex);
+       sigValueChanged(tmpValue);
     }
 }
 
@@ -198,41 +176,107 @@ void SliderUnit::onSliderValueChanged(double v)
 void SliderUnit::onSpinValueChanged(double v)
 {
     {
-        std::lock_guard<std::mutex> lock(valueMutex);
-        value_ = v;
+        std::lock_guard<std::mutex> lock(sliderMutex);
+        value = v;
         slider.blockSignals(true);
-        slider.setValue(value_ * resolution);
+        slider.setValue(value * resolution);
         slider.blockSignals(false);
     }
     {
-        std::lock_guard<std::mutex> lock(callbackMutex);
-        callback(v);
+        std::lock_guard<std::mutex> lock(signalMutex);
+        sigValueChanged(v);
     }
+}
+
+
+SliderOwner::SliderOwner(SliderUnit* sliderUnit)
+    : sliderUnit(sliderUnit)
+{
+    ++sliderUnit->refCount;
+}
+
+
+SliderOwner::~SliderOwner()
+{
+    {
+        std::lock_guard<std::mutex> lock(sliderUnit->signalMutex);
+        connection.disconnect();
+    }
+    {
+        std::lock_guard<std::mutex> lock(sliderUnit->sliderMutex);
+        if(--sliderUnit->refCount == 0){
+            sliderUnit->viewImpl->removeSlider(sliderUnit);
+        }
+    }
+}
+    
+
+double SliderOwner::value() const
+{
+    std::lock_guard<std::mutex> lock(sliderUnit->sliderMutex);
+    return sliderUnit->value;
+}
+    
+
+void SliderOwner::setValue(double value, bool doSync)
+{
+    if(doSync){
+        callSynchronously([this, value](){ doSetValue(value); });
+    } else {
+        callFromMainThread([this, value](){ doSetValue(value); });
+    }
+}
+
+
+void SliderOwner::doSetValue(double value)
+{
+    std::lock_guard<std::mutex> lock(sliderUnit->sliderMutex);
+    if(value != sliderUnit->value){
+        sliderUnit->value = value;
+        sliderUnit->slider.blockSignals(true);
+        sliderUnit->spin.blockSignals(true);
+        sliderUnit->spin.setValue(value);
+        sliderUnit->slider.setValue(value * resolution);
+        sliderUnit->spin.blockSignals(false);
+        sliderUnit->slider.blockSignals(false);
+    }
+}
+
+
+void SliderOwner::setCallback(std::function<void(double value)> callback)
+{
+    std::lock_guard<std::mutex> lock(sliderUnit->signalMutex);
+    if(callback){
+        connection = sliderUnit->sigValueChanged.connect(callback);
+    } else {
+        connection.disconnect();
+    }
+}
+
 }
 
 
 void GeneralSliderView::initializeClass(ExtensionManager* ext)
 {
-    ::instance =
-        ext->viewManager().registerClass<GeneralSliderView>(
-            "GeneralSliderView", N_("General Sliders"), ViewManager::SINGLE_OPTIONAL);
+    ext->viewManager().registerClass<GeneralSliderView>(
+        "GeneralSliderView", N_("General Sliders"), ViewManager::SINGLE_OPTIONAL);
 }
 
 
 GeneralSliderView* GeneralSliderView::instance()
 {
-    return ::instance;
+    return ViewManager::getOrCreateView<GeneralSliderView>();
 }
 
 
 GeneralSliderView::GeneralSliderView()
 {
-    impl = new GeneralSliderViewImpl(this);
+    impl = new Impl(this);
 }
 
 
-GeneralSliderViewImpl::GeneralSliderViewImpl(GeneralSliderView* self) :
-    self(self)
+GeneralSliderView::Impl::Impl(GeneralSliderView* self)
+    : self(self)
 {
     self->setDefaultLayoutArea(View::CENTER);
     self->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
@@ -264,42 +308,54 @@ GeneralSliderView::~GeneralSliderView()
 }
 
 
-GeneralSliderViewImpl::~GeneralSliderViewImpl()
+GeneralSliderView::Impl::~Impl()
 {
-    sliders.clear();
+
 }
 
 
-GeneralSliderView::Slider* GeneralSliderView::getOrCreateSlider
-(const std::string& owner, const std::string& name, double lower, double upper, int precision)
+GeneralSliderView::SliderPtr GeneralSliderView::getOrCreateSlider
+(const std::string& /* owner */, const std::string& name, double lower, double upper, int precision)
 {
-    Slider* slider;
-    auto owner_ = owner;
+    return getOrCreateSlider(name, lower, upper, precision);
+}
+
+
+GeneralSliderView::SliderPtr GeneralSliderView::getOrCreateSlider
+(const std::string& name, double lower, double upper, int precision)
+{
+    SliderUnit* sliderUnit = nullptr;
     auto name_ = name;
     callSynchronously(
-        [this, owner_, name_, lower, upper, precision, &slider](){
-            impl->getOrCreateSlider(owner_, name_, lower, upper, precision, slider); });
-    return slider;
+        [this, name_, lower, upper, precision, &sliderUnit](){
+            impl->getOrCreateSlider(name_, lower, upper, precision, sliderUnit); });
+    
+    return new SliderOwner(sliderUnit);
 }
 
 
-void GeneralSliderViewImpl::getOrCreateSlider
-(const std::string& owner, const std::string& name,
- double lower, double upper, int precision, GeneralSliderView::Slider*& out_slider)
+void GeneralSliderView::Impl::getOrCreateSlider
+(const std::string& name, double lower, double upper, int precision, SliderUnit*& out_sliderUnit)
 {
-    auto sliderUnit = new SliderUnit(this, owner, name, lower, upper, precision);
-
     std::lock_guard<std::mutex> lock(slidersMutex);
-    int row = sliders.size();
-    sliders.push_back(sliderUnit);
-
-    attachSlider(sliderUnit, row);
     
-    out_slider = sliderUnit;
+    SliderUnit* sliderUnit = nullptr;
+    auto p = sliderMap.find(name);
+    if(p != sliderMap.end()){
+        sliderUnit = p->second;
+    }
+    if(!sliderUnit){
+        sliderUnit = new SliderUnit(this, name, lower, upper, precision);
+        int row = sliders.size();
+        sliders.push_back(sliderUnit);
+        attachSlider(sliderUnit, row);
+        sliderMap[name] = sliderUnit;
+    }
+    out_sliderUnit = sliderUnit;
 }
     
 
-void GeneralSliderViewImpl::attachSlider(SliderUnit* unit, int row)
+void GeneralSliderView::Impl::attachSlider(SliderUnit* unit, int row)
 {
     sliderGrid.addWidget(&unit->nameLabel, row, 0);
     sliderGrid.addWidget(&unit->spin, row, 1);
@@ -309,42 +365,39 @@ void GeneralSliderViewImpl::attachSlider(SliderUnit* unit, int row)
 }
 
 
-void GeneralSliderView::removeSlider(GeneralSliderView::Slider* slider)
+void GeneralSliderView::removeSlider(GeneralSliderView::Slider* /* slider */)
 {
-    callFromMainThread([this, slider](){ impl->removeSlider(slider); });
+
 }
 
 
-void GeneralSliderViewImpl::removeSlider(GeneralSliderView::Slider* slider)
+void GeneralSliderView::Impl::removeSlider(SliderUnit* sliderUnit)
+{
+    callFromMainThread([this, sliderUnit](){ removeSliderMain(sliderUnit); });
+}
+
+
+void GeneralSliderView::Impl::removeSliderMain(SliderUnit* sliderUnit)
 {
     std::lock_guard<std::mutex> lock(slidersMutex);
-    auto iter = std::find(sliders.begin(), sliders.end(), slider);
+
+    auto iter = std::find(sliders.begin(), sliders.end(), sliderUnit);
     if(iter != sliders.end()){
+        sliderMap.erase(sliderUnit->name);
         sliders.erase(iter);
     }
+            
     updateSliderGrid();
 }
 
 
 void GeneralSliderView::removeSliders(const std::string& owner)
 {
-    auto owner_ = owner;
-    callFromMainThread([this, owner_](){ impl->removeSliders(owner_); });
+
 }
     
 
-void GeneralSliderViewImpl::removeSliders(const std::string& owner)
-{
-    std::lock_guard<std::mutex> lock(slidersMutex);
-
-    auto pred = [owner](SliderUnit* slider){ return slider->owner == owner; };
-    sliders.erase(std::remove_if(sliders.begin(), sliders.end(), pred), sliders.end());
-
-    updateSliderGrid();
-}
-
-
-void GeneralSliderViewImpl::updateSliderGrid()
+void GeneralSliderView::Impl::updateSliderGrid()
 {
     for(size_t i=0; i < sliders.size(); ++i){
         attachSlider(sliders[i], i);

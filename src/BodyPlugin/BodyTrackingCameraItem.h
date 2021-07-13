@@ -12,14 +12,23 @@
 
 namespace cnoid {
 
-class BodyTrackingCameraItemImpl;
-  
+class SgCamera;
+class SgPosTransform;
+
 class CNOID_EXPORT BodyTrackingCameraItem : public Item, public RenderableItem
 {
 public:
     static void initializeClass(ExtensionManager* ext);
     
-    enum CameraType { PERSPECTIVE = 0, ORTHOGRAPHIC, N_CAMERA_TYPE  };
+    enum CameraType {
+        Perspective,
+        Orthographic,
+        NumCameraTypes,
+        // deprecated
+        PERSPECTIVE = Perspective,
+        ORTHOGRAPHIC = Orthographic,
+        N_CAMERA_TYPE
+    };
 
     BodyTrackingCameraItem();
     BodyTrackingCameraItem(const BodyTrackingCameraItem& org);
@@ -27,18 +36,28 @@ public:
 
     virtual bool setName(const std::string& name) override;
 
+    void setTargetLink(const std::string& name);
+    const std::string& targetLinkName() const;
+    void setRotationSyncEnabled(bool on);
+    bool isRotationSyncEnabled() const;
+    void setCameraType(CameraType type);
+    CameraType cameraType() const;
+    SgCamera* currentCamera();
+    SgPosTransform* cameraTransform();
+
     // RenderableItem
     virtual SgNode* getScene() override;
 
 protected:
     virtual Item* doDuplicate() const override;
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
     virtual bool store(Archive& archive) override;
     virtual bool restore(const Archive& archive) override;
     
 private:
-    BodyTrackingCameraItemImpl* impl;
+    class Impl;
+    Impl* impl;
 };
   
 typedef ref_ptr<BodyTrackingCameraItem> BodyTrackingCameraItemPtr;

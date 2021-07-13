@@ -40,10 +40,11 @@ double getCurrentTime()
 
 namespace cnoid {
 
-class BodyImpl
+class Body::Impl
 {
 public:
     NameToLinkMap nameToLinkMap;
+    NameToLinkMap jointSpecificNameToLinkMap;
     DeviceNameMap deviceNameMap;
     CacheMap cacheMap;
     MappingPtr info;
@@ -60,6 +61,8 @@ public:
     BodyHandleEntity bodyHandleEntity;
     BodyHandle bodyHandle;
 
+    Impl(Body* self);
+    void initialize(Body* self, Link* rootLink);
     bool installCustomizer(BodyCustomizerInterface* customizerInterface);
 };
 
@@ -67,39 +70,51 @@ public:
 
 
 Body::Body()
-    : Body(new Link)
 {
+    impl = new Impl(this);
 
+    auto rootLink = new Link;
+    rootLink->setJointType(Link::FreeJoint);
+    impl->initialize(this, rootLink);
+}
+
+
+Body::Body(const std::string& name)
+    : Body()
+{
+    impl->name = name;
 }
 
 
 Body::Body(Link* rootLink)
 {
-    initialize();
-    currentTimeFunction = getCurrentTime;
-    impl->centerOfMass.setZero();
-    impl->info = new Mapping();
-
-    rootLink_ = nullptr;
-    setRootLink(rootLink);
+    impl = new Impl(this);
+    impl->initialize(this, rootLink);
 }
 
 
-void Body::initialize()
+Body::Impl::Impl(Body* self)
 {
-    impl = new BodyImpl;
-    
-    impl->customizerHandle = 0;
-    impl->customizerInterface = 0;
-    impl->bodyHandleEntity.body = this;
-    impl->bodyHandle = &impl->bodyHandleEntity;
+    customizerHandle = 0;
+    customizerInterface = nullptr;
+    bodyHandleEntity.body = self;
+    bodyHandle = &bodyHandleEntity;
+}
+
+
+void Body::Impl::initialize(Body* self, Link* rootLink)
+{
+    self->currentTimeFunction = getCurrentTime;
+    centerOfMass.setZero();
+    info = new Mapping;
+
+    self->rootLink_ = nullptr;
+    self->setRootLink(rootLink);
 }
 
 
 void Body::copyFrom(const Body* org, CloneMap* cloneMap)
 {
-    initialize();
-
     currentTimeFunction = org->currentTimeFunction;
 
     impl->centerOfMass = org->impl->centerOfMass;
@@ -108,8 +123,12 @@ void Body::copyFrom(const Body* org, CloneMap* cloneMap)
     impl->info = org->impl->info;
 
     setRootLink(cloneLinkTree(org->rootLink(), cloneMap));
+
     if(cloneMap){
-        rootLink_->parent_ = cloneMap->findClone<Link>(org->rootLink()->parent());
+        // reference to the parent body
+        if(auto orgParentBodyLink = org->parentBodyLink()){
+            parentBodyLink_ = cloneMap->findClone<Link>(orgParentBodyLink);
+        }
     }
 
     for(auto& device : org->devices()){
@@ -125,9 +144,8 @@ void Body::copyFrom(const Body* org, CloneMap* cloneMap)
     for(auto& orgExtraJoint : org->extraJoints_){
         ExtraJoint extraJoint(orgExtraJoint);
         for(int j=0; j < 2; ++j){
-            extraJoint.link[j] = link(orgExtraJoint.link[j]->index());
+            extraJoint.setLink(j, link(orgExtraJoint.link(j)->index()));
         }
-        extraJoint.body[0] = extraJoint.body[1] = this;
         extraJoints_.push_back(extraJoint);
     }
 
@@ -188,7 +206,7 @@ void Body::cloneShapes(CloneMap& cloneMap)
 
 Body::~Body()
 {
-    setRootLink(0);
+    setRootLink(nullptr);
     
     if(impl->customizerHandle){
         impl->customizerInterface->destroy(impl->customizerHandle);
@@ -200,11 +218,11 @@ Body::~Body()
 void Body::setRootLink(Link* link)
 {
     if(rootLink_){
-        rootLink_->setBody(0);
+        rootLink_->setBodyToSubTree(nullptr);
     }
     rootLink_ = link;
     if(rootLink_){
-        rootLink_->setBody(this);
+        rootLink_->setBodyToSubTree(this);
         updateLinkTree();
     }
 }
@@ -223,6 +241,7 @@ void Body::updateLinkTree()
     isStaticModel_ = true;
     
     impl->nameToLinkMap.clear();
+    impl->jointSpecificNameToLinkMap.clear();
     linkTraverse_.find(rootLink());
 
     const int numLinks = linkTraverse_.numLinks();
@@ -236,8 +255,12 @@ void Body::updateLinkTree()
     for(int i=0; i < numLinks; ++i){
         Link* link = linkTraverse_[i];
         link->setIndex(i);
-        impl->nameToLinkMap[link->name()] = link;
-
+        if(!link->name().empty()){
+            impl->nameToLinkMap[link->name()] = link;
+        }
+        if(!link->jointSpecificName().empty()){
+            impl->jointSpecificNameToLinkMap[link->jointSpecificName()] = link;
+        }
         const int id = link->jointId();
         if(id >= 0){
             if(id >= static_cast<int>(jointIdToLinkArray.size())){
@@ -276,7 +299,7 @@ void Body::updateLinkTree()
 }
 
 
-void Body::resetDefaultPosition(const Position& T)
+void Body::resetDefaultPosition(const Isometry3& T)
 {
     rootLink_->setOffsetPosition(T);
 }
@@ -308,20 +331,20 @@ void Body::setModelName(const std::string& name)
 
 void Body::setParent(Link* parentBodyLink)
 {
-    rootLink_->parent_ = parentBodyLink;
+    parentBodyLink_ = parentBodyLink;
 }
 
 
 void Body::resetParent()
 {
-    rootLink_->parent_ = nullptr;
+    parentBodyLink_.reset();
 }
 
 
 void Body::syncPositionWithParentBody(bool doForwardKinematics)
 {
-    if(auto parentBodyLink = rootLink_->parent_){
-        rootLink_->setPosition(parentBodyLink->T() * rootLink_->Tb());
+    if(auto parentLink = parentBodyLink()){
+        rootLink_->setPosition(parentLink->T() * rootLink_->Tb());
         if(doForwardKinematics){
             calcForwardKinematics();
         }
@@ -334,16 +357,16 @@ Link* Body::findUniqueEndLink() const
     Link* endLink = nullptr;
     Link* link = rootLink_;
     while(true){
-        if(!link->child_){
+        if(!link->child()){
             if(link != rootLink_){
                 endLink = link;
             }
             break;
         }
-        if(link->child_->sibling_){
+        if(link->child()->sibling()){
             break;
         }
-        link = link->child_;
+        link = link->child();
     }
     return endLink;
 }
@@ -353,10 +376,10 @@ Link* Body::lastSerialLink() const
 {
     Link* link = rootLink_;
     while(true){
-        if(!link->child_ || link->child_->sibling_){
+        if(!link->child() || link->child()->sibling()){
             break;
         }
-        link = link->child_;
+        link = link->child();
     }
     return link;
 }
@@ -418,6 +441,21 @@ void Body::clearDevices()
 {
     devices_.clear();
     impl->deviceNameMap.clear();
+}
+
+
+void Body::sortDevicesByLinkOrder()
+{
+    std::stable_sort(
+        devices_.begin(), devices_.end(),
+        [](const Device* a, const Device* b){
+            return a->link()->index() < b->link()->index();
+        });
+
+    int index = 0;
+    for(auto& device : devices_){
+        device->setIndex(index++);
+    }
 }
 
 
@@ -483,6 +521,16 @@ Link* Body::link(const std::string& name) const
 }
 
 
+Link* Body::joint(const std::string& name) const
+{
+    auto p = impl->jointSpecificNameToLinkMap.find(name);
+    if(p != impl->jointSpecificNameToLinkMap.end()){
+        return p->second;
+    }
+    return link(name);
+}
+
+
 void Body::resetLinkName(Link* link, const std::string& name)
 {
     auto p = impl->nameToLinkMap.find(link->name());
@@ -492,6 +540,29 @@ void Body::resetLinkName(Link* link, const std::string& name)
         }
     }
     impl->nameToLinkMap[name] = link;
+}
+
+
+void Body::resetJointSpecificName(Link* link)
+{
+    const auto& currentName = link->jointSpecificName();
+    if(!currentName.empty()){
+        auto p = impl->jointSpecificNameToLinkMap.find(currentName);
+        if(p != impl->jointSpecificNameToLinkMap.end()){
+            if(p->second == link){
+                impl->jointSpecificNameToLinkMap.erase(p);
+            }
+        }
+    }
+}
+    
+
+void Body::resetJointSpecificName(Link* link, const std::string& name)
+{
+    resetJointSpecificName(link);
+    if(!name.empty()){
+        impl->jointSpecificNameToLinkMap[name] = link;
+    }
 }
 
 
@@ -628,7 +699,19 @@ BodyHandler* Body::findHandler(std::function<bool(BodyHandler*)> isTargetHandler
     return nullptr;
 }
 
-    
+
+int Body::numHandlers() const
+{
+    return impl->handlers.size();
+}
+
+
+BodyHandler* Body::handler(int index)
+{
+    return impl->handlers[index];
+}
+
+
 BodyCustomizerHandle Body::customizerHandle() const
 {
     return impl->customizerHandle;
@@ -689,14 +772,14 @@ bool Body::installCustomizer(BodyCustomizerInterface* customizerInterface)
 }
 
 
-bool BodyImpl::installCustomizer(BodyCustomizerInterface* customizerInterface)
+bool Body::Impl::installCustomizer(BodyCustomizerInterface* customizerInterface)
 {
     if(this->customizerInterface){
         if(customizerHandle){
             this->customizerInterface->destroy(customizerHandle);
             customizerHandle = 0;
         }
-        this->customizerInterface = 0;
+        this->customizerInterface = nullptr;
     }
 	
     if(customizerInterface){

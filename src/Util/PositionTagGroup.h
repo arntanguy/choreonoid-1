@@ -1,6 +1,7 @@
 #ifndef CNOID_UTIL_POSITION_TAG_GROUP_H
 #define CNOID_UTIL_POSITION_TAG_GROUP_H
 
+#include "ClonableReferenced.h"
 #include "PositionTag.h"
 #include "Signal.h"
 #include "EigenTypes.h"
@@ -12,7 +13,7 @@ namespace cnoid {
 class PositionTag;
 class Mapping;
 
-class CNOID_EXPORT PositionTagGroup : public Referenced
+class CNOID_EXPORT PositionTagGroup : public ClonableReferenced
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -20,6 +21,16 @@ public:
     PositionTagGroup();
     PositionTagGroup(const PositionTagGroup& org);
     virtual ~PositionTagGroup();
+
+    PositionTagGroup* clone() const {
+        return static_cast<PositionTagGroup*>(doClone(nullptr));
+    }
+    PositionTagGroup* clone(CloneMap& cloneMap) const {
+        return static_cast<PositionTagGroup*>(doClone(&cloneMap));
+    }
+
+    const std::string& name() const;
+    void setName(const std::string& name);
 
     void clearTags();
 
@@ -33,39 +44,32 @@ public:
         return tags_[index];
     }
 
-    const Position& originOffset() const {
-        return T_offset_;
-    }
-    
-    template<class Scalar, int Mode, int Options>
-    void setOriginOffset(const Eigen::Transform<Scalar, 3, Mode, Options>& T, bool doNotify){
-        T_offset_ = T.template cast<Position::Scalar>();
-        if(doNotify){
-            notifyOffsetPositionUpdate();
-        }
-    }
-    
     typedef std::vector<PositionTagPtr> Container;
     Container::const_iterator begin() const { return tags_.begin(); }
     Container::const_iterator end() const { return tags_.end(); }
     
-    void insert(int index, PositionTag* point);
-    void append(PositionTag* point);
+    void insert(int index, PositionTag* tag);
+    void insert(int index, PositionTagGroup* group);
+    void append(PositionTag* tag);
     bool removeAt(int index);
     SignalProxy<void(int index)> sigTagAdded();
     SignalProxy<void(int index, PositionTag* tag)> sigTagRemoved();
-    SignalProxy<void(int index)> sigTagUpdated();
-    SignalProxy<void(const Position& T)> sigOffsetPositionChanged();
+    SignalProxy<void(int index)> sigTagPositionChanged();
+    SignalProxy<void(int index)> sigTagPositionUpdated();
+    void notifyTagPositionChange(int index);
+    void notifyTagPositionUpdate(int index, bool doNotifyPositionChange = true);
 
-    void notifyTagUpdate(int index);
-    void notifyOffsetPositionUpdate();
-    
     bool read(const Mapping* archive);
-    void write(Mapping* archive) const;
+    bool write(Mapping* archive) const;
 
+    enum CsvFormat { XYZMMRPYDEG = 0, XYZMM = 1 };
+    bool loadCsvFile(const std::string& filename, CsvFormat csvFormat, std::ostream& os);
+
+protected:
+    virtual Referenced* doClone(CloneMap* cloneMap) const override;
+    
 private:
     Container tags_;
-    Position T_offset_;
     
     class Impl;
     Impl* impl;

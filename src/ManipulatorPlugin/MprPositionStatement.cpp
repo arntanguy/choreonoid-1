@@ -1,6 +1,7 @@
 #include "MprPositionStatement.h"
+#include "MprProgram.h"
 #include "MprStatementRegistration.h"
-#include <cnoid/LinkKinematicsKit>
+#include "MprPositionList.h"
 #include <cnoid/ValueTree>
 #include <fmt/format.h>
 
@@ -44,22 +45,31 @@ std::string MprPositionStatement::label(int index) const
 std::string MprPositionStatement::positionLabel() const
 {
     if(positionId_.isInt()){
+        if(auto holder = holderProgram()){
+            if(holder->hasLocalPositionList()){
+                return format("({0})", positionId_.toInt());
+            }
+        }
         return format("P{0}", positionId_.toInt());
+
     } else {
         return positionId_.toString();
     }
 }
 
 
-const MprPosition* MprPositionStatement::position(const MprPositionList* positions) const
+MprPosition* MprPositionStatement::position()
 {
-    return positions->findPosition(positionId_);
+    if(auto program = holderProgram()){
+        return program->positionList()->findPosition(positionId_);
+    }
+    return nullptr;
 }
 
 
-MprPosition* MprPositionStatement::position(MprPositionList* positions) const
+const MprPosition* MprPositionStatement::position() const
 {
-    return positions->findPosition(positionId_);
+    return const_cast<MprPositionStatement*>(this)->position();
 }
 
 
@@ -78,87 +88,12 @@ bool MprPositionStatement::write(Mapping& archive) const
 }
 
 
-MprTagTraceStatement::MprTagTraceStatement()
-    : T_tags(Position::Identity()),
-      baseFrameId_(0),
-      offsetFrameId_(0)
-{
-    positionList_ = new MprPositionList;
-}
-
-
-MprTagTraceStatement::MprTagTraceStatement(const MprTagTraceStatement& org, CloneMap* cloneMap)
-    : MprStructuredStatement(org, cloneMap),
-      tagGroup_(org.tagGroup_),
-      T_tags(org.T_tags),
-      baseFrameId_(org.baseFrameId_),
-      offsetFrameId_(org.offsetFrameId_)
-{
-    if(cloneMap){
-        positionList_ = org.positionList_->clone(*cloneMap);
-    } else {
-        positionList_ = org.positionList_->clone();
-    }
-}
-
-
-std::string MprTagTraceStatement::label(int index) const
-{
-    if(index == 0){
-        return "Trace";
-    } else if(index == 1){
-        const auto& name = lowerLevelProgram()->name();
-        if(!name.empty()){
-            return name;
-        } else {
-            return "-----";
-        }
-    }
-    return string();
-}
-
-
-void MprTagTraceStatement::updateFramesWithCurrentFrames(LinkKinematicsKit* kinematicsKit)
-{
-    setBaseFrameId(kinematicsKit->currentBaseFrameId());
-    setOffsetFrameId(kinematicsKit->currentOffsetFrameId());
-}
-
-
-void MprTagTraceStatement::setGlobalTagGroupPosition(LinkKinematicsKit* kinematicsKit, const Position& T_parent)
-{
-    auto T_base = kinematicsKit->globalBasePosition(baseFrameId_);
-    Position T_tags = T_base.inverse(Eigen::Isometry) * T_parent;
-    setTagGroupPosition(T_tags);
-}
-
-
-MprProgram::iterator MprTagTraceStatement::expandTraceStatements()
-{
-    return holderProgram()->end();
-}
-
-
-bool MprTagTraceStatement::read(MprProgram* program, const Mapping& archive)
-{
-    return MprStructuredStatement::read(program, archive);
-}
-
-
-bool MprTagTraceStatement::write(Mapping& archive) const
-{
-    return MprStructuredStatement::write(archive);
-}
-
-
 namespace {
 
 struct StatementTypeRegistration {
     StatementTypeRegistration(){
         MprStatementRegistration()
-            .registerAbstractType<MprPositionStatement, MprStatement>()
-            .registerAbstractType<MprTagTraceStatement, MprStatement>()
-            ;
+            .registerAbstractType<MprPositionStatement, MprStatement>();
     }
 } registration;
 

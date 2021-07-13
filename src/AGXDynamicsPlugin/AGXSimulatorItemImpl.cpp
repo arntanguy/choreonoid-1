@@ -17,6 +17,10 @@ namespace cnoid {
 const std::unordered_map<std::string, agx::ContactMaterial::ContactReductionMode> agxContactReductionModeMap{
     {"", agx::ContactMaterial::ContactReductionMode::REDUCE_GEOMETRY},
     {"default", agx::ContactMaterial::ContactReductionMode::REDUCE_GEOMETRY},
+    {"reduce_geometry", agx::ContactMaterial::ContactReductionMode::REDUCE_GEOMETRY},
+    {"reduce_all", agx::ContactMaterial::ContactReductionMode::REDUCE_ALL},
+    {"reduce_none", agx::ContactMaterial::ContactReductionMode::REDUCE_NONE},
+    // deprecated
     {"reduceGeometry", agx::ContactMaterial::ContactReductionMode::REDUCE_GEOMETRY},
     {"reduceALL", agx::ContactMaterial::ContactReductionMode::REDUCE_ALL},
     {"reduceNone", agx::ContactMaterial::ContactReductionMode::REDUCE_NONE}
@@ -171,11 +175,22 @@ bool AGXSimulatorItemImpl::initializeSimulation(const std::vector<SimulationBody
 
     createAGXMaterialTable();
 
+    doUpdateLinkContactPoints = false;
+    
     for(auto simBody : simBodies){
-        AGXBody* body = static_cast<AGXBody*>(simBody);
+        AGXBody* agxBody = static_cast<AGXBody*>(simBody);
         // Create rigidbody, geometry, constraints
-        body->createBody(agxScene);
-        body->setSensor(self->worldTimeStep(), g);
+        agxBody->createBody(agxScene);
+        agxBody->setSensor(self->worldTimeStep(), g);
+
+        if(!doUpdateLinkContactPoints){
+            for(auto& link : agxBody->body()->links()){
+                if(link->sensingMode() & Link::LinkContactState){
+                    doUpdateLinkContactPoints = true;
+                    break;
+                }
+            }
+        }
     }
 
     setAdditionalAGXMaterialParam();
@@ -184,7 +199,6 @@ bool AGXSimulatorItemImpl::initializeSimulation(const std::vector<SimulationBody
     return true;
 }
 
-#define SET_AGXMATERIAL_FIELD(field) desc.field = mat->info<double>(#field, desc.field)
 void AGXSimulatorItemImpl::createAGXMaterialTable()
 {
     WorldItem* const worldItem = self->findOwnerItem<WorldItem>();
@@ -195,20 +209,22 @@ void AGXSimulatorItemImpl::createAGXMaterialTable()
     matTable->forEachMaterial(
         [&](int id, Material* mat){
             AGXMaterialDesc desc;
-            desc.name = Material::name(id);
-            SET_AGXMATERIAL_FIELD(density);
-            SET_AGXMATERIAL_FIELD(youngsModulus);
-            SET_AGXMATERIAL_FIELD(poissonRatio);
+            desc.name = Material::nameOfId(id);
+
+            auto info = mat->info();
+            info->read("density", desc.density);
+            info->read({ "youngs_modulus", "youngsModulus" }, desc.youngsModulus);
             desc.viscosity = mat->viscosity();
-            desc.spookDamping = mat->info<double>("spookDamping", desc.spookDamping);
+            info->read({ "spook_damping", "spookDamping" }, desc.spookDamping);
             desc.roughness = mat->roughness();
-            SET_AGXMATERIAL_FIELD(surfaceViscosity);
-            SET_AGXMATERIAL_FIELD(adhesionForce);
-            SET_AGXMATERIAL_FIELD(adhesivOverlap);
-            SET_AGXMATERIAL_FIELD(wireYoungsModulusStretch);
-            desc.wireSpookDampingStretch = mat->info<double>("wireSpookDampingStretch", desc.wireSpookDampingStretch);
-            SET_AGXMATERIAL_FIELD(wireYoungsModulusBend);
-            desc.wireSpookDampingBend = mat->info<double>("wireSpookDampingBend", desc.wireSpookDampingBend);
+            info->read({ "surface_viscosity", "surfaceViscosity" }, desc.surfaceViscosity);
+            info->read({ "adhesion_force", "adhesionForce" }, desc.adhesionForce);
+            info->read({ "adhesiv_overlap", "adhesivOverlap" }, desc.adhesivOverlap);
+            info->read({ "wire_youngs_modulus_stretch", "wireYoungsModulusStretch" }, desc.wireYoungsModulusStretch);
+            info->read({ "wire_spook_damping_stretch", "wireSpookDampingStretch" }, desc.wireSpookDampingStretch);
+            info->read({ "wire_youngs_modulus_bend", "wireYoungsModulusBend" }, desc.wireYoungsModulusBend);
+            info->read({ "wire_spook_damping_bend", "wireSpookDampingBend" }, desc.wireSpookDampingBend);
+            
             getAGXScene()->createMaterial(desc);
         });
 
@@ -225,25 +241,32 @@ void AGXSimulatorItemImpl::createAGXContactMaterial(int id1, int id2, ContactMat
 {
     Mapping* info = mat->info();
     AGXContactMaterialDesc desc;
-    desc.nameA = Material::name(id1);
-    desc.nameB = Material::name(id2);
-    SET_AGXMATERIAL_FIELD(youngsModulus);
+    desc.nameA = Material::nameOfId(id1);
+    desc.nameB = Material::nameOfId(id2);
+    info->read({ "youngs_modulus", "youngsModulus" }, desc.youngsModulus);
     desc.restitution = mat->restitution();
-    desc.spookDamping = mat->info<double>("spookDamping", desc.spookDamping);
+    info->read({ "spook_damping", "spookDamping" }, desc.spookDamping);
     desc.friction = mat->friction();
-    SET_AGXMATERIAL_FIELD(secondaryFriction);
-    SET_AGXMATERIAL_FIELD(surfaceViscosity);
-    SET_AGXMATERIAL_FIELD(secondarySurfaceViscosity);
-    SET_AGXMATERIAL_FIELD(adhesionForce);
-    SET_AGXMATERIAL_FIELD(adhesivOverlap);
-    auto binNode = info->find("contactReductionBinResolution");
-    if(binNode->isValid()) desc.contactReductionBinResolution = (agx::UInt8)binNode->toInt();
-
-    auto crmNode = info->find("contactReductionMode");
+    info->read({ "secondary_friction", "secondaryFriction" }, desc.secondaryFriction);
+    info->read({ "surface_viscosity", "surfaceViscosity" }, desc.surfaceViscosity);
+    info->read({ "secondary_surface_viscosity", "secondarySurfaceViscosity" }, desc.secondarySurfaceViscosity);
+    info->read({ "adhesion_force", "adhesionForce" }, desc.adhesionForce);
+    info->read({ "adhesiv_overlap", "adhesivOverlap" }, desc.adhesivOverlap);
+    desc.contactReductionBinResolution =
+        info->get({ "contact_reduction_bin_resolution", "contactReductionBinResolution" },
+                  static_cast<int>(desc.contactReductionBinResolution));
+    
+    auto crmNode = info->find("contact_reduction_mode");
+    if(!crmNode->isValid()){
+        crmNode = info->find("contactReductionMode");
+    }
     agxConvert::setValue(crmNode, agxContactReductionModeMap, "", desc.contactReductionMode,
-    "Illegal contactReductionMode value. Use default.");
+                         "Illegal contactReductionMode value. Use default.");
 
-    auto frictionModelNode = info->find("frictionModel");
+    auto frictionModelNode = info->find("friction_model");
+    if(!frictionModelNode->isValid()){
+        frictionModelNode = info->find("frictionModel");
+    }
     if(frictionModelNode->isValid()){
         vector<string> fmVec;
         if(agxConvert::setVector(frictionModelNode, 2, fmVec)){
@@ -267,21 +290,21 @@ static void setFrameOfOrientedFrictionModel
 
     auto info = materialPair->info();
     string referenceBodyName, referenceLinkName;
-    if(!info->read("referenceBodyName", referenceBodyName)){
+    if(!info->read({ "reference_body", "referenceBodyName" } ,referenceBodyName)){
         LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING "
-                         << "referenceBodyName is not set or correct at the material table " << pairName << LOGGER_ENDL();
+                         << "reference_body is not set or correct at the material table " << pairName << LOGGER_ENDL();
         return;
     }
     auto simBody = simulator->findSimulationBody(referenceBodyName);
     auto agxBody = static_cast<AGXBody*>(simBody);
     if(!agxBody){
-        LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING " << "reference body " << referenceBodyName
-                         << " is not found at the material table " << pairName << LOGGER_ENDL();
+        //LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING " << "reference body " << referenceBodyName
+        //                 << " is not found at the material table " << pairName << LOGGER_ENDL();
         return;
     }
-    if(!info->read("referenceLinkName", referenceLinkName)){
+    if(!info->read({ "reference_link", "referenceLinkName" }, referenceLinkName)){
         LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING "
-                         << "referenceLinkName is not set or correct at the material table " << pairName << LOGGER_ENDL();
+                         << "reference_link is not set or correct at the material table " << pairName << LOGGER_ENDL();
         return;
     }
     agx::RigidBody* rigid = agxBody->getAGXRigidBody(referenceLinkName);
@@ -293,10 +316,10 @@ static void setFrameOfOrientedFrictionModel
     
     frictionModel->setReferenceFrame(rigid->getFrame());
     Vector3 primaryDirection;
-    if(read(info, "primaryDirection", primaryDirection)){
+    if(read(info, { "primary_direction", "primaryDirection" }, primaryDirection)){
         frictionModel->setPrimaryDirection(agxConvert::toAGX(primaryDirection));
     }else{
-        LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING " << "primaryDirection is not set or correct" << LOGGER_ENDL();
+        LOGGER_WARNING() << "AGXDynamicsPlugin:WARNING " << "primary_direction is not set or correct" << LOGGER_ENDL();
     }
 
     if(auto cnfModel = dynamic_cast<agx::ConstantNormalForceOrientedBoxFrictionModel*>(frictionModel)){
@@ -322,8 +345,8 @@ void AGXSimulatorItemImpl::setAdditionalAGXMaterialParam()
     // Extract oriented-type friction models
     matTable->forEachMaterialPair(
         [&](int id1, int id2, ContactMaterial* materialPair){
-            agx::Material* mat1 = mgr->getMaterial(Material::name(id1));
-            agx::Material* mat2 = mgr->getMaterial(Material::name(id2));
+            agx::Material* mat1 = mgr->getMaterial(Material::nameOfId(id1));
+            agx::Material* mat2 = mgr->getMaterial(Material::nameOfId(id2));
             if(mat1 && mat2){
                 if(auto agxMaterialPair = mgr->getOrCreateContactMaterial(mat1, mat2)){
                     string pairName = "[" + mat1->getName() + " " + mat2->getName() + "]";
@@ -350,7 +373,7 @@ bool AGXSimulatorItemImpl::stepSimulation(const std::vector<SimulationBody*>& ac
     agx::Notify::instance()->setNotifyLevel(agxNotifyLevel.at(m_p_debugMessageOnConsoleType.selectedSymbol()));
 
     for(auto simBody : activeSimBodies){
-        auto const agxBody = dynamic_cast<AGXBody*>(simBody);
+        auto const agxBody = static_cast<AGXBody*>(simBody);
         agxBody->setControlInputToAGX();
         agxBody->addForceTorqueToAGX();
     }
@@ -358,29 +381,60 @@ bool AGXSimulatorItemImpl::stepSimulation(const std::vector<SimulationBody*>& ac
     agxScene->stepSimulation();
 
     for(auto simBody : activeSimBodies){
-        auto const agxBody = dynamic_cast<AGXBody*>(simBody);
+        auto const agxBody = static_cast<AGXBody*>(simBody);
         agxBody->setLinkStateToCnoid();
 
         // Update sensors
         if(agxBody->hasForceSensors())              agxBody->updateForceSensors();
         if(agxBody->hasGyroOrAccelerationSensors()) agxBody->updateGyroAndAccelerationSensors();
     }
+
+    if(doUpdateLinkContactPoints){
+        updateLinkContactPoints();
+    }
+    
     return true;
 }
 
-void AGXSimulatorItemImpl::stopSimulation()
+void AGXSimulatorItemImpl::updateLinkContactPoints()
 {
-    //cout << "stopSimulation" << endl;
+    for(auto& contact : agxScene->getSimulation()->getSpace()->getGeometryContacts()){
+        if(contact->isEnabled()){
+            for(int i=0; i < 2; ++i){
+                if(auto linkRigidBody = dynamic_cast<LinkRigidBody*>(contact->rigidBody(i))){
+                    auto link = linkRigidBody->getLink();
+                    if(link->sensingMode() & Link::LinkContactState){
+                        updateLinkContactPoints(contact, link, (i == 0) ? 1.0 : -1.0);
+                    }
+                }
+            }
+        }
+    }
 }
 
-void AGXSimulatorItemImpl::pauseSimulation()
-{
-    //cout << "pauseSimulation" << endl;
-}
 
-void AGXSimulatorItemImpl::restartSimulation()
+void AGXSimulatorItemImpl::updateLinkContactPoints
+(agxCollide::GeometryContact* contact, Link* link, double direction)
 {
-    //cout << "restartSimulation" << endl;
+    auto& srcPoints = contact->points();
+    auto& points = link->contactPoints();
+    points.clear();
+    points.reserve(srcPoints.size());
+    for(auto& point : srcPoints){
+        if(point.enabled()){
+            Eigen::Map<Vector3> position(point.point().ptr());
+            Eigen::Map<Vector3f> normal(point.normal().ptr());
+            auto agxForce = point.getForce();
+            Eigen::Map<Vector3> force(agxForce.ptr());
+            Eigen::Map<Vector3f> velocity(point.velocity().ptr());
+            points.emplace_back(
+                position,
+                direction * normal.cast<double>(),
+                direction * force,
+                direction * velocity.cast<double>(),
+                point.depth());
+        }
+    }
 }
 
 void AGXSimulatorItemImpl::setGravity(const Vector3& g)

@@ -12,11 +12,8 @@
 #include <cnoid/EigenUtil>
 #include <cnoid/CloneMap>
 #include <bitset>
-#include <deque>
 #include <array>
 #include <unordered_map>
-
-#include <iostream>
 
 using namespace std;
 using namespace cnoid;
@@ -42,8 +39,8 @@ const Vector3f HighlightedAxisColors[3] = {
 };
 
 constexpr double StdUnitHandleWidth = 0.02;
-constexpr double StdPixelHandleWidth = 6.0;
-constexpr double MaxPixelHandleWidthCorrectionRatio = 3.0;
+constexpr double StdPixelHandleWidth = 5.0;
+constexpr double MaxPixelHandleWidthCorrectionRatio = 5.0;
 constexpr double StdRotationHandleSizeRatio = 0.6;
 constexpr double WideUnitHandleWidth = 0.08;
 constexpr double WideRotationHandleSizeRatio = 0.5;
@@ -122,7 +119,7 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     
     PositionDragger* self;
-    unordered_map<double, SgNodePtr> handleVariantMap;
+    map<int, SgNodePtr> widthLevelToHandleShapeMap;
     AxisBitSet draggableAxisBitSet;
     SgSwitchPtr axisSwitch[6];
     int handleType;
@@ -133,14 +130,13 @@ public:
     DisplayMode displayMode;
     bool isEditMode;
     bool isOverlayMode;
-    bool isFixedPixelSizeMode;
+    bool isScreenFixedSizeMode;
     bool isContainerMode;
     bool isDragEnabled;
     bool isContentsDragEnabled;
-    bool isUndoEnabled;
     bool hasOffset;
-    Affine3 T_parent;
-    Position T_offset;
+    Isometry3 T_parent;
+    Isometry3 T_offset;
     SgSwitchableGroupPtr topSwitch;
     SgOverlayPtr overlay;
     SgFixedPixelSizeGroupPtr fixedPixelSizeGroup;
@@ -153,7 +149,6 @@ public:
     Signal<void()> sigDragStarted;
     Signal<void()> sigPositionDragged;
     Signal<void()> sigDragFinished;
-    std::deque<Affine3> history;
 
     Impl(PositionDragger* self, int mode, int axes);
     SgNode* createHandle(double widthRatio);
@@ -163,21 +158,23 @@ public:
     double calcWidthRatio(double pixelSizeRatio);
     SgNode* getOrCreateHandleVariant(double pixelSizeRatio, bool isForPicking);
     void clearHandleVariants();
-    void setDraggableAxes(AxisBitSet axisBitSet);
+    void setDraggableAxes(AxisBitSet axisBitSet, SgUpdateRef update);
+    void disableScreenFixedSizeMode();
     void setMaterialParameters(AxisBitSet axisBitSet, float t, bool isHighlighted);
     void highlightAxes(AxisBitSet axisBitSet);
-    void showDragMarkers(bool on);
-    AxisBitSet detectTargetAxes(const SceneWidgetEvent& event);
-    bool onButtonPressEvent(const SceneWidgetEvent& event);
+    void showDragMarkers(bool on, SgUpdateRef update);
+    AxisBitSet detectTargetAxes(SceneWidgetEvent* event);
+    bool onButtonPressEvent(SceneWidgetEvent* event);
     bool onTranslationDraggerPressed(
-        const SceneWidgetEvent& event, const Affine3& T_global, AxisBitSet axisBitSet);
+        SceneWidgetEvent* event, const Isometry3& T_global, AxisBitSet axisBitSet);
     bool onRotationDraggerPressed(
-        const SceneWidgetEvent& event, const Affine3& T_global, AxisBitSet axisBitSet);
-    void storeCurrentPositionToHistory();
+        SceneWidgetEvent* event, const Isometry3& T_global, AxisBitSet axisBitSet);
 };
 
 }
 
+
+namespace {
 
 SgHandleVariantSelector::SgHandleVariantSelector(PositionDragger::Impl* dragger)
     : SgGroup(findClassId<SgHandleVariantSelector>()),
@@ -191,17 +188,15 @@ void SgHandleVariantSelector::render(SceneRenderer* renderer)
 {
     double pixelSizeRatio = -1.0;
     bool isForPicking = false;
-    if(!dragger->isFixedPixelSizeMode){
+    if(!dragger->isScreenFixedSizeMode){
         pixelSizeRatio = renderer->projectedPixelSizeRatio(
             renderer->currentModelTransform().translation());
         isForPicking = renderer->isRenderingPickingImage();
     }
 
-    //
     clearChildren();
-    
     if(auto node = dragger->getOrCreateHandleVariant(pixelSizeRatio, isForPicking)){
-        addChildOnce(node);
+        addChild(node);
         renderer->renderNode(node);
     }
 }
@@ -229,7 +224,7 @@ void SgViewpointDependentSelector::setSwitchAngle(double rad)
 
 void SgViewpointDependentSelector::render(SceneRenderer* renderer)
 {
-    const Affine3& C = renderer->currentCameraPosition();
+    const Isometry3& C = renderer->currentCameraPosition();
     const Affine3& M = renderer->currentModelTransform();
     double d = fabs((C.translation() - M.translation()).normalized().dot((M.linear() * axis).normalized()));
     if(d > thresh){
@@ -243,9 +238,12 @@ void SgViewpointDependentSelector::render(SceneRenderer* renderer)
     }
 }
 
+}
+
 
 PositionDragger::PositionDragger(int mode, int axes)
 {
+    setAttribute(Marker | Operable);
     impl = new Impl(this, mode, axes);
 }
 
@@ -279,14 +277,13 @@ PositionDragger::Impl::Impl(PositionDragger* self, int axes, int handleType)
     }
     
 
-    displayMode = DisplayInFocus;
+    displayMode = DisplayInEditMode;
     isEditMode = false;
     isOverlayMode = false;
-    isFixedPixelSizeMode = false;
+    isScreenFixedSizeMode = false;
     isContainerMode = false;
     isDragEnabled = true;
     isContentsDragEnabled = true;
-    isUndoEnabled = false;
 
     hasOffset = false;
     T_offset.setIdentity();
@@ -342,7 +339,10 @@ SgNode* PositionDragger::Impl::createTranslationHandle(double widthRatio)
         stickLength *= 2.0;
     }
     stickLength -= extraEndLength / 2.0;
-    int divisionNumber = std::max((int)(24 / widthRatio), 8);
+
+    double k = (widthRatio - 1.0) / (MaxPixelHandleWidthCorrectionRatio - 1.0);
+    int divisionNumber = 24.0  * (1.0 - k) + 8.0 * k;
+    
     meshGenerator.setDivisionNumber(divisionNumber);
     SgMeshPtr mesh = meshGenerator.generateArrow(
         (unitHandleWidth / 2.0) * widthRatio,
@@ -422,7 +422,10 @@ SgNode* PositionDragger::Impl::createRotationDiscHandle(double widthRatio)
     double width = unitHandleWidth / rotationHandleSizeRatio * widthRatio;
     meshGenerator.setDivisionNumber(36);
     mesh[0] = meshGenerator.generateDisc(1.0, 1.0 - width);
-    mesh[1] = meshGenerator.generateCylinder(1.0, width, false, false);
+    SgMesh::Cylinder cylinder(1.0, width);
+    cylinder.top = cylinder.bottom = false;
+    mesh[1] = new SgMesh(cylinder);
+    meshGenerator.updateMeshWithPrimitiveInformation(mesh[1]);
 
     for(int i=0; i < 3; ++i){
         auto selector = new SgViewpointDependentSelector;
@@ -455,6 +458,7 @@ SgNode* PositionDragger::Impl::createRotationDiscHandle(double widthRatio)
 double PositionDragger::Impl::calcWidthRatio(double pixelSizeRatio)
 {
     double widthRatio = 1.0;
+
     if(pixelSizeRatio >= 0.0){
         double pixelWidth = unitHandleWidth * handleSize * pixelSizeRatio;
         if(pixelWidth > 0.1){
@@ -466,16 +470,11 @@ double PositionDragger::Impl::calcWidthRatio(double pixelSizeRatio)
             }
         }
     }
+    
     return widthRatio;
 }
     
 
-/**
-   \todo
-    - Make the handles for picking a bit wider
-    - Cache the generated handles in handleVariantMap
-    - Adjust the width considering the DPI of the display
-*/
 SgNode* PositionDragger::Impl::getOrCreateHandleVariant(double pixelSizeRatio, bool isForPicking)
 {
     double widthRatio;
@@ -484,34 +483,44 @@ SgNode* PositionDragger::Impl::getOrCreateHandleVariant(double pixelSizeRatio, b
     } else {
         widthRatio = 1.0;
     }
-    return createHandle(widthRatio);
+    constexpr double resolution = 5.0;
+    int widthLevel = std::round(widthRatio * resolution);
+
+    auto p = widthLevelToHandleShapeMap.find(widthLevel);
+    if(p != widthLevelToHandleShapeMap.end()){
+        return p->second;
+    } else {
+        auto shape = createHandle(widthLevel / resolution);
+        widthLevelToHandleShapeMap[widthLevel] = shape;
+        return shape;
+    }
 }
 
 
 void PositionDragger::Impl::clearHandleVariants()
 {
-    handleVariantMap.clear();
+    widthLevelToHandleShapeMap.clear();
 }
 
 
-void PositionDragger::setOffset(const Affine3& T)
+void PositionDragger::setOffset(const Isometry3& T)
 {
     impl->T_offset = T;
-    impl->hasOffset = (T.matrix() != Affine3::Identity().matrix());
+    impl->hasOffset = (T.matrix() != Isometry3::Identity().matrix());
 }
 
 
-void PositionDragger::setDraggableAxes(int axisBitSet)
+void PositionDragger::setDraggableAxes(int axisBitSet, SgUpdateRef update)
 {
-    impl->setDraggableAxes(axisBitSet);
+    impl->setDraggableAxes(axisBitSet, update);
 }
 
 
-void PositionDragger::Impl::setDraggableAxes(AxisBitSet axisBitSet)
+void PositionDragger::Impl::setDraggableAxes(AxisBitSet axisBitSet, SgUpdateRef update)
 {
     if(axisBitSet != draggableAxisBitSet){
         for(int i=0; i < 6; ++i){
-            axisSwitch[i]->setTurnedOn(axisBitSet[i], true);
+            axisSwitch[i]->setTurnedOn(axisBitSet[i], update);
         }
         draggableAxisBitSet = axisBitSet;
     }
@@ -542,7 +551,17 @@ void PositionDragger::setHandleSize(double s)
         impl->handleSize = s;
         impl->clearHandleVariants();
     }
+    impl->disableScreenFixedSizeMode();
 }
+
+
+void PositionDragger::Impl::disableScreenFixedSizeMode()
+{
+    if(isScreenFixedSizeMode){
+        topSwitch->removeChainedGroup(fixedPixelSizeGroup);
+        isScreenFixedSizeMode = false;
+    }
+}    
 
 
 void PositionDragger::setHandleWidthRatio(double w)
@@ -590,7 +609,11 @@ bool PositionDragger::adjustSize(const BoundingBox& bb)
 
     Vector3 s = bb.size() / 2.0;
     std::sort(s.data(), s.data() + 3);
-    double r = Vector2(s[0], s[1]).norm();
+
+    if(s[2] > 3.0 * s[1]){
+        s[2] = 3.0 * s[1];
+    }
+    double r = Vector2(s[2], s[1]).norm();
     if(!impl->isOverlayMode){
         r *= 1.05;
     }
@@ -609,6 +632,52 @@ bool PositionDragger::adjustSize()
         }
     }
     return adjustSize(bb);
+}
+
+
+void PositionDragger::setPixelSize(int size, int width)
+{
+    double dsize = size;
+    impl->handleSize = 1.0;
+    impl->clearHandleVariants();
+    impl->unitHandleWidth = width / dsize;
+
+    if(impl->fixedPixelSizeGroup){
+        impl->fixedPixelSizeGroup->setPixelSizeRatio(dsize);
+    }
+
+    if(!impl->isScreenFixedSizeMode){
+        if(!impl->fixedPixelSizeGroup){
+            impl->fixedPixelSizeGroup = new SgFixedPixelSizeGroup(dsize);
+        }
+        impl->topSwitch->insertChainedGroup(impl->fixedPixelSizeGroup);
+        impl->isScreenFixedSizeMode = true;
+    } else {
+        impl->fixedPixelSizeGroup->setPixelSizeRatio(dsize);
+    }
+}
+
+
+void PositionDragger::setFixedPixelSizeMode(bool on, double pixelSizeRatio)
+{
+    if(on){
+        double size = impl->handleSize * pixelSizeRatio;
+        setPixelSize(size, size * impl->unitHandleWidth);
+    } else {
+        impl->disableScreenFixedSizeMode();
+    }
+}
+
+
+bool PositionDragger::isScreenFixedSizeMode() const
+{
+    return impl->isScreenFixedSizeMode;
+}
+
+
+bool PositionDragger::isFixedPixelSizeMode() const
+{
+    return impl->isScreenFixedSizeMode;
 }
 
 
@@ -695,31 +764,6 @@ bool PositionDragger::isOverlayMode() const
 }
 
 
-void PositionDragger::setFixedPixelSizeMode(bool on, double pixelSizeRatio)
-{
-    if(impl->fixedPixelSizeGroup){
-        impl->fixedPixelSizeGroup->setPixelSizeRatio(pixelSizeRatio);
-    }
-    if(on != impl->isFixedPixelSizeMode){
-        if(on){
-            if(!impl->fixedPixelSizeGroup){
-                impl->fixedPixelSizeGroup = new SgFixedPixelSizeGroup(pixelSizeRatio);
-            }
-            impl->topSwitch->insertChainedGroup(impl->fixedPixelSizeGroup);
-        } else {
-            impl->topSwitch->removeChainedGroup(impl->fixedPixelSizeGroup);
-        }
-        impl->isFixedPixelSizeMode = on;
-    }
-}
-
-
-bool PositionDragger::isFixedPixelSizeMode() const
-{
-    return impl->isFixedPixelSizeMode;
-}
-    
-
 bool PositionDragger::isContainerMode() const
 {
     return impl->isContainerMode;
@@ -750,24 +794,24 @@ PositionDragger::DisplayMode PositionDragger::displayMode() const
 }
 
 
-void PositionDragger::setDisplayMode(DisplayMode mode)
+void PositionDragger::setDisplayMode(DisplayMode mode, SgUpdateRef update)
 {
     if(mode != impl->displayMode){
         impl->displayMode = mode;
         if(mode == DisplayAlways){
-            impl->showDragMarkers(true);
+            impl->showDragMarkers(true, update);
         } else if(mode == DisplayInEditMode){
             if(impl->isEditMode){
-                impl->showDragMarkers(true);
+                impl->showDragMarkers(true, update);
             }
         } else if(mode == DisplayNever){
-            impl->showDragMarkers(false);
+            impl->showDragMarkers(false, update);
         }
     }
 }
 
 
-void PositionDragger::Impl::showDragMarkers(bool on)
+void PositionDragger::Impl::showDragMarkers(bool on, SgUpdateRef update)
 {
     if(displayMode == DisplayNever){
         on = false;
@@ -775,14 +819,14 @@ void PositionDragger::Impl::showDragMarkers(bool on)
         on = true;
     }
     
-    topSwitch->setTurnedOn(on, true);
+    topSwitch->setTurnedOn(on, update);
 }    
 
 
-void PositionDragger::setDraggerAlwaysShown(bool on)
+void PositionDragger::setDraggerAlwaysShown(bool on, SgUpdateRef update)
 {
     if(on){
-        setDisplayMode(DisplayAlways);
+        setDisplayMode(DisplayAlways, update);
     }
 }
 
@@ -793,10 +837,10 @@ bool PositionDragger::isDraggerAlwaysShown() const
 }
 
 
-void PositionDragger::setDraggerAlwaysHidden(bool on)
+void PositionDragger::setDraggerAlwaysHidden(bool on, SgUpdateRef update)
 {
     if(on){
-        setDisplayMode(DisplayNever);
+        setDisplayMode(DisplayNever, update);
     }
 }
 
@@ -825,32 +869,39 @@ bool PositionDragger::isDragging() const
 }
 
 
-Affine3 PositionDragger::draggingPosition() const
+Isometry3 PositionDragger::draggingPosition() const
 {
-    Affine3 T1;
+    Isometry3 T1;
+    bool doNormalization = false;
     if(impl->dragProjector.isDragging()){
         T1 = impl->T_parent.inverse(Eigen::Isometry) * impl->dragProjector.position();
+        doNormalization = true;
     } else {
         T1 = T();
     }
     if(impl->hasOffset){
-        return T1 * impl->T_offset.inverse(Eigen::Isometry);
+        doNormalization = true;
+        T1 = T1 * impl->T_offset.inverse(Eigen::Isometry);
+    }
+    if(doNormalization){
+        normalizeRotation(T1);
     }
     return T1;
 }
 
 
-Affine3 PositionDragger::globalDraggingPosition() const
+Isometry3 PositionDragger::globalDraggingPosition() const
 {
-    Affine3 T1;
+    Isometry3 T1;
     if(impl->dragProjector.isDragging()){
         T1 = impl->dragProjector.position();
     } else {
         T1 = impl->T_parent * T();
     }
     if(impl->hasOffset){
-        return T1 * impl->T_offset.inverse(Eigen::Isometry);
+        T1 = T1 * impl->T_offset.inverse(Eigen::Isometry);
     }
+    normalizeRotation(T1);
     return T1;
 }
 
@@ -873,11 +924,11 @@ SignalProxy<void()> PositionDragger::sigDragFinished()
 }
 
 
-AxisBitSet PositionDragger::Impl::detectTargetAxes(const SceneWidgetEvent& event)
+AxisBitSet PositionDragger::Impl::detectTargetAxes(SceneWidgetEvent* event)
 {
     AxisBitSet axisBitSet(0);
 
-    auto& path = event.nodePath();
+    auto& path = event->nodePath();
     for(size_t i=0; i < path.size(); ++i){
         if(path[i] == self){
             for(size_t j=i+1; j < path.size(); ++j){
@@ -896,11 +947,18 @@ AxisBitSet PositionDragger::Impl::detectTargetAxes(const SceneWidgetEvent& event
     }
 
     if((axisBitSet & AxisBitSet(TRANSLATION_AXES)).any()){
-        const Affine3 T_global = calcTotalTransform(event.nodePath(), self);
-        const Vector3 p_local = T_global.inverse() * event.point();
-        double width = handleSize * unitHandleWidth * calcWidthRatio(event.pixelSizeRatio());
-        if(p_local.norm() < 1.5 * width){
-            axisBitSet |= AxisBitSet(TRANSLATION_AXES);
+        const Isometry3 T_global = calcRelativePosition(event->nodePath(), self);
+        const Vector3 p_local = T_global.inverse() * event->point();
+        if(!isScreenFixedSizeMode){
+            double width = handleSize * unitHandleWidth * calcWidthRatio(event->pixelSizeRatio());
+            if(p_local.norm() < 1.5 * width){
+                axisBitSet |= AxisBitSet(TRANSLATION_AXES);
+            }
+        } else {
+            double pixelWidth = handleSize * unitHandleWidth * fixedPixelSizeGroup->pixelSizeRatio();
+            if(p_local.norm() * event->pixelSizeRatio() < 1.5 * pixelWidth){
+                axisBitSet |= AxisBitSet(TRANSLATION_AXES);
+            }
         }
     }
 
@@ -908,13 +966,13 @@ AxisBitSet PositionDragger::Impl::detectTargetAxes(const SceneWidgetEvent& event
 }
 
 
-bool PositionDragger::onButtonPressEvent(const SceneWidgetEvent& event)
+bool PositionDragger::onButtonPressEvent(SceneWidgetEvent* event)
 {
     return impl->onButtonPressEvent(event);
 }
 
 
-bool PositionDragger::Impl::onButtonPressEvent(const SceneWidgetEvent& event)
+bool PositionDragger::Impl::onButtonPressEvent(SceneWidgetEvent* event)
 {
     bool processed = false;
 
@@ -922,17 +980,18 @@ bool PositionDragger::Impl::onButtonPressEvent(const SceneWidgetEvent& event)
         return processed;
     }
 
-    auto& path = event.nodePath();
+    auto& path = event->nodePath();
     auto iter = std::find(path.begin(), path.end(), self);
     if(iter != path.end()){
-        T_parent = calcTotalTransform(path.begin(), iter);
-        const Affine3 T_global = T_parent * self->T();
+        T_parent = calcRelativePosition(path.begin(), iter);
+        const Isometry3 T_global = T_parent * self->T();
 
         auto axisBitSet = detectTargetAxes(event);
         if(axisBitSet.none()){
             if(self->isContainerMode() && isContentsDragEnabled){
                 if(displayMode == DisplayInFocus){
-                    showDragMarkers(true);
+                    SgTmpUpdate update;
+                    showDragMarkers(true, update);
                 }
                 dragProjector.setInitialPosition(T_global);
                 dragProjector.setTranslationAlongViewPlane();
@@ -950,7 +1009,6 @@ bool PositionDragger::Impl::onButtonPressEvent(const SceneWidgetEvent& event)
     }
 
     if(processed){
-        storeCurrentPositionToHistory();
         sigDragStarted();
     } else {
         dragProjector.resetDragMode();
@@ -961,7 +1019,7 @@ bool PositionDragger::Impl::onButtonPressEvent(const SceneWidgetEvent& event)
 
 
 bool PositionDragger::Impl::onTranslationDraggerPressed
-(const SceneWidgetEvent& event, const Affine3& T_global, AxisBitSet axisBitSet)
+(SceneWidgetEvent* event, const Isometry3& T_global, AxisBitSet axisBitSet)
 {
     bool processed = false;
 
@@ -985,7 +1043,7 @@ bool PositionDragger::Impl::onTranslationDraggerPressed
 
 
 bool PositionDragger::Impl::onRotationDraggerPressed
-(const SceneWidgetEvent& event, const Affine3& T_global, AxisBitSet axisBitSet)
+(SceneWidgetEvent* event, const Isometry3& T_global, AxisBitSet axisBitSet)
 {
     bool processed = false;
 
@@ -1005,7 +1063,7 @@ bool PositionDragger::Impl::onRotationDraggerPressed
 }
 
 
-bool PositionDragger::onButtonReleaseEvent(const SceneWidgetEvent&)
+bool PositionDragger::onButtonReleaseEvent(SceneWidgetEvent*)
 {
     if(impl->dragProjector.isDragging()){
         impl->sigDragFinished();
@@ -1016,7 +1074,7 @@ bool PositionDragger::onButtonReleaseEvent(const SceneWidgetEvent&)
 }
 
 
-bool PositionDragger::onPointerMoveEvent(const SceneWidgetEvent& event)
+bool PositionDragger::onPointerMoveEvent(SceneWidgetEvent* event)
 {
     if(!impl->dragProjector.isDragging()){
         if(impl->isDragEnabled){
@@ -1037,7 +1095,7 @@ bool PositionDragger::onPointerMoveEvent(const SceneWidgetEvent& event)
 }
 
 
-void PositionDragger::onPointerLeaveEvent(const SceneWidgetEvent&)
+void PositionDragger::onPointerLeaveEvent(SceneWidgetEvent*)
 {
     if(impl->dragProjector.isDragging()){
         impl->sigDragFinished();
@@ -1048,74 +1106,47 @@ void PositionDragger::onPointerLeaveEvent(const SceneWidgetEvent&)
 }
 
 
-void PositionDragger::onFocusChanged(const SceneWidgetEvent&, bool on)
+void PositionDragger::onFocusChanged(SceneWidgetEvent* event, bool on)
 {
     if(isContainerMode()){
         if(impl->displayMode == DisplayInFocus){
-            impl->showDragMarkers(on);
+            SgTmpUpdate update;
+            impl->showDragMarkers(on, update);
         }
     }
 }
 
 
-void PositionDragger::onSceneModeChanged(const SceneWidgetEvent& event)
+void PositionDragger::onSceneModeChanged(SceneWidgetEvent* event)
 {
-    if(event.sceneWidget()->isEditMode()){
+    SgTmpUpdate update;
+    if(event->sceneWidget()->isEditMode()){
         impl->isEditMode = true;
         if(impl->displayMode == DisplayInEditMode){
-            impl->showDragMarkers(true);
+            impl->showDragMarkers(true, update);
         }
     } else {
         impl->isEditMode = false;
         if(impl->displayMode == DisplayInEditMode || impl->displayMode == DisplayInFocus){
-            impl->showDragMarkers(false);
+            impl->showDragMarkers(false, update);
         }
     }
 }
 
 
-void PositionDragger::storeCurrentPositionToHistory()
+void PositionDragger::setUndoEnabled(bool /* on */)
 {
-    impl->storeCurrentPositionToHistory();
-}
 
-
-void PositionDragger::Impl::storeCurrentPositionToHistory()
-{
-    if(isUndoEnabled){
-        history.push_back(self->position());
-        if(history.size() > 10){
-            history.pop_front();
-        }
-    }
-}
-
-
-void PositionDragger::setUndoEnabled(bool on)
-{
-    impl->isUndoEnabled = on;
 }
 
 
 bool PositionDragger::isUndoEnabled() const
 {
-    return impl->isUndoEnabled;
+    return false;
 }
 
 
-bool PositionDragger::onUndoRequest()
+void PositionDragger::storeCurrentPositionToHistory()
 {
-    if(!impl->history.empty()){
-        const Affine3& T = impl->history.back();
-        setPosition(T);
-        impl->history.pop_back();
-        notifyUpdate();
-    }
-    return true;
-}
 
-
-bool PositionDragger::onRedoRequest()
-{
-    return true;
 }

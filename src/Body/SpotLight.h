@@ -17,7 +17,7 @@ public:
     SpotLight();
     SpotLight(const SpotLight& org, bool copyStateOnly = false);
 
-    virtual const char* typeName() override;
+    virtual const char* typeName() const override;
     void copyStateFrom(const SpotLight& other);
     virtual void copyStateFrom(const DeviceState& other) override;
     virtual DeviceState* cloneState() const override;
@@ -37,6 +37,9 @@ public:
 
     float cutOffExponent() const { return cutOffExponent_; }
     void setCutOffExponent(float e) { cutOffExponent_ = e; }
+
+    bool readSpecifications(const Mapping* info);
+    bool writeSpecifications(Mapping* info) const;
 
 protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;

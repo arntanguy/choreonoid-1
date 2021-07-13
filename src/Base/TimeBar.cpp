@@ -5,8 +5,6 @@
 #include "TimeBar.h"
 #include "ExtensionManager.h"
 #include "Archive.h"
-#include "MessageView.h"
-#include "MainWindow.h"
 #include "OptionManager.h"
 #include "LazyCaller.h"
 #include "SpinBox.h"
@@ -15,10 +13,10 @@
 #include "CheckBox.h"
 #include "Dialog.h"
 #include <QDialogButtonBox>
+#include <QElapsedTimer>
 #include <cmath>
 #include <limits>
 #include <iostream>
-#include <QElapsedTimer>
 #include "gettext.h"
 
 using namespace std;
@@ -40,7 +38,7 @@ public:
     SpinBox playbackFrameRateSpin;
     CheckBox idleLoopDrivenCheck;
     DoubleSpinBox playbackSpeedScaleSpin;
-    CheckBox fillLevelSyncCheck;
+    CheckBox ongoingTimeSyncCheck;
     CheckBox autoExpandCheck;
     QCheckBox beatModeCheck;
     DoubleSpinBox tempoSpin;
@@ -89,9 +87,9 @@ public:
         vbox->addLayout(hbox);
 
         hbox = new QHBoxLayout();
-        fillLevelSyncCheck.setText(_("Sync with ongoing updates"));
-        fillLevelSyncCheck.setChecked(true);
-        hbox->addWidget(&fillLevelSyncCheck);
+        ongoingTimeSyncCheck.setText(_("Sync with ongoing updates"));
+        ongoingTimeSyncCheck.setChecked(true);
+        hbox->addWidget(&ongoingTimeSyncCheck);
         hbox->addStretch();
         vbox->addLayout(hbox);
 
@@ -147,7 +145,7 @@ public:
         QDialogButtonBox* buttonBox = new QDialogButtonBox(this);
         buttonBox->addButton(okButton, QDialogButtonBox::AcceptRole);
         connect(buttonBox,SIGNAL(accepted()), this, SLOT(accept()));
-        vbox->addWidget(okButton);
+        vbox->addWidget(buttonBox);
     }
 };
 
@@ -155,13 +153,14 @@ public:
 
 namespace cnoid {
 
-class TimeBarImpl : public QObject
+class TimeBar::Impl : public QObject
 {
 public:
-    TimeBarImpl(TimeBar* self);
-    ~TimeBarImpl();
+    Impl(TimeBar* self);
+    ~Impl();
 
-    bool setTime(double time, bool calledFromPlaybackLoop, QWidget* callerWidget = 0);
+    double quantizedTime(double time) const;
+    bool setTime(double time, bool calledFromPlaybackLoop, QWidget* callerWidget = nullptr);
     void onTimeSpinChanged(double value);
     bool onTimeSliderValueChanged(int value);
 
@@ -173,11 +172,12 @@ public:
     void onPlayActivated();
     void onResumeActivated();
     void startPlayback();
+    void startPlayback(double time);
     void stopPlayback(bool isStoppedManually);
-    int startFillLevelUpdate();
-    void updateFillLevel(int id, double time);
-    void updateMinFillLevel();
-    void stopFillLevelUpdate(int id);
+    int startOngoingTimeUpdate(double time);
+    void updateOngoingTime(int id, double time);
+    void updateMinOngoingTime();
+    void stopOngoingTimeUpdate(int id);
 
     void onTimeRangeSpinsChanged();
     void onFrameRateSpinChanged(int value);
@@ -190,7 +190,6 @@ public:
     bool restoreState(const Archive& archive);
 
     TimeBar* self;
-    ostream& os;
     ConfigDialog config;
 
     ToolButton* stopResumeButton;
@@ -212,9 +211,9 @@ public:
     QElapsedTimer elapsedTimer;
     bool repeatMode;
     bool isDoingPlayback;
-    map<int, double> fillLevelMap;
-    double fillLevel;
-    bool isFillLevelActive;
+    map<int, double> ongoingTimeMap;
+    double ongoingTime;
+    bool hasOngoingTime;
 
     Signal<bool(double time), LogicalProduct> sigPlaybackInitialized;
     Signal<void(double time)> sigPlaybackStarted;
@@ -257,13 +256,12 @@ TimeBar* TimeBar::instance()
 TimeBar::TimeBar()
     : ToolBar(N_("TimeBar"))
 {
-    impl = new TimeBarImpl(this);
+    impl = new Impl(this);
 }
 
 
-TimeBarImpl::TimeBarImpl(TimeBar* self)
+TimeBar::Impl::Impl(TimeBar* self)
     : self(self),
-      os(MessageView::mainInstance()->cout()),
       resumeIcon(QIcon(":/Base/icon/resume.svg")),
       stopIcon(QIcon(":/Base/icon/stop.svg"))
 {
@@ -278,8 +276,8 @@ TimeBarImpl::TimeBarImpl(TimeBar* self)
     repeatMode = false;
     timerId = 0;
     isDoingPlayback = false;
-    fillLevel = 0;
-    isFillLevelActive = false;
+    ongoingTime = 0.0;
+    hasOngoingTime = false;
 
     self->addButton(QIcon(":/Base/icon/play.svg"), _("Start animation"))
         ->sigClicked().connect([&](){ onPlayActivated(); });
@@ -335,7 +333,7 @@ TimeBar::~TimeBar()
 }
 
 
-TimeBarImpl::~TimeBarImpl()
+TimeBar::Impl::~Impl()
 {
 
 }
@@ -372,83 +370,10 @@ SignalProxy<void(double time, bool isStoppedManually)> TimeBar::sigPlaybackStopp
 }
 
 
-bool TimeBar::setTime(double time)
-{
-    return impl->setTime(time, false);
-}
-
-
-/**
-   @todo check whether block() and unblock() of sigc::connection
-   decrease the performance or not.
-*/
-bool TimeBarImpl::setTime(double time, bool calledFromPlaybackLoop, QWidget* callerWidget)
+void TimeBar::Impl::onTimeSpinChanged(double value)
 {
     if(TRACE_FUNCTIONS){
-        cout << "TimeBarImpl::setTime(" << time << ", " << calledFromPlaybackLoop << ")" << endl;
-    }
-    
-    if(!calledFromPlaybackLoop && isDoingPlayback){
-        return false;
-    }
-
-    /*
-    double newTime; 
-    if(isFillLevelActive && calledFromPlaybackLoop){
-        newTime = floor(time * self->frameRate_) / self->frameRate_;
-    } else {
-        newTime = nearbyint(time * self->frameRate_) / self->frameRate_;
-    }
-    */
-    const double newTime = floor(time * self->frameRate_) / self->frameRate_;
-
-    // When the optimization is enabled,
-    // the result of (newTime == self->time_) sometimes becomes false,
-    // so here the following judgement is used.
-    if(fabs(newTime - self->time_) < 1.0e-14){
-        if(calledFromPlaybackLoop){
-            return true;
-        }
-        if(callerWidget){
-            return false;
-        }
-    }
-
-    if(newTime > maxTime && config.autoExpandCheck.isChecked()){
-        maxTime = newTime;
-        timeSpin->blockSignals(true);
-        timeSlider->blockSignals(true);
-        maxTimeSpin->blockSignals(true);
-        timeSpin->setRange(minTime, maxTime);
-        const double r = pow(10.0, decimals);
-        timeSlider->setRange((int)nearbyint(minTime * r), (int)nearbyint(maxTime * r));
-        maxTimeSpin->setValue(maxTime);
-        maxTimeSpin->blockSignals(false);
-        timeSlider->blockSignals(false);
-        timeSpin->blockSignals(false);
-    }
-        
-    self->time_ = newTime;
-
-    if(callerWidget != timeSpin){
-        timeSpin->blockSignals(true);
-        timeSpin->setValue(self->time_);
-        timeSpin->blockSignals(false);
-    }
-    if(callerWidget != timeSlider){
-        timeSlider->blockSignals(true);
-        timeSlider->setValue((int)nearbyint(self->time_ * pow(10.0, decimals)));
-        timeSlider->blockSignals(false);
-    }
-
-    return sigTimeChanged(self->time_);
-}
-
-
-void TimeBarImpl::onTimeSpinChanged(double value)
-{
-    if(TRACE_FUNCTIONS){
-        cout << "TimeBarImpl::onTimeSpinChanged()" << endl;
+        cout << "TimeBar::Impl::onTimeSpinChanged()" << endl;
     }
     if(isDoingPlayback){
         stopPlayback(true);
@@ -457,10 +382,10 @@ void TimeBarImpl::onTimeSpinChanged(double value)
 }
 
 
-bool TimeBarImpl::onTimeSliderValueChanged(int value)
+bool TimeBar::Impl::onTimeSliderValueChanged(int value)
 {
     if(TRACE_FUNCTIONS){
-        cout << "TimeBarImpl::onTimeSliderChanged(): value = " << value << endl;
+        cout << "TimeBar::Impl::onTimeSliderChanged(): value = " << value << endl;
     }
     if(isDoingPlayback){
         stopPlayback(true);
@@ -476,7 +401,7 @@ void TimeBar::setFrameRate(double rate)
 }
 
 
-void TimeBarImpl::setFrameRate(double rate)
+void TimeBar::Impl::setFrameRate(double rate)
 {
     if(rate > 0.0){
         if(self->frameRate_ != rate){
@@ -505,7 +430,7 @@ void TimeBar::setTimeRange(double min, double max)
 }
 
 
-void TimeBarImpl::setTimeRange(double minTime, double maxTime)
+void TimeBar::Impl::setTimeRange(double minTime, double maxTime)
 {
     this->minTime = minTime;
     this->maxTime = maxTime;
@@ -513,7 +438,7 @@ void TimeBarImpl::setTimeRange(double minTime, double maxTime)
 }
 
 
-void TimeBarImpl::updateTimeProperties(bool forceUpdate)
+void TimeBar::Impl::updateTimeProperties(bool forceUpdate)
 {
     timeSpin->blockSignals(true);
     timeSlider->blockSignals(true);
@@ -548,7 +473,7 @@ void TimeBarImpl::updateTimeProperties(bool forceUpdate)
 }
 
     
-void TimeBarImpl::onPlaybackSpeedScaleChanged(double value)
+void TimeBar::Impl::onPlaybackSpeedScaleChanged(double value)
 {
     playbackSpeedScale = value;
     
@@ -570,7 +495,7 @@ void TimeBar::setPlaybackSpeedScale(double scale)
 }
 
 
-void TimeBarImpl::onPlaybackFrameRateChanged(int value)
+void TimeBar::Impl::onPlaybackFrameRateChanged(int value)
 {
     playbackFrameRate = value;
 
@@ -598,15 +523,14 @@ void TimeBar::setRepeatMode(bool on)
 }
 
 
-void TimeBarImpl::onPlayActivated()
+void TimeBar::Impl::onPlayActivated()
 {
     stopPlayback(true);
-    setTime(minTime, false);
-    startPlayback();
+    startPlayback(minTime);
 }
 
 
-void TimeBarImpl::onResumeActivated()
+void TimeBar::Impl::onResumeActivated()
 {
     if(isDoingPlayback){
         stopPlayback(true);
@@ -619,21 +543,39 @@ void TimeBarImpl::onResumeActivated()
 
 void TimeBar::startPlayback()
 {
-    impl->startPlayback();
+    impl->startPlayback(time_);
 }
 
 
-void TimeBarImpl::startPlayback()
+void TimeBar::startPlayback(double time)
+{
+    impl->startPlayback(time);
+}
+
+
+void TimeBar::Impl::startPlayback()
+{
+    startPlayback(self->time_);
+}
+
+
+void TimeBar::Impl::startPlayback(double time)
 {
     stopPlayback(false);
-    
+
+    bool isOngoingTimeValid = hasOngoingTime && config.ongoingTimeSyncCheck.isChecked();
+    if(isOngoingTimeValid){
+        time = ongoingTime;
+    }
+
+    self->time_ = quantizedTime(time);
     animationTimeOffset = self->time_;
 
     if(sigPlaybackInitialized(self->time_)){
 
         sigPlaybackStarted(self->time_);
-
-        if(!setTime(self->time_, true)){
+        
+        if(!setTime(self->time_, false) && !isOngoingTimeValid){
             sigPlaybackStopped(self->time_, false);
 
         } else {
@@ -661,7 +603,7 @@ void TimeBar::stopPlayback(bool isStoppedManually)
 }
 
 
-void TimeBarImpl::stopPlayback(bool isStoppedManually)
+void TimeBar::Impl::stopPlayback(bool isStoppedManually)
 {
     if(isDoingPlayback){
         killTimer(timerId);
@@ -672,8 +614,8 @@ void TimeBarImpl::stopPlayback(bool isStoppedManually)
         stopResumeButton->setIcon(resumeIcon);
         stopResumeButton->setToolTip(tip);
 
-        if(fillLevelMap.empty()){
-            isFillLevelActive = false;
+        if(ongoingTimeMap.empty()){
+            hasOngoingTime = false;
         }
     }
 }
@@ -685,85 +627,168 @@ bool TimeBar::isDoingPlayback()
 }
 
 
-int TimeBar::startFillLevelUpdate()
+void TimeBar::Impl::timerEvent(QTimerEvent*)
 {
-    return impl->startFillLevelUpdate();    
+    double time = animationTimeOffset + playbackSpeedScale * (elapsedTimer.elapsed() / 1000.0);
+
+    bool doStopAtLastOngoingTime = false;
+    if(hasOngoingTime){
+        if(config.ongoingTimeSyncCheck.isChecked() || (time > ongoingTime)){
+            animationTimeOffset += (ongoingTime - time);
+            time = ongoingTime;
+            if(ongoingTimeMap.empty()){
+                doStopAtLastOngoingTime = true;
+            }
+        }
+    }
+
+    if(!setTime(time, true) || doStopAtLastOngoingTime){
+        stopPlayback(false);
+        
+        if(!doStopAtLastOngoingTime && repeatMode){
+            startPlayback(minTime);
+        }
+    }
 }
 
 
-int TimeBarImpl::startFillLevelUpdate()
+double TimeBar::Impl::quantizedTime(double time) const
 {
-    int id=0;
-    if(fillLevelMap.empty()){
-        isFillLevelActive = true;
+    return floor(time * self->frameRate_) / self->frameRate_;
+}
+
+
+bool TimeBar::setTime(double time)
+{
+    return impl->setTime(time, false);
+}
+
+
+/**
+   @todo check whether block() and unblock() of sigc::connection
+   decrease the performance or not.
+*/
+bool TimeBar::Impl::setTime(double time, bool calledFromPlaybackLoop, QWidget* callerWidget)
+{
+    if(TRACE_FUNCTIONS){
+        cout << "TimeBar::Impl::setTime(" << time << ", " << calledFromPlaybackLoop << ")" << endl;
+    }
+    
+    if(!calledFromPlaybackLoop && isDoingPlayback){
+        return false;
+    }
+
+    const double newTime = quantizedTime(time);
+
+    // Avoid redundant update
+    if(calledFromPlaybackLoop || callerWidget){
+        // When the optimization is enabled,
+        // the result of (newTime == self->time_) sometimes becomes false,
+        // so here the following judgement is used.
+        if(fabs(newTime - self->time_) < 1.0e-14){
+            return calledFromPlaybackLoop;
+        }
+    }
+
+    if(newTime > maxTime && config.autoExpandCheck.isChecked()){
+        maxTime = newTime;
+        timeSpin->blockSignals(true);
+        timeSlider->blockSignals(true);
+        maxTimeSpin->blockSignals(true);
+        timeSpin->setRange(minTime, maxTime);
+        const double r = pow(10.0, decimals);
+        timeSlider->setRange((int)nearbyint(minTime * r), (int)nearbyint(maxTime * r));
+        maxTimeSpin->setValue(maxTime);
+        maxTimeSpin->blockSignals(false);
+        timeSlider->blockSignals(false);
+        timeSpin->blockSignals(false);
+    }
+        
+    self->time_ = newTime;
+
+    if(callerWidget != timeSpin){
+        timeSpin->blockSignals(true);
+        timeSpin->setValue(self->time_);
+        timeSpin->blockSignals(false);
+    }
+    if(callerWidget != timeSlider){
+        timeSlider->blockSignals(true);
+        timeSlider->setValue((int)nearbyint(self->time_ * pow(10.0, decimals)));
+        timeSlider->blockSignals(false);
+    }
+
+    return sigTimeChanged(self->time_);
+}
+
+
+int TimeBar::startOngoingTimeUpdate(double time)
+{
+    return impl->startOngoingTimeUpdate(time);
+}
+
+
+int TimeBar::Impl::startOngoingTimeUpdate(double time)
+{
+    int id = 0;
+    if(ongoingTimeMap.empty()){
+        hasOngoingTime = true;
     } else {
-        while(fillLevelMap.find(id) == fillLevelMap.end()){
+        while(ongoingTimeMap.find(id) == ongoingTimeMap.end()){
             ++id;
         }
     }
-    updateFillLevel(id, 0.0);
+    updateOngoingTime(id, time);
+
     return id;
 }
 
 
-
-void TimeBar::updateFillLevel(int id, double time)
+void TimeBar::updateOngoingTime(int id, double time)
 {
-    impl->updateFillLevel(id, time);
+    impl->updateOngoingTime(id, time);
 }
 
 
-void TimeBarImpl::updateFillLevel(int id, double time)
+void TimeBar::Impl::updateOngoingTime(int id, double time)
 {
-    fillLevelMap[id] = time;
-    updateMinFillLevel();
+    ongoingTimeMap[id] = time;
+    updateMinOngoingTime();
 }
 
 
-void TimeBarImpl::updateMinFillLevel()
+void TimeBar::Impl::updateMinOngoingTime()
 {
-    double minFillLevel = std::numeric_limits<double>::max();
-    map<int,double>::iterator p;
-    for(p = fillLevelMap.begin(); p != fillLevelMap.end(); ++p){
-        minFillLevel = std::min(p->second, minFillLevel);
+    double minOngoingTime = std::numeric_limits<double>::max();
+    for(auto& kv : ongoingTimeMap){
+        minOngoingTime = std::min(kv.second, minOngoingTime);
     }
-    fillLevel = minFillLevel;
+    ongoingTime = minOngoingTime;
 }    
 
 
-void TimeBar::stopFillLevelUpdate(int id)
+void TimeBar::stopOngoingTimeUpdate(int id)
 {
-    impl->stopFillLevelUpdate(id);
+    impl->stopOngoingTimeUpdate(id);
 }
 
 
-void TimeBarImpl::stopFillLevelUpdate(int id)
+void TimeBar::Impl::stopOngoingTimeUpdate(int id)
 {
-    fillLevelMap.erase(id);
+    ongoingTimeMap.erase(id);
 
-    if(!fillLevelMap.empty()){
-        updateMinFillLevel();
+    if(!ongoingTimeMap.empty()){
+        updateMinOngoingTime();
     } else {
         if(!isDoingPlayback){
-            isFillLevelActive = false;
+            hasOngoingTime = false;
         }
     }
 }
 
 
-void TimeBar::setFillLevelSync(bool on)
+void TimeBar::setOngoingTimeSyncEnabled(bool on)
 {
-    impl->config.fillLevelSyncCheck.setChecked(on);
-}
-
-
-void TimeBar::startPlaybackFromFillLevel()
-{
-    if(isDoingPlayback()){
-        stopPlayback();
-    }
-    setTime(impl->fillLevel);
-    startPlayback();
+    impl->config.ongoingTimeSyncCheck.setChecked(on);
 }
 
 
@@ -777,48 +802,22 @@ double TimeBar::realPlaybackTime() const
 }
 
 
-void TimeBarImpl::timerEvent(QTimerEvent*)
-{
-    double time = animationTimeOffset + playbackSpeedScale * (elapsedTimer.elapsed() / 1000.0);
-
-    bool doStopAtLastFillLevel = false;
-    if(isFillLevelActive){
-        if(config.fillLevelSyncCheck.isChecked() || (time > fillLevel)){
-            animationTimeOffset += (fillLevel - time);
-            time = fillLevel;
-            if(fillLevelMap.empty()){
-                doStopAtLastFillLevel = true;
-            }
-        }
-    }
-
-    if(!setTime(time, true) || doStopAtLastFillLevel){
-        stopPlayback(false);
-        
-        if(!doStopAtLastFillLevel && repeatMode){
-            setTime(minTime, true);
-            startPlayback();
-        }
-    }
-}
-
-
-void TimeBarImpl::onTimeRangeSpinsChanged()
+void TimeBar::Impl::onTimeRangeSpinsChanged()
 {
     setTimeRange(minTimeSpin->value(), maxTimeSpin->value());
 }
 
 
-void TimeBarImpl::onFrameRateSpinChanged(int value)
+void TimeBar::Impl::onFrameRateSpinChanged(int value)
 {
     setFrameRate(config.frameRateSpin.value());
 }
 
 
-void TimeBarImpl::onRefreshButtonClicked()
+void TimeBar::Impl::onRefreshButtonClicked()
 {
     if(!isDoingPlayback){
-        sigTimeChanged(self->time_);
+        setTime(self->time_, false);
     }
 }
 
@@ -835,7 +834,7 @@ bool TimeBar::storeState(Archive& archive)
 }
 
 
-bool TimeBarImpl::storeState(Archive& archive)
+bool TimeBar::Impl::storeState(Archive& archive)
 {
     archive.write("minTime", minTime);
     archive.write("maxTime", maxTime);
@@ -844,7 +843,7 @@ bool TimeBarImpl::storeState(Archive& archive)
     archive.write("idleLoopDrivenMode", config.idleLoopDrivenCheck.isChecked());
     archive.write("currentTime", self->time_);
     archive.write("speedScale", playbackSpeedScale);
-    archive.write("syncToOngoingUpdates", config.fillLevelSyncCheck.isChecked());
+    archive.write("syncToOngoingUpdates", config.ongoingTimeSyncCheck.isChecked());
     archive.write("autoExpansion", config.autoExpandCheck.isChecked());
     return true;
 }
@@ -856,7 +855,7 @@ bool TimeBar::restoreState(const Archive& archive)
 }
 
 
-bool TimeBarImpl::restoreState(const Archive& archive)
+bool TimeBar::Impl::restoreState(const Archive& archive)
 {
     archive.read("minTime", minTime);
     archive.read("maxTime", maxTime);
@@ -865,7 +864,7 @@ bool TimeBarImpl::restoreState(const Archive& archive)
     config.playbackFrameRateSpin.setValue(archive.get("playbackFrameRate", playbackFrameRate));
     config.idleLoopDrivenCheck.setChecked(archive.get("idleLoopDrivenMode", config.idleLoopDrivenCheck.isChecked()));
     config.playbackSpeedScaleSpin.setValue(archive.get("speedScale", playbackSpeedScale));
-    config.fillLevelSyncCheck.setChecked(archive.get("syncToOngoingUpdates", config.fillLevelSyncCheck.isChecked()));
+    config.ongoingTimeSyncCheck.setChecked(archive.get("syncToOngoingUpdates", config.ongoingTimeSyncCheck.isChecked()));
     config.autoExpandCheck.setChecked(archive.get("autoExpansion", config.autoExpandCheck.isChecked()));
 
     double prevFrameRate = self->frameRate_;

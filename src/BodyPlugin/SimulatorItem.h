@@ -45,6 +45,10 @@ public:
 
     virtual bool initialize(SimulatorItem* simulatorItem, BodyItem* bodyItem);
 
+    const std::string& recordItemPrefix() const;
+    virtual void initializeRecordBuffers();
+    virtual void initializeRecordItems();
+
     /**
        Called from the simulation loop thread
     */
@@ -56,17 +60,12 @@ public:
        is not recoreded is changed
     */
     void notifyUnrecordedDeviceStateChange(Device* device);
-
-    const std::string& resultItemPrefix() const;
     
-    virtual void initializeResultBuffers();
-    virtual void initializeResultItems();
-
     /**
        Called from the simulation loop thread.
     */
-    virtual void bufferResults();
-    virtual void flushResults();
+    virtual void bufferRecords();
+    virtual void flushRecords();
 
     class Impl;
 
@@ -86,17 +85,16 @@ public:
 
     static SimulatorItem* findActiveSimulatorItemFor(Item* item);
 
-    SimulatorItem();
     virtual ~SimulatorItem();
 
     WorldItem* worldItem();
     virtual double worldTimeStep();
     void setTimeStep(double step);
 
-    virtual bool startSimulation(bool doReset = true);
-    virtual void stopSimulation();
-    virtual void pauseSimulation();
-    virtual void restartSimulation();
+    bool startSimulation(bool doReset = true);
+    void stopSimulation(bool isForced = false);
+    void pauseSimulation();
+    void restartSimulation();
     bool isRunning() const;
     bool isPausing() const;
     bool isActive() const; ///< isRunning() && !isPausing()
@@ -116,27 +114,62 @@ public:
     SignalProxy<void()> sigSimulationStarted();
     SignalProxy<void()> sigSimulationPaused();
     SignalProxy<void()> sigSimulationResumed();
-    SignalProxy<void()> sigSimulationFinished();
+    SignalProxy<void(bool isForced)> sigSimulationFinished();
 
-    enum RecordingMode { REC_FULL, REC_TAIL, REC_NONE, N_RECORDING_MODES };
-    enum TimeRangeMode { TR_UNLIMITED, TR_ACTIVE_CONTROL, TR_SPECIFIED, TR_TIMEBAR, N_TIME_RANGE_MODES };
+    enum RecordingMode {
+        FullRecording,
+        TailRecording,
+        NoRecording,
+        NumRecordingModes,
+
+        // Deprecated
+        REC_FULL = FullRecording,
+        REC_TAIL = TailRecording,
+        REC_NONE = NoRecording,
+        N_RECORDING_MODES = NumRecordingModes
+    };
     
     void setRecordingMode(int selection);
     int recordingMode() const;
+
+    enum TimeRangeMode {
+        UnlimitedTime,
+        SpecifiedTime,
+        TimeBarTime,
+        NumTimeRangeModes,
+
+        // Deprecated. Use setActiveControlTimeRangeMode.
+        ActiveControlTime, 
+
+        // Deprecated
+        TR_UNLIMITED = UnlimitedTime,
+        TR_ACTIVE_CONTROL = ActiveControlTime,
+        TR_SPECIFIED = SpecifiedTime,
+        TR_TIMEBAR = TimeBarTime,
+        N_TIME_RANGE_MODES = NumTimeRangeModes
+    };
+    
     void setTimeRangeMode(int selection);
+
+    void setTimeLength(double length);
+
+    [[deprecated("Use setTimeLength")]]
+    void setSpecifiedRecordingTimeLength(double length){
+        setTimeLength(length);
+    }
+
+    void setActiveControlTimeRangeMode(bool on);
+    bool isActiveControlTimeRangeMode() const;
+
     void setRealtimeSyncMode(bool on);
+    
     void setDeviceStateOutputEnabled(bool on);
 
     bool isRecordingEnabled() const;
     bool isDeviceStateOutputEnabled() const;
 
-    void setSpecifiedRecordingTimeLength(double length);
-
     bool isAllLinkPositionOutputMode();
     virtual void setAllLinkPositionOutputMode(bool on);
-
-    void setSelfCollisionEnabled(bool on);
-    bool isSelfCollisionEnabled() const ;
 
     const std::string& controllerOptionString() const;
     
@@ -183,22 +216,23 @@ public:
     
     /**
        @param attachmentPoint link local position
-       @param goal global goal position
     */
     virtual void setVirtualElasticString(
         BodyItem* bodyItem, Link* link, const Vector3& attachmentPoint, const Vector3& endPoint);
     virtual void clearVirtualElasticStrings();
 
-    virtual void setForcedPosition(BodyItem* bodyItem, const Position& T);
+    virtual void setForcedPosition(BodyItem* bodyItem, const Isometry3& T);
     virtual bool isForcedPositionActiveFor(BodyItem* bodyItem) const;
     virtual void clearForcedPositions();
 
     class Impl;
 
 protected:
+    SimulatorItem();
+    SimulatorItem(const std::string& name);
     SimulatorItem(const SimulatorItem& org);
 
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
     virtual void onDisconnectedFromRoot() override;
 
     virtual void clearSimulation();
@@ -223,6 +257,13 @@ protected:
        @note This function is called from the main thread.
     */
     virtual bool initializeSimulation(const std::vector<SimulationBody*>& simBodies) = 0;
+
+    /**
+       This function is called after all the initializetion processes including those of
+       controllers and sub simulators to complete the initialization of simulation.
+       @note This function is called from the main thread.
+    */
+    virtual bool completeInitializationOfSimulation();
 
     virtual void initializeSimulationThread();
 

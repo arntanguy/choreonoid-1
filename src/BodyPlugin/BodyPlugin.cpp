@@ -2,15 +2,19 @@
   @author Shin'ichiro Nakaoka
 */
 
+#include "BodySelectionManager.h"
 #include "WorldItem.h"
 #include "BodyItem.h"
 #include "LinkOffsetFrameListItem.h"
+#include "MaterialTableItem.h"
 #include "SimulatorItem.h"
 #include "AISTSimulatorItem.h"
 #include "KinematicSimulatorItem.h"
 #include "ControllerItem.h"
 #include "SimpleControllerItem.h"
 #include "BodyMotionControllerItem.h"
+#include "ControllerLogItem.h"
+#include "BodyContactPointLoggerItem.h"
 #include "SubSimulatorItem.h"
 #include "GLVisionSimulatorItem.h"
 #include "SimulationScriptItem.h"
@@ -27,7 +31,6 @@
 #include "BodyElementOverwriteItem.h"
 #include "LinkShapeOverwriteItem.h"
 #include "DeviceOverwriteItem.h"
-#include "BodySelectionManager.h"
 #include "KinematicFaultChecker.h"
 #include "SplineFilterDialog.h"
 #include "LinkDeviceListView.h"
@@ -55,7 +58,6 @@
 #include <cnoid/UTF8>
 #include <cnoid/Plugin>
 #include <cnoid/ItemManager>
-#include <cnoid/MessageView>
 #include <cnoid/CnoidBody>
 #include <fmt/format.h>
 #include "gettext.h"
@@ -73,7 +75,7 @@ public:
         setActivationPriority(0);
     }
 
-    virtual bool initialize()
+    virtual bool initialize() override
     {
 
 #ifdef CNOID_ENABLE_GETTEXT
@@ -88,12 +90,15 @@ public:
         WorldItem::initializeClass(this);
         BodyItem::initializeClass(this);
         LinkOffsetFrameListItem::initializeClass(this);
+        MaterialTableItem::initializeClass(this);
         SimulatorItem::initializeClass(this);
         AISTSimulatorItem::initializeClass(this);
         KinematicSimulatorItem::initializeClass(this);
         ControllerItem::initializeClass(this);
         SimpleControllerItem::initializeClass(this);
         BodyMotionControllerItem::initializeClass(this);
+        ControllerLogItem::initializeClass(this);
+        BodyContactPointLoggerItem::initializeClass(this);
         SubSimulatorItem::initializeClass(this);
         GLVisionSimulatorItem::initializeClass(this);
         SimulationScriptItem::initializeClass(this);
@@ -108,9 +113,10 @@ public:
         BodyElementOverwriteItem::initializeClass(this);
         LinkShapeOverwriteItem::initializeClass(this);
         DeviceOverwriteItem::initializeClass(this);
+        CollisionSeqItem::initislizeClass(this);
 
         BodyMotionEngine::initializeClass(this);
-        CollisionSeqEngine::initializeClass(this);
+        CollisionSeqEngine::initializeClass();
         KinematicFaultChecker::initializeClass(this);
         initializeSplineFilterDialog(this);
 
@@ -137,11 +143,9 @@ public:
         LinkGraphView::initializeClass(this);
         BodyLinkView::initializeClass(this);
 
-        CollisionSeqItem::initislizeClass(this);
-
         initializeHrpsysFileIO(this);
 
-        loadDefaultBodyCustomizers(mvout());
+        loadDefaultBodyCustomizers(mvout(false));
 
         return true;
     }

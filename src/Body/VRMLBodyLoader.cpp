@@ -285,7 +285,7 @@ VRMLBodyLoaderImpl::VRMLBodyLoaderImpl()
 {
     divisionNumber = sgConverter.divisionNumber();
     isVerbose = false;
-    body = 0;
+    body = nullptr;
     os_ = &nullout();
     
     if(protoInfoMap.empty()){
@@ -390,7 +390,7 @@ bool VRMLBodyLoaderImpl::load(Body* body, const std::string& filename)
     bool result = false;
 
     this->body = body;
-    rootJointNode = 0;
+    rootJointNode.reset();
     extraJointNodes.clear();
     validJointIdSet.clear();
     numValidJointIds = 0;
@@ -768,24 +768,21 @@ Link* VRMLBodyLoaderImpl::createLink(VRMLProtoInstance* jointNode)
     readVRMLfield(jf["jointType"], jointType);
     
     if(jointType == "fixed" ){
-        link->setJointType(Link::FIXED_JOINT);
+        link->setJointType(Link::FixedJoint);
     } else if(jointType == "free" ){
-        link->setJointType(Link::FREE_JOINT);
+        link->setJointType(Link::FreeJoint);
     } else if(jointType == "rotate" ){
-        link->setJointType(Link::ROTATIONAL_JOINT);
+        link->setJointType(Link::RevoluteJoint);
     } else if(jointType == "slide" ){
-        link->setJointType(Link::SLIDE_JOINT);
+        link->setJointType(Link::PrismaticJoint);
     } else if(jointType == "pseudoContinuousTrack"){
-        link->setJointType(Link::PSEUDO_CONTINUOUS_TRACK);
-        link->setActuationMode(Link::JOINT_SURFACE_VELOCITY);
-        os() << format(
-            _("Warning: A deprecated joint type 'pseudoContinousTrack'is specified for {}."), link->name())
-             << endl;
+        link->setJointType(Link::PseudoContinuousTrackJoint);
+        link->setActuationMode(Link::JointVelocity);
     } else {
         throw invalid_argument(format(_("JointType \"{}\" is not supported."), jointType));
     }
 
-    if(link->jointType() == Link::FREE_JOINT || link->jointType() == Link::FIXED_JOINT){
+    if(link->isFreeJoint() || link->isFixedJoint()){
         link->setJointAxis(Vector3::Zero());
 
     } else {
@@ -959,7 +956,12 @@ void VRMLBodyLoaderImpl::readSegmentNode(LinkInfo& iLink, VRMLProtoInstance* seg
             node->setName(segmentNode->defName);
             iLink.visualShape->addChild(node);
         } else {
-            SgPosTransform* transform = new SgPosTransform(T);
+            SgTransform* transform;
+            if(T.linear().isUnitary(1.0e-6)){
+                transform = new SgPosTransform(Isometry3(T.matrix()));
+            } else {
+                transform = new SgAffineTransform(T);
+            }
             transform->addChild(node);
             transform->setName(segmentNode->defName);
             iLink.visualShape->addChild(transform);
@@ -986,11 +988,15 @@ void VRMLBodyLoaderImpl::readSurfaceNode(LinkInfo& iLink, VRMLProtoInstance* seg
     readJointSubNodes(iLink, collisionNodes, acceptableProtoIds, T);
 
     SgGroup* group;
-    SgPosTransform* transform = 0;
+    SgTransform* transform = nullptr;
     if(T.isApprox(Affine3::Identity())){
         group = iLink.collisionShape;
     } else {
-        transform = new SgPosTransform(T);
+        if(T.linear().isUnitary(1.0e-6)){
+            transform = new SgPosTransform(Isometry3(T.matrix()));
+        } else {
+            transform = new SgAffineTransform(T);
+        }
         group = transform;
     }
     for(size_t i=0; i < collisionNodes.size(); ++i){
@@ -1018,10 +1024,9 @@ void VRMLBodyLoaderImpl::readDeviceNode(LinkInfo& iLink, VRMLProtoInstance* devi
         DeviceFactory& factory = p->second;
         DevicePtr device = factory(deviceNode);
         if(device){
-            device->setLink(iLink.link);
             device->setLocalTranslation(T * device->localTranslation());
             device->setLocalRotation(T.linear() * device->localRotation());
-            body->addDevice(device);
+            body->addDevice(device, iLink.link);
 
             SgNodePtr node = sgConverter.convert(deviceNode);
             if(node){
@@ -1095,7 +1100,7 @@ AccelerationSensorPtr VRMLBodyLoaderImpl::createAccelerationSensor(VRMLProtoInst
 CameraPtr VRMLBodyLoaderImpl::createCamera(VRMLProtoInstance* node)
 {
     CameraPtr camera;
-    RangeCamera* range = 0;
+    RangeCamera* range = nullptr;
     
     const SFString& type = stdx::get<SFString>(node->fields["type"]);
     if(type == "COLOR"){
@@ -1202,12 +1207,11 @@ void VRMLBodyLoaderImpl::setExtraJoints()
         string link1Name, link2Name;
         readVRMLfield(f["link1Name"], link1Name);
         readVRMLfield(f["link2Name"], link2Name);
-        joint.link[0] = body->link(link1Name);
-        joint.link[1] = body->link(link2Name);
-        joint.body[0] = joint.body[1] = body;
+        joint.setLink(0, body->link(link1Name));
+        joint.setLink(1, body->link(link2Name));
 
         for(int j=0; j < 2; ++j){
-            if(!joint.link[j]){
+            if(!joint.link(j)){
                 throw invalid_argument(
                     format(_("Field \"link{}Name\" of a ExtraJoint node does not specify a valid link name"), (j+1)));
             }
@@ -1215,16 +1219,19 @@ void VRMLBodyLoaderImpl::setExtraJoints()
 
         SFString& jointType = stdx::get<SFString>(f["jointType"]);
         if(jointType == "piston"){
-            joint.type = ExtraJoint::EJ_PISTON;
-            joint.axis = stdx::get<SFVec3f>(f["jointAxis"]);
+            joint.setType(ExtraJoint::EJ_PISTON);
+            joint.setAxis(stdx::get<SFVec3f>(f["jointAxis"]));
         } else if(jointType == "ball"){
-            joint.type = ExtraJoint::EJ_BALL;
+            joint.setType(ExtraJoint::EJ_BALL);
         } else {
             throw invalid_argument(format(_("JointType \"{}\" is not supported."), jointType));
         }
-            
-        readVRMLfield(f["link1LocalPos"], joint.point[0]);
-        readVRMLfield(f["link2LocalPos"], joint.point[1]);
+
+        Vector3 p;
+        readVRMLfield(f["link1LocalPos"], p);
+        joint.setPoint(0, p);
+        readVRMLfield(f["link2LocalPos"], p);
+        joint.setPoint(1, p);
 
         body->addExtraJoint(joint);
     }

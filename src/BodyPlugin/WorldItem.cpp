@@ -4,6 +4,7 @@
 */
 
 #include "WorldItem.h"
+#include "MaterialTableItem.h"
 #include "KinematicsBar.h"
 #include <cnoid/ItemManager>
 #include <cnoid/RootItem>
@@ -62,15 +63,14 @@ struct ColdetBodyInfo
 
 namespace cnoid {
 
-class WorldItemImpl
+class WorldItem::Impl
 {
 public:
     WorldItem* self;
     ostream& os;
     KinematicsBar* kinematicsBar;
 
-    Connection sigSubTreeChangedConnection;
-    ConnectionSet sigKinematicStateChangedConnections;
+    ScopedConnectionSet sigKinematicStateChangedConnections;
 
     Selection collisionDetectorType;
     BodyCollisionDetector bodyCollisionDetector;
@@ -79,17 +79,22 @@ public:
     Signal<void()> sigCollisionsUpdated;
     LazyCaller updateCollisionDetectorLater;
     LazyCaller updateCollisionsLater;
-    bool isCollisionDetectionEnabled;
     SceneCollisionPtr sceneCollision;
+    bool isCollisionDetectionEnabled;
+    bool needToUpdateCollisionsLater;
+    
+    bool needToUpdateUnifiedMaterialTable;
+    ItemList<MaterialTableItem> materialTableItems;
+    MaterialTablePtr unifiedMaterialTable;
+    MaterialTablePtr defaultMaterialTable;
+    string defaultMaterialTableFile;
+    std::time_t defaultMaterialTableTimestamp;
 
-    string materialTableFile;
-    MaterialTablePtr materialTable;
-    std::time_t materialTableTimestamp;
-
-    WorldItemImpl(WorldItem* self);
-    WorldItemImpl(WorldItem* self, const WorldItemImpl& org);
-    ~WorldItemImpl();
+    Impl(WorldItem* self);
+    Impl(WorldItem* self, const Impl& org);
     void init();
+    ~Impl();
+    void onSubTreeChanged();
     bool selectCollisionDetector(int index);
     void enableCollisionDetection(bool on);
     void clearCollisionDetector();
@@ -98,7 +103,8 @@ public:
     void updateCollisions(bool forceUpdate);
     void ignoreLinkPair(CollisionDetector* detector, GeometryHandle linkGeometry, Link* parentBodyLink, bool ignore);
     void extractCollisions(const CollisionPair& collisionPair);
-    MaterialTable* getOrLoadMaterialTable(bool checkFileUpdate);
+    MaterialTable* getOrLoadDefaultMaterialTable(bool checkFileUpdate);
+    MaterialTable* getOrCreateUnifiedMaterialTable();
 };
 
 }
@@ -106,19 +112,20 @@ public:
 
 void WorldItem::initializeClass(ExtensionManager* ext)
 {
-    ext->itemManager().registerClass<WorldItem>(N_("WorldItem"));
-    ext->itemManager().addCreationPanel<WorldItem>();
+    ext->itemManager()
+        .registerClass<WorldItem>(N_("WorldItem"))
+        .addCreationPanel<WorldItem>();
 }
 
 
 WorldItem::WorldItem()
 {
-    impl = new WorldItemImpl(this);
+    impl = new Impl(this);
     setName("World");
 }
 
 
-WorldItemImpl::WorldItemImpl(WorldItem* self)
+WorldItem::Impl::Impl(WorldItem* self)
     : self(self),
       os(mvout()),
       updateCollisionsLater([&](){ updateCollisions(false); }),
@@ -134,23 +141,23 @@ WorldItemImpl::WorldItemImpl(WorldItem* self)
 
     init();
 
-    materialTableFile = toUTF8((shareDirPath() / "default" / "materials.yaml").string());
+    defaultMaterialTableFile = toUTF8((shareDirPath() / "default" / "materials.yaml").string());
 }
 
 
 WorldItem::WorldItem(const WorldItem& org)
     : Item(org)
 {
-    impl = new WorldItemImpl(this, *org.impl);
+    impl = new Impl(this, *org.impl);
 }
 
 
-WorldItemImpl::WorldItemImpl(WorldItem* self, const WorldItemImpl& org)
+WorldItem::Impl::Impl(WorldItem* self, const Impl& org)
     : self(self),
       os(org.os),
       updateCollisionsLater([&](){ updateCollisions(false); }),
       updateCollisionDetectorLater([&](){ updateCollisionDetector(false); }),
-      materialTableFile(org.materialTableFile)
+      defaultMaterialTableFile(org.defaultMaterialTableFile)
 {
     collisionDetectorType = org.collisionDetectorType;
     isCollisionDetectionEnabled = org.isCollisionDetectionEnabled;
@@ -159,7 +166,7 @@ WorldItemImpl::WorldItemImpl(WorldItem* self, const WorldItemImpl& org)
 }
 
 
-void WorldItemImpl::init()
+void WorldItem::Impl::init()
 {
     kinematicsBar = KinematicsBar::instance();
     bodyCollisionDetector.setCollisionDetector(CollisionDetector::create(collisionDetectorType.selectedIndex()));
@@ -167,20 +174,54 @@ void WorldItemImpl::init()
     collisions = std::make_shared<vector<CollisionLinkPairPtr>>();
     sceneCollision = new SceneCollision(collisions);
     sceneCollision->setName("Collisions");
-    materialTableTimestamp = 0;
+    defaultMaterialTableTimestamp = 0;
+    needToUpdateCollisionsLater = false;
+    needToUpdateUnifiedMaterialTable = true;
+
+    self->sigSubTreeChanged().connect([&](){ onSubTreeChanged(); });
 }
 
     
+Item* WorldItem::doDuplicate() const
+{
+    return new WorldItem(*this);
+}
+
+
 WorldItem::~WorldItem()
 {
     delete impl;
 }
 
 
-WorldItemImpl::~WorldItemImpl()
+WorldItem::Impl::~Impl()
 {
-    sigKinematicStateChangedConnections.disconnect();
-    sigSubTreeChangedConnection.disconnect();
+
+}
+
+
+void WorldItem::Impl::onSubTreeChanged()
+{
+    if(isCollisionDetectionEnabled){
+        updateCollisionDetectorLater();
+    }
+    needToUpdateUnifiedMaterialTable = true;
+}
+
+
+void WorldItem::storeCurrentBodyPositionsAsInitialPositions()
+{
+    for(auto& bodyItem : descendantItems<BodyItem>()){
+        bodyItem->storeInitialState();
+    }
+}
+
+
+void WorldItem::restoreInitialBodyPositions(bool doNotify)
+{
+    for(auto& bodyItem : descendantItems<BodyItem>()){
+        bodyItem->restoreInitialState(doNotify);
+    }
 }
 
 
@@ -206,7 +247,7 @@ bool WorldItem::selectCollisionDetector(const std::string& name)
 }
 
 
-bool WorldItemImpl::selectCollisionDetector(int index)
+bool WorldItem::Impl::selectCollisionDetector(int index)
 {
     if(index >= 0 && index < collisionDetectorType.size()){
         CollisionDetector* newCollisionDetector = CollisionDetector::create(index);
@@ -229,33 +270,28 @@ CollisionDetector* WorldItem::collisionDetector()
 }
 
 
-void WorldItem::enableCollisionDetection(bool on)
+void WorldItem::setCollisionDetectionEnabled(bool on)
 {
     impl->enableCollisionDetection(on);
 }
 
 
-void WorldItemImpl::enableCollisionDetection(bool on)
+void WorldItem::Impl::enableCollisionDetection(bool on)
 {
     if(TRACE_FUNCTIONS){
-        os << "WorldItemImpl::enableCollisionDetection(" << on << ")" << endl;
+        os << "WorldItem::Impl::enableCollisionDetection(" << on << ")" << endl;
     }
 
     bool changed = false;
     
     if(isCollisionDetectionEnabled && !on){
         clearCollisionDetector();
-        sigSubTreeChangedConnection.disconnect();
         isCollisionDetectionEnabled = false;
         changed = true;
         
     } else if(!isCollisionDetectionEnabled && on){
         isCollisionDetectionEnabled = true;
-
         updateCollisionDetector(true);
-        sigSubTreeChangedConnection =
-            self->sigSubTreeChanged().connect(
-                [&](){ updateCollisionDetectorLater(); });
         changed = true;
     }
 
@@ -272,14 +308,16 @@ bool WorldItem::isCollisionDetectionEnabled()
 }
 
 
-void WorldItemImpl::clearCollisionDetector()
+void WorldItem::Impl::clearCollisionDetector()
 {
     if(TRACE_FUNCTIONS){
-        os << "WorldItemImpl::clearCollisionDetector()" << endl;
+        os << "WorldItem::Impl::clearCollisionDetector()" << endl;
     }
 
     bodyCollisionDetector.clearBodies();
     sigKinematicStateChangedConnections.disconnect();
+    updateCollisionsLater.cancel();
+    needToUpdateCollisionsLater = false;
 
     for(auto& info : coldetBodyInfos){
         info.bodyItem->clearCollisions();
@@ -299,10 +337,10 @@ void WorldItem::updateCollisionDetector()
 }
 
 
-void WorldItemImpl::updateCollisionDetector(bool forceUpdate)
+void WorldItem::Impl::updateCollisionDetector(bool forceUpdate)
 {
     if(TRACE_FUNCTIONS){
-        os << "WorldItemImpl::updateCollisionDetector()" << endl;
+        os << "WorldItem::Impl::updateCollisionDetector()" << endl;
     }
 
     if(!isCollisionDetectionEnabled){
@@ -319,7 +357,12 @@ void WorldItemImpl::updateCollisionDetector(bool forceUpdate)
                           [](ColdetBodyInfo& info1, ColdetBodyInfo& info2){
                               return (info1.bodyItem == info2.bodyItem &&
                                       info1.isSelfCollisionDetectionEnabled == info2.isSelfCollisionDetectionEnabled); })){
-                return; // not changed
+                // A set of body items are not changed
+                if(needToUpdateCollisionsLater){
+                    needToUpdateCollisionsLater = false;
+                    updateCollisions(false);
+                    return;
+                }
             }
         }
         coldetBodyInfos = infos;
@@ -353,7 +396,7 @@ void WorldItemImpl::updateCollisionDetector(bool forceUpdate)
 }
 
 
-void WorldItemImpl::updateColdetBodyInfos(vector<ColdetBodyInfo>& infos)
+void WorldItem::Impl::updateColdetBodyInfos(vector<ColdetBodyInfo>& infos)
 {
     infos.clear();
     for(auto bodyItem : self->descendantItems<BodyItem>()){
@@ -370,8 +413,13 @@ void WorldItem::updateCollisions()
 }
 
 
-void WorldItemImpl::updateCollisions(bool forceUpdate)
+void WorldItem::Impl::updateCollisions(bool forceUpdate)
 {
+    if(updateCollisionDetectorLater.isPending()){
+        needToUpdateCollisionsLater = true;
+        return;
+    }
+    
     auto collisionDetector = bodyCollisionDetector.collisionDetector();
 
     for(auto& bodyInfo : coldetBodyInfos){
@@ -417,7 +465,7 @@ void WorldItemImpl::updateCollisions(bool forceUpdate)
 }
 
 
-void WorldItemImpl::ignoreLinkPair
+void WorldItem::Impl::ignoreLinkPair
 (CollisionDetector* detector, GeometryHandle linkGeometry, Link* parentBodyLink, bool ignore)
 {
     while(parentBodyLink){
@@ -433,7 +481,7 @@ void WorldItemImpl::ignoreLinkPair
 }
 
 
-void WorldItemImpl::extractCollisions(const CollisionPair& collisionPair)
+void WorldItem::Impl::extractCollisions(const CollisionPair& collisionPair)
 {
     CollisionLinkPairPtr collisionLinkPair = std::make_shared<CollisionLinkPair>();
     collisionLinkPair->collisions = collisionPair.collisions();
@@ -460,52 +508,46 @@ SignalProxy<void()> WorldItem::sigCollisionsUpdated()
 }
 
 
-SgNode* WorldItem::getScene()
+void WorldItem::setDefaultMaterialTableFile(const std::string& filename)
 {
-    return impl->sceneCollision;
-}
-
-
-void WorldItem::setMaterialTableFile(const std::string& filename)
-{
-    if(filename != impl->materialTableFile){
-        impl->materialTable = nullptr;
-        impl->materialTableFile = filename;
+    if(filename != impl->defaultMaterialTableFile){
+        impl->defaultMaterialTable = nullptr;
+        impl->defaultMaterialTableFile = filename;
     }
 }
 
 
-MaterialTable* WorldItem::materialTable(bool checkFileUpdate)
+MaterialTable* WorldItem::defaultMaterialTable(bool checkFileUpdate)
 {
-    return impl->getOrLoadMaterialTable(checkFileUpdate);
+    return impl->getOrLoadDefaultMaterialTable(checkFileUpdate);
 }
 
 
-MaterialTable* WorldItemImpl::getOrLoadMaterialTable(bool checkFileUpdate)
+MaterialTable* WorldItem::Impl::getOrLoadDefaultMaterialTable(bool checkFileUpdate)
 {
     bool failedToLoad = false;
     
-    if(!materialTable){
-        materialTable = new MaterialTable;
-        if(materialTable->load(materialTableFile, os)){
-            materialTableTimestamp =
-                filesystem::last_write_time_to_time_t(fromUTF8(materialTableFile));
+    if(!defaultMaterialTable){
+        defaultMaterialTable = new MaterialTable;
+        if(defaultMaterialTable->load(defaultMaterialTableFile, os)){
+            defaultMaterialTableTimestamp =
+                filesystem::last_write_time_to_time_t(fromUTF8(defaultMaterialTableFile));
         } else {
             failedToLoad = true;
         }
 
     } else if(checkFileUpdate){
-        if(!materialTableFile.empty()){
-            filesystem::path fpath(fromUTF8(materialTableFile));
+        if(!defaultMaterialTableFile.empty()){
+            filesystem::path fpath(fromUTF8(defaultMaterialTableFile));
             if(filesystem::exists(fpath)){
                 auto newTimestamp = filesystem::last_write_time_to_time_t(fpath);
-                if(newTimestamp > materialTableTimestamp){
+                if(newTimestamp > defaultMaterialTableTimestamp){
                     MaterialTablePtr newMaterialTable = new MaterialTable;
-                    if(newMaterialTable->load(materialTableFile, os)){
-                        materialTable = newMaterialTable;
-                        materialTableTimestamp = newTimestamp;
+                    if(newMaterialTable->load(defaultMaterialTableFile, os)){
+                        defaultMaterialTable = newMaterialTable;
+                        defaultMaterialTableTimestamp = newTimestamp;
                         MessageView::instance()->putln(
-                            format(_("Material table \"{}\" has been reloaded."), materialTableFile));
+                            format(_("Default material table \"{}\" has been reloaded."), defaultMaterialTableFile));
                     } else {
                         failedToLoad = true;
                     }
@@ -516,37 +558,70 @@ MaterialTable* WorldItemImpl::getOrLoadMaterialTable(bool checkFileUpdate)
 
     if(failedToLoad){
         MessageView::instance()->putln(
-            format(_("Reloading material table \"{}\" failed."), materialTableFile), MessageView::Warning);
+            format(_("Reloading default material table \"{}\" failed."), defaultMaterialTableFile),
+            MessageView::Warning);
     }
 
-    return materialTable;
+    return defaultMaterialTable;
 }
 
 
-Item* WorldItem::doDuplicate() const
+MaterialTable* WorldItem::materialTable()
 {
-    return new WorldItem(*this);
+    return impl->getOrCreateUnifiedMaterialTable();
+}
+
+
+MaterialTable* WorldItem::Impl::getOrCreateUnifiedMaterialTable()
+{
+    if(!needToUpdateUnifiedMaterialTable){
+        return unifiedMaterialTable;
+    }
+    
+    auto newMaterialTableItems = self->descendantItems<MaterialTableItem>();
+
+    if(newMaterialTableItems.empty()){
+        unifiedMaterialTable = getOrLoadDefaultMaterialTable(false);
+        materialTableItems.clear();
+
+    } else if(newMaterialTableItems != materialTableItems){
+        unifiedMaterialTable = new MaterialTable(*getOrLoadDefaultMaterialTable(false));
+        for(auto& materialTableItem : newMaterialTableItems){
+            unifiedMaterialTable->merge(materialTableItem->materialTable());
+        }
+        materialTableItems.swap(newMaterialTableItems);
+    }
+
+    needToUpdateUnifiedMaterialTable = false;
+    return unifiedMaterialTable;
+}
+
+
+SgNode* WorldItem::getScene()
+{
+    return impl->sceneCollision;
 }
 
 
 void WorldItem::doPutProperties(PutPropertyFunction& putProperty)
 {
     putProperty(_("Collision detection"), isCollisionDetectionEnabled(),
-                [&](bool on){ enableCollisionDetection(on); return true; });
+                [&](bool on){ setCollisionDetectionEnabled(on); return true; });
     putProperty(_("Collision detector"), impl->collisionDetectorType,
                 [&](int index){ return impl->selectCollisionDetector(index); });
 
-    FilePathProperty materialFileProperty(impl->materialTableFile, { _("Contact material definition file (*.yaml)") });
-    putProperty(_("Material table"), materialFileProperty,
-                [&](const string& filename){ setMaterialTableFile(filename); return true; });
+    FilePathProperty materialFileProperty(
+        impl->defaultMaterialTableFile, { _("Contact material definition file (*.yaml)") });
+    putProperty(_("Default material table"), materialFileProperty,
+                [&](const string& filename){ setDefaultMaterialTableFile(filename); return true; });
 }
 
 
 bool WorldItem::store(Archive& archive)
 {
-    archive.write("collisionDetection", isCollisionDetectionEnabled());
-    archive.write("collisionDetector", impl->collisionDetectorType.selectedSymbol());
-    archive.writeRelocatablePath("materialTableFile", impl->materialTableFile);
+    archive.write("collision_detection", isCollisionDetectionEnabled());
+    archive.write("collision_detector", impl->collisionDetectorType.selectedSymbol());
+    archive.writeRelocatablePath("default_material_table_file", impl->defaultMaterialTableFile);
     return true;
 }
 
@@ -554,14 +629,17 @@ bool WorldItem::store(Archive& archive)
 bool WorldItem::restore(const Archive& archive)
 {
     string symbol;
-    if(archive.read("collisionDetector", symbol)){
+    if(archive.read({ "collision_detector", "collisionDetector" }, symbol)){
         selectCollisionDetector(symbol);
     }
-    if(archive.get("collisionDetection", false)){
+    if(archive.get({ "collision_detection", "collisionDetection" }, false)){
         archive.addPostProcess([&](){ impl->enableCollisionDetection(true); });
     }
-    if(archive.readRelocatablePath("materialTableFile", symbol)){
-        setMaterialTableFile(symbol);
+    if(archive.read({ "default_material_table_file", "materialTableFile" }, symbol)){
+        symbol = archive.resolveRelocatablePath(symbol);
+        if(!symbol.empty()){
+            setDefaultMaterialTableFile(symbol);
+        }
     }
     return true;
 }

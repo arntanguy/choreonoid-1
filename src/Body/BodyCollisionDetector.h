@@ -13,7 +13,6 @@ namespace cnoid {
 
 class Body;
 class Link;
-class BodyCollisionDetectorImpl;
 
 class CNOID_EXPORT BodyCollisionDetector
 {
@@ -35,12 +34,13 @@ public:
     bool makeReady();
 
     void updatePositions();
-    void updatePositions(std::function<void(Referenced* object, Position*& out_position)> positionQuery);
+    void updatePositions(std::function<void(Referenced* object, Isometry3*& out_position)> positionQuery);
 
     void detectCollisions(std::function<void(const CollisionPair& collisionPair)> callback);
 
 private:
-    BodyCollisionDetectorImpl* impl;
+    class Impl;
+    Impl* impl;
 };
 
 }

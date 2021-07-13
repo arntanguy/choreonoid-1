@@ -16,6 +16,7 @@
 
 namespace cnoid {
 
+class ItemManager;
 class BodyState;
 class LinkKinematicsKit;
 class InverseKinematics;
@@ -28,10 +29,15 @@ class CNOID_EXPORT BodyItem : public Item, public LocatableItem, public Renderab
 {
 public:
     static void initializeClass(ExtensionManager* ext);
+
+    // The following functions are Implemented in BodyItemFileIO.cpp
+    static void registerBodyItemFileIoSet(ItemManager* im);
+    //! The actual type of the IO object returned by this function is BodyItemBodyFileIO.
     static ItemFileIO* bodyFileIO();
     static ItemFileIO* meshFileIO();
         
     BodyItem();
+    BodyItem(const std::string& name);
     BodyItem(const BodyItem& org);
     virtual ~BodyItem();
 
@@ -52,9 +58,9 @@ public:
     BodyItem* parentBodyItem();
     // True if the body is attached to the parent body with a holder device and an attachment device
     bool isAttachedToParentBody() const { return isAttachedToParentBody_; }
-    void setAttachmentEnabled(bool on);
+    void setAttachmentEnabled(bool on, bool doNotifyUpdate = true);
     bool isAttachmentEnabled() const;
-    bool attachToParentBody();    
+    bool attachToParentBody(bool doNotifyUpdate = true);    
 
     // The current parent body can temporarily be changed by this function
     //void setTemporalParentBodyItem(BodyItem* parentBodyItem);
@@ -83,27 +89,30 @@ public:
     void getInitialState(BodyState& out_state);
     void setInitialState(const BodyState& in_state);
 
-    // for undo, redo operations
+    [[deprecated("This function does nothing.")]]
     void beginKinematicStateEdit();
+    [[deprecated("This function does nothing.")]]
     void cancelKinematicStateEdit();
+    [[deprecated("Use notifyKinematicStateEdited")]]
     void acceptKinematicStateEdit();
-    bool undoKinematicState();
-    bool redoKinematicState();
 
     LinkKinematicsKit* findPresetLinkKinematicsKit(Link* targetLink = nullptr);
     std::shared_ptr<InverseKinematics> findPresetIK(Link* targetLink);
     LinkKinematicsKit* getCurrentLinkKinematicsKit(Link* targetLink);
     std::shared_ptr<InverseKinematics> getCurrentIK(Link* targetLink);
-    std::shared_ptr<PinDragIK> pinDragIK();
+    std::shared_ptr<PinDragIK> getOrCreatePinDragIK();
+    std::shared_ptr<PinDragIK> checkPinDragIK();
     std::shared_ptr<PenetrationBlocker> createPenetrationBlocker(Link* link, bool excludeSelfCollisions = false);
 
+    [[deprecated("Create a new BodyItem and use Item::replace to update the model.")]]
     SignalProxy<void()> sigModelUpdated();
+    [[deprecated("Create a new BodyItem and use Item::replace to update the model.")]]
     void notifyModelUpdate();
         
     /**
-       Signal emitted when there is a change in "kinematic" state such as joint angle of robot,
+       This signal is emitted when there is a change in "kinematic" state such as joint angle of robot,
        joint angular velocity, root position / posture. Item :: sigUpdated () is assumed to be
-       a case where the model itself is changed, and it is used distinguished from it.
+       a case where the model itself is changed, and you have to distinguish them.
     */
     SignalProxy<void()> sigKinematicStateChanged();
 
@@ -117,15 +126,26 @@ public:
     void notifyKinematicStateChangeLater(
         Connection& connectionToBlock,
         bool requestFK = false, bool requestVelFK = false, bool requestAccFK = false);
-    
-    SignalProxy<void()> sigKinematicStateEdited();
 
-    void enableCollisionDetection(bool on);
+    /**
+       This signal is emitted when a kinematic state has been updated.
+       In constrast to sigKinematicStateChange, this signal is emitted when a series of changes
+       are finalized.
+    */
+    SignalProxy<void()> sigKinematicStateUpdated();
+
+    void notifyKinematicStateUpdate(bool doNotifyStateChange = true);
+    
     bool isCollisionDetectionEnabled() const;
+    void setCollisionDetectionEnabled(bool on);
+    [[deprecated("Use setCollisionDetectionEnabled")]]
+    void enableCollisionDetection(bool on) { setCollisionDetectionEnabled(on); }
     
-    void enableSelfCollisionDetection(bool on);
     bool isSelfCollisionDetectionEnabled() const;        
-
+    void setSelfCollisionDetectionEnabled(bool on);
+    [[deprecated("Use setSelfCollisionDetectionEnabled")]]
+    void enableSelfCollisionDetection(bool on) { setSelfCollisionDetectionEnabled(on); }
+    
     void clearCollisions();
 
     std::vector<CollisionLinkPairPtr>& collisions() { return collisions_; }
@@ -172,7 +192,8 @@ public:
 protected:
     virtual Item* doDuplicate() const override;
     virtual void doAssign(Item* item) override;
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
+    virtual void onConnectedToRoot() override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
     virtual bool store(Archive& archive) override;
     virtual bool restore(const Archive& archive) override;

@@ -1,9 +1,11 @@
 #include "FileDialog.h"
 #include "AppConfig.h"
 #include "ProjectManager.h"
+#include "MainWindow.h"
 #include <cnoid/ExecutablePath>
 #include <cnoid/UTF8>
 #include <cnoid/stdx/filesystem>
+#include <cnoid/stdx/optional>
 #include <QBoxLayout>
 #include <QStyle>
 
@@ -37,13 +39,22 @@ class FileDialog::Impl : public QFileDialog
 public:
     FileDialog* self;
     QBoxLayout* optionPanelBox;
+    stdx::optional<Signal<void(int index)>> sigFilterSelected;
     Signal<bool(int result), LogicalProduct> sigAboutToFinished;
     
     Impl(FileDialog* self);
     void updatePresetDirectories();    
+    void onFilterSelected(const QString& selected);
     void onFinished(int result);
     void storeRecentDirectories();
 };
+
+}
+
+
+FileDialog::FileDialog()
+    : FileDialog(MainWindow::instance())
+{
 
 }
 
@@ -171,6 +182,38 @@ bool FileDialog::selectFilePath(const std::string& filePath)
 void FileDialog::insertOptionPanel(QWidget* panel)
 {
     impl->optionPanelBox->insertWidget(0, panel);
+}
+
+
+SignalProxy<void(int index)> FileDialog::sigFilterSelected()
+{
+    if(!impl->sigFilterSelected){
+        stdx::emplace(impl->sigFilterSelected);
+        QObject::connect(impl, &QFileDialog::filterSelected,
+                [this](const QString& filter){ impl->onFilterSelected(filter); });
+    }
+    return *impl->sigFilterSelected;
+}
+
+
+void FileDialog::Impl::onFilterSelected(const QString& selected)
+{
+    auto filters = nameFilters();
+    for(int index = 0; index < filters.size(); ++index){
+        if(filters[index] == selected){
+            (*sigFilterSelected)(index);
+            break;
+        }
+    }
+}
+
+
+void FileDialog::selectNameFilter(int index)
+{
+    auto filters = impl->nameFilters();
+    if(index < filters.size()){
+        impl->selectNameFilter(filters[index]);
+    }
 }
 
 

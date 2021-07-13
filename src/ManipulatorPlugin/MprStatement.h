@@ -1,7 +1,7 @@
 #ifndef CNOID_MANIPULATOR_PLUGIN_MPR_STATEMENT_H
 #define CNOID_MANIPULATOR_PLUGIN_MPR_STATEMENT_H
 
-#include <cnoid/CloneableReferenced>
+#include <cnoid/ClonableReferenced>
 #include <cnoid/HierarchicalClassRegistry>
 #include <cnoid/PolymorphicFunctionSet>
 #include <string>
@@ -10,11 +10,10 @@
 namespace cnoid {
 
 class MprProgram;
-typedef ref_ptr<MprProgram> MprProgramPtr;
-
+class MprStructuredStatement;
 class Mapping;
 
-class CNOID_EXPORT MprStatement : public CloneableReferenced
+class CNOID_EXPORT MprStatement : public ClonableReferenced
 {
 public:
     int classId() const {
@@ -29,20 +28,24 @@ public:
         return static_cast<MprStatement*>(doClone(&cloneMap));
     }
 
+    std::string label() const;
+    virtual std::string label(int index) const = 0;
+
     MprProgram* holderProgram() const;
+    MprStructuredStatement* holderStatement() const;
     MprProgram* topLevelProgram() const;
 
     virtual MprProgram* getLowerLevelProgram();
 
     void notifyUpdate();
 
-    virtual std::string label(int index) const = 0;
     virtual bool read(MprProgram* program, const Mapping& archive) = 0;
     virtual bool write(Mapping& archive) const = 0;
 
 protected:
     MprStatement();
     MprStatement(const MprStatement& org);
+    ~MprStatement();
     
 private:
     mutable int classId_;

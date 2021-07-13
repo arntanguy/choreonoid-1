@@ -3,7 +3,7 @@
 */
 
 #include "../PluginManager.h"
-#include <pybind11/pybind11.h>
+#include <cnoid/PyUtil>
 
 using namespace cnoid;
 namespace py = pybind11;
@@ -17,9 +17,6 @@ void exportPyPluginManager(py::module m)
             "instance", [](py::object){ return PluginManager::instance(); }, py::return_value_policy::reference)
         .def("unloadPlugin", (bool (PluginManager::*)(const std::string&)) &PluginManager::unloadPlugin)
         .def("reloadPlugin", &PluginManager::reloadPlugin)
-
-        // deprecated
-        .def_static("getInstance", &PluginManager::instance, py::return_value_policy::reference)
         ;
 }
 

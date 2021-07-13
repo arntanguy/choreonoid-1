@@ -4,6 +4,8 @@
 */
 
 #include "RateGyroSensor.h"
+#include "StdBodyFileUtil.h"
+#include <cnoid/EigenArchive>
 
 using namespace cnoid;
 
@@ -16,7 +18,7 @@ RateGyroSensor::RateGyroSensor()
 }
 
 
-const char* RateGyroSensor::typeName()
+const char* RateGyroSensor::typeName() const
 {
     return "RateGyroSensor";
 }
@@ -96,4 +98,39 @@ double* RateGyroSensor::writeState(double* out_buf) const
 {
     Eigen::Map<Vector3>(out_buf) << w_;
     return out_buf + 3;
+}
+
+
+bool RateGyroSensor::readSpecifications(const Mapping* info)
+{
+    read(info, { "max_angular_velocity", "maxAngularVelocity" }, spec->w_max);
+    return true;
+}
+
+
+bool RateGyroSensor::writeSpecifications(Mapping* info) const
+{
+    if(!spec->w_max.isConstant(std::numeric_limits<double>::max())){
+        write(info, "max_angular_velocity", degree(spec->w_max));
+    }
+    return true;
+}
+
+
+namespace {
+
+StdBodyFileDeviceTypeRegistration<RateGyroSensor>
+registerHolderDevice(
+    "RateGyroSensor",
+     [](StdBodyLoader* loader, const Mapping* info){
+         RateGyroSensorPtr sensor = new RateGyroSensor;
+         if(sensor->readSpecifications(info)){
+            return loader->readDevice(sensor, info);
+        }
+        return false;
+    },
+    [](StdBodyWriter* /* writer */, Mapping* info, const RateGyroSensor* sensor)
+    {
+        return sensor->writeSpecifications(info);
+    });
 }

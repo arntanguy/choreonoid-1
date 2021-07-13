@@ -7,13 +7,12 @@
 #define CNOID_BODY_FORWARD_DYNAMICS_H
 
 #include "BasicSensorSimulationHelper.h"
-#include "Link.h"
 #include "exportdecl.h"
 
 namespace cnoid {
 
-class DyBody;
-typedef ref_ptr<DyBody> DyBodyPtr;
+class DySubBody;
+typedef ref_ptr<DySubBody> DySubBodyPtr;
 
 /**
    This class calculates the forward dynamics of a Body object
@@ -25,7 +24,7 @@ class CNOID_EXPORT ForwardDynamics {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         
-    ForwardDynamics(DyBody* body);
+    ForwardDynamics(DySubBody* subBody);
     virtual ~ForwardDynamics();
         
     void setGravityAcceleration(const Vector3& g);
@@ -37,24 +36,22 @@ public:
 
     virtual void initialize() = 0;
     virtual void calcNextState() = 0;
+    virtual void refreshState() = 0;
 
 protected:
-
     virtual void initializeSensors();
 
     /**
        @brief update position/orientation using spatial velocity
-       @param out_p p(t+dt)
-       @param out_R R(t+dt)
-       @param p0 p(t)
-       @param R0 R(t)
+       @param out_T T(t+dt)
+       @param T0 T(t)
        @param w angular velocity
-       @param v0 spatial velocity
+       @param vo spatial velocity
        @param dt time step[s]
     */
-    static void SE3exp(Position& out_T, const Position& T0, const Vector3& w, const Vector3& vo, double dt);
+    static void SE3exp(Isometry3& out_T, const Isometry3& T0, const Vector3& w, const Vector3& vo, double dt);
 		
-    DyBodyPtr body;
+    DySubBodyPtr subBody;
     Vector3 g;
     double timeStep;
     bool sensorsEnabled;

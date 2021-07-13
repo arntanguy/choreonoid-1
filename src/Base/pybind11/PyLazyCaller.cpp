@@ -3,7 +3,7 @@
 */
 
 #include "../LazyCaller.h"
-#include <pybind11/pybind11.h>
+#include <cnoid/PyUtil>
 
 using namespace cnoid;
 namespace py = pybind11;
@@ -32,8 +32,24 @@ namespace cnoid {
 
 void exportPyLazyCaller(py::module m)
 {
-    m.def("callLater", [](py::function func){ cnoid::callLater(PyFunc(func)); });
-    m.def("callSynchronously", [](py::function func){ cnoid::callSynchronously(PyFunc(func)); });
+    py::class_<LazyCaller> lazyCaller(m, "LazyCaller");
+
+    py::enum_<LazyCaller::Priority>(lazyCaller, "Priority")
+        .value("HighPriority", LazyCaller::HighPriority)
+        .value("NormalPriority", LazyCaller::NormalPriority)
+        .value("LowPriority", LazyCaller::LowPriority)
+        .value("MinimumPriority", LazyCaller::MinimumPriority)
+        ;
+    
+    m.def("callLater",
+          [](py::function func, int priority){
+              cnoid::callLater(PyFunc(func), priority); },
+          py::arg("func"), py::arg("priority") = LazyCaller::NormalPriority);
+    
+    m.def("callSynchronously",
+          [](py::function func, int priority){
+              cnoid::callSynchronously(PyFunc(func), priority); },
+          py::arg("func"), py::arg("priority") = LazyCaller::NormalPriority);
 }
 
 }

@@ -1,4 +1,5 @@
 #include "MprProgram.h"
+#include "MprStructuredStatement.h"
 #include "MprBasicStatements.h"
 #include "MprPositionStatement.h"
 #include "MprStatementRegistration.h"
@@ -29,15 +30,15 @@ public:
     MprPositionListPtr positionList;
     Signal<void(MprStatement* statement)> sigStatementUpdated;
     Signal<void(iterator iter)> sigStatementInserted;
-    Signal<void(MprProgram* program, MprStatement* statement)> sigStatementRemoved;
+    Signal<void(MprStatement* statement, MprProgram* program)> sigStatementRemoved;
     std::string name;
+    std::function<PositionTagGroup*(const std::string& name)> positionTagGroupFinder;
 
     Impl(MprProgram* self);
     Impl(MprProgram* self, const Impl& org, CloneMap* cloneMap);
     void notifyStatementInsertion(iterator iter);
-    void notifyStatementRemoval(MprProgram* program, MprStatement* statement);
+    void notifyStatementRemoval(MprStatement* statement, MprProgram* program);
     void notifyStatementUpdate(MprStatement* statement) const;
-    MprPositionList* getOrCreatePositionList();
     bool read(const Mapping& archive);    
 };
 
@@ -47,6 +48,8 @@ public:
 MprProgram::MprProgram()
 {
     impl = new Impl(this);
+    hasLocalPositionList_ = false;
+    isEditingEnabled_ = true;
 }
 
 
@@ -70,6 +73,9 @@ MprProgram::MprProgram(const MprProgram& org, CloneMap* cloneMap)
             append(statement->clone(), false);
         }
     }
+
+    hasLocalPositionList_ = org.hasLocalPositionList_;
+    isEditingEnabled_ = org.isEditingEnabled_;
 }
 
 
@@ -154,7 +160,7 @@ MprProgram::iterator MprProgram::remove(iterator pos, bool doNotify)
         statement->holderProgram_.reset();
         auto iter = statements_.erase(pos);
         if(doNotify){
-            impl->notifyStatementRemoval(this, statement);
+            impl->notifyStatementRemoval(statement, this);
         }
         return iter;
     }
@@ -164,7 +170,7 @@ MprProgram::iterator MprProgram::remove(iterator pos, bool doNotify)
 
 bool MprProgram::remove(MprStatement* statement, bool doNotify)
 {
-    auto pos = std::find(begin(), end(), statement);
+    auto pos = find(statement);
     if(pos != statements_.end()){
         remove(pos, doNotify);
         return true;
@@ -173,21 +179,33 @@ bool MprProgram::remove(MprStatement* statement, bool doNotify)
 }
 
 
+MprProgram::iterator MprProgram::find(MprStatement* statement)
+{
+    return std::find(begin(), end(), statement);
+}
+
+
+MprProgram::const_iterator MprProgram::find(MprStatement* statement) const
+{
+    return std::find(begin(), end(), statement);
+}
+
+
 void MprProgram::clearStatements()
 {
     while(!statements_.empty()){
-        remove(statements_.end(), true);
+        remove(--statements_.end(), true);
     }
 }
 
 
-void MprProgram::Impl::notifyStatementRemoval(MprProgram* program, MprStatement* statement)
+void MprProgram::Impl::notifyStatementRemoval(MprStatement* statement, MprProgram* program)
 {
-    sigStatementRemoved(program, statement);
+    sigStatementRemoved(statement, program);
 
     if(auto hs = holderStatement.lock()){
         if(auto hp = hs->holderProgram()){
-            hp->impl->notifyStatementRemoval(program, statement);
+            hp->impl->notifyStatementRemoval(statement, program);
         }
     }
 }
@@ -211,7 +229,7 @@ SignalProxy<void(MprProgram::iterator iter)> MprProgram::sigStatementInserted()
 }
 
 
-SignalProxy<void(MprProgram* program, MprStatement* statement)>
+SignalProxy<void(MprStatement* statement, MprProgram* program)>
 MprProgram::sigStatementRemoved()
 {
     return impl->sigStatementRemoved;
@@ -234,7 +252,7 @@ bool MprProgram::isTopLevelProgram() const
 {
     return impl->holderStatement ? false : true;
 }
-
+    
 
 bool MprProgram::isSubProgram() const
 {
@@ -262,7 +280,26 @@ void MprProgram::setHolderStatement(MprStructuredStatement* holder)
 }
 
 
-static bool traverseAllStatements
+static void traverseStatements
+(MprProgram* program, const std::function<void(MprStatement* statement)>& callback)
+{
+    for(auto& statement : *program){
+        callback(statement);
+        if(auto structured = dynamic_cast<MprStructuredStatement*>(statement.get())){
+            auto program = structured->lowerLevelProgram();
+            traverseStatements(program, callback);
+        }
+    }
+}
+
+
+void MprProgram::traverseStatements(std::function<void(MprStatement* statement)> callback)
+{
+    ::traverseStatements(this, callback);
+}
+
+
+static bool traverseStatements
 (MprProgram* program, const std::function<bool(MprStatement* statement)>& callback)
 {
     for(auto& statement : *program){
@@ -271,7 +308,7 @@ static bool traverseAllStatements
         }
         if(auto structured = dynamic_cast<MprStructuredStatement*>(statement.get())){
             auto program = structured->lowerLevelProgram();
-            if(!traverseAllStatements(program, callback)){
+            if(!traverseStatements(program, callback)){
                 return false;
             }
         }
@@ -280,30 +317,36 @@ static bool traverseAllStatements
 }
 
 
-void MprProgram::traverseAllStatements(std::function<bool(MprStatement* statement)> callback)
+bool MprProgram::traverseStatements(std::function<bool(MprStatement* statement)> callback)
 {
-    ::traverseAllStatements(this, callback);
+    return ::traverseStatements(this, callback);
 }
 
 
-MprPositionList* MprProgram::Impl::getOrCreatePositionList()
+void MprProgram::setLocalPositionListEnabled(bool on)
 {
-    if(!positionList){
-        positionList = new MprPositionList;
+    if(on != hasLocalPositionList_){
+        if((on && impl->holderStatement) || !on){
+            impl->positionList.reset();
+            hasLocalPositionList_ = on;
+        }
     }
-    return positionList;
 }
 
 
 MprPositionList* MprProgram::positionList()
 {
-    if(!impl->holderStatement){
-        return impl->getOrCreatePositionList();
+    if(!impl->positionList){
+        if(impl->holderStatement && !hasLocalPositionList_){
+            if(auto topLevel = topLevelProgram()){
+                impl->positionList = topLevel->positionList();
+            }
+        }
+        if(!impl->positionList){
+            impl->positionList = new MprPositionList;
+        }
     }
-    if(auto topLevel = topLevelProgram()){
-        return topLevel->impl->getOrCreatePositionList();
-    }
-    return impl->getOrCreatePositionList();
+    return impl->positionList;
 }
 
 
@@ -323,12 +366,11 @@ void MprProgram::removeUnreferencedPositions()
     
     std::unordered_set<GeneralId, GeneralId::Hash> referencedIds;
 
-    traverseAllStatements(
+    traverseStatements(
         [&](MprStatement* statement){
             if(auto ps = dynamic_cast<MprPositionStatement*>(statement)){
                 referencedIds.insert(ps->positionId());
             }
-            return true;
         });
 
     positionList_->removeUnreferencedPositions(
@@ -345,8 +387,8 @@ void MprProgram::renumberPositionIds()
 
     int idCounter = 0;
 
-    traverseAllStatements(
-        [&](MprStatement* statement){
+    traverseStatements(
+        [&](MprStatement* statement) {
             if(auto ps = dynamic_cast<MprPositionStatement*>(statement)){
                 auto id = ps->positionId();
                 if(id.isInt()){
@@ -363,7 +405,6 @@ void MprProgram::renumberPositionIds()
                     }
                 }
             }
-            return true;
         });
 
     vector<MprPositionPtr> unreferencedIntIdPositions;
@@ -425,7 +466,7 @@ bool MprProgram::read(const Mapping& archive)
 
 bool MprProgram::Impl::read(const Mapping& archive)
 {
-    if(!self->isSubProgram()){
+    if(self->isTopLevelProgram()){
         
         auto& typeNode = archive.get("type");
         if(typeNode.toString() != "ManipulatorProgram"){
@@ -443,14 +484,17 @@ bool MprProgram::Impl::read(const Mapping& archive)
         }
 
         archive.read("name", name);
+    }
 
-        auto& positionSetNode = *archive.findMapping("positions");
-        if(positionSetNode.isValid()){
-            getOrCreatePositionList();
-            positionList->clear();
-            if(!positionList->read(positionSetNode)){
-                return false;
-            }
+    auto& positionSetNode = *archive.findMapping("positions");
+    if(positionSetNode.isValid()){
+        if(self->isSubProgram()){
+            self->setLocalPositionListEnabled(true);
+        }
+        auto positionList = self->positionList();
+        positionList->clear();
+        if(!positionList->read(positionSetNode)){
+            return false;
         }
     }
     
@@ -504,7 +548,7 @@ bool MprProgram::save(const std::string& filename)
 
 bool MprProgram::write(Mapping& archive) const
 {
-    if(!isSubProgram()){
+    if(isTopLevelProgram()){
         archive.write("type", "ManipulatorProgram");
         archive.write("format_version", 1.0);
         archive.write("name", name(), DOUBLE_QUOTED);
@@ -526,10 +570,12 @@ bool MprProgram::write(Mapping& archive) const
         }
     }
 
-    if(!isSubProgram() && impl->positionList){
-        MappingPtr node = new Mapping;
-        if(impl->positionList->write(*node)){
-            archive.insert("positions", node);
+    if(isTopLevelProgram() || hasLocalPositionList()){
+        if(impl->positionList){
+            MappingPtr node = new Mapping;
+            if(impl->positionList->write(*node)){
+                archive.insert("positions", node);
+            }
         }
     }
 

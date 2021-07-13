@@ -9,15 +9,15 @@
 #include "SubSimulatorItem.h"
 #include "SimulationScriptItem.h"
 #include "BodyMotionItem.h"
-#include "BodyMotionEngine.h"
 #include "WorldLogFileItem.h"
 #include "CollisionSeqItem.h"
 #include "CollisionSeqEngine.h"
 #include <cnoid/ExtensionManager>
 #include <cnoid/ItemManager>
+#include <cnoid/MenuManager>
+#include <cnoid/TimeSyncItemEngine>
 #include <cnoid/RootItem>
 #include <cnoid/ItemTreeView>
-#include <cnoid/MenuManager>
 #include <cnoid/ControllerIO>
 #include <cnoid/BodyState>
 #include <cnoid/AppUtil>
@@ -27,7 +27,7 @@
 #include <cnoid/PutPropertyFunction>
 #include <cnoid/Archive>
 #include <cnoid/MultiDeviceStateSeq>
-#include <cnoid/ReferencedObjectSeqItem>
+#include <cnoid/ControllerLogItem>
 #include <cnoid/Timer>
 #include <cnoid/Deque2D>
 #include <cnoid/ConnectionSet>
@@ -106,25 +106,66 @@ public:
     SimulatorItem::Impl* simImpl;
     Body* body_;
 
+    std::thread controlThread;
+    std::condition_variable controlCondition;
+    std::mutex controlMutex;
+    bool isExitingControlLoopRequested;
+    bool isControlRequested;
+    bool isControlFinished;
+    bool isControlToBeContinued;
+
     std::mutex logMutex;
     ReferencedPtr lastLogData;
     unique_ptr<ReferencedObjectSeq> logBuf;
     int logBufFrameOffset;
-    ReferencedObjectSeqItemPtr logItem;
+    ControllerLogItemPtr logItem;
     shared_ptr<ReferencedObjectSeq> log;
+    bool isLogEnabled_;
 
     ControllerInfo(ControllerItem* controller, SimulationBody::Impl* simBodyImpl);
+
+    virtual std::string controllerName() const override;
     virtual Body* body() override;
     std::ostream& os() const override;
     virtual double timeStep() const override;
     virtual double currentTime() const override;
     virtual std::string optionString() const override;
+
     virtual bool enableLog() override;
+    bool isLogEnabled() const;
     virtual void outputLog(Referenced* frameLog) override;
     void flushLog();
+
+    virtual bool isNoDelayMode() const override;
+    virtual bool setNoDelayMode(bool on) override;
+
+    bool waitForControlInThreadToFinish();
+    void concurrentControlLoop();    
 };
 
 typedef ref_ptr<ControllerInfo> ControllerInfoPtr;
+
+class SimulationLogEngine : public TimeSyncItemEngine
+{
+public:
+    SimulatorItem::Impl* itemImpl;
+    TimeSyncItemEngineManager* manager;
+    vector<TimeSyncItemEnginePtr> subEngines;;
+    CollisionSeqEnginePtr collisionSeqEngine;
+    bool doKeepPlayback;
+
+    SimulationLogEngine(SimulatorItem::Impl* itemImpl);
+    void clearSubEngines();
+    void addSubEnginesFor(Item* item);
+    void addCollisionSeqEngine(CollisionSeqItem* collisionSeqItem);
+    virtual void onPlaybackStarted(double /* time */) override;
+    virtual bool onTimeChanged(double time) override;
+    virtual void onPlaybackStopped(double time, bool isStoppedManually) override;
+    virtual bool isTimeSyncAlwaysMaintained() const override;
+    void notifyKinematicStateUpdate();
+};
+
+typedef ref_ptr<SimulationLogEngine> SimulationLogEnginePtr;
 
 }
 
@@ -146,48 +187,44 @@ public:
 
     Deque2D<double> jointPosBuf;
     MultiSE3Deque linkPosBuf;
-    vector<Device*> devicesToNotifyResults;
+    vector<Device*> devicesToNotifyRecords;
     ScopedConnectionSet deviceStateConnections;
     vector<bool> deviceStateChangeFlag;
     Deque2D<DeviceStatePtr> deviceStateBuf;
 
-    ItemPtr parentOfResultItems;
-    string resultItemPrefix;
+    ItemPtr parentOfRecordItems;
+    string recordItemPrefix;
     shared_ptr<BodyMotion> motion;
-    shared_ptr<MultiValueSeq> jointPosResults;
-    shared_ptr<MultiSE3Seq> linkPosResults;
-    MultiSE3SeqItemPtr linkPosResultItem;
+    shared_ptr<MultiValueSeq> jointPosRecord;
+    shared_ptr<MultiSE3Seq> linkPosRecord;
+    MultiSE3SeqItemPtr linkPosRecordItem;
     vector<DeviceStatePtr> prevFlushedDeviceStateInDirectMode;
-    shared_ptr<MultiDeviceStateSeq> deviceStateResults;
+    shared_ptr<MultiDeviceStateSeq> deviceStateRecord;
 
     Impl(SimulationBody* self, Body* body);
-    void findControlSrcItems(Item* item, vector<Item*>& io_items, bool doPickCheckedItems = false);
+    void findControlSrcItems(Item* item, vector<Item*>& io_items);
     bool initialize(SimulatorItem* simulatorItem, BodyItem* bodyItem);
     bool initialize(SimulatorItem::Impl* simImpl, ControllerItem* controllerItem);
     void extractAssociatedItems(bool doReset);
     void copyStateToBodyItem();
     void cloneShapesOnce();
-    void initializeResultData();
-    void initializeResultBuffers();
-    void initializeResultItems();
+    void initializeRecording();
+    void initializeRecordBuffers();
+    void initializeRecordItems();
     void setInitialStateOfBodyMotion(shared_ptr<BodyMotion> bodyMotion);
     void setActive(bool on);
-    void bufferResults();
-    void flushResults();
-    void flushResultsToBodyMotionItems();
-    void flushResultsToBody();
-    void flushResultsToWorldLogFile(int bufferFrame);
-    void notifyResults(double time);
+    void bufferRecords();
+    void flushRecords();
+    void flushRecordsToBodyMotionItems();
+    void flushRecordsToBody();
+    void flushRecordsToWorldLogFile(int bufferFrame);
+    void notifyRecords(double time);
 };
 
 
 class SimulatorItem::Impl : public QThread, public ControllerIO
 {
 public:
-    Impl(SimulatorItem* self);
-    Impl(SimulatorItem* self, const Impl& org);
-    ~Impl();
-            
     SimulatorItem* self;
     WorldItem* worldItem;
 
@@ -213,17 +250,11 @@ public:
     FunctionSet midDynamicsFunctions;
     FunctionSet postDynamicsFunctions;
     
-    vector<SimulationBody::Impl*> simBodyImplsToNotifyResults;
+    vector<SimulationBody::Impl*> simBodyImplsToNotifyRecords;
     ItemList<SubSimulatorItem> subSimulatorItems;
 
-    vector<ControllerItem*> activeControllers;
-    std::thread controlThread;
-    std::condition_variable controlCondition;
-    std::mutex controlMutex;
-    bool isExitingControlLoopRequested;
-    bool isControlRequested;
-    bool isControlFinished;
-    bool isControlToBeContinued;
+    vector<ControllerInfoPtr> activeControllerInfos;
+    vector<ControllerItemPtr> loggingControllers;
     bool doStopSimulationWhenNoActiveControllers;
     bool hasControllers; // Includes non-active controllers
 
@@ -234,11 +265,12 @@ public:
 
     Selection recordingMode;
     Selection timeRangeMode;
-    double specifiedTimeLength;
+    double timeLength;
     int maxFrame;
     int ringBufferSize;
     bool isRecordingEnabled;
     bool isRingBufferMode;
+    bool isActiveControlTimeRangeMode;
     bool useControllerThreads;
     bool useControllerThreadsProperty;
     bool isAllLinkPositionOutputMode;
@@ -254,18 +286,18 @@ public:
     string controllerOptionString_;
 
     TimeBar* timeBar;
-    int fillLevelId;
-    QMutex resultBufMutex;
+    QMutex recordBufMutex;
     double actualSimulationTime;
     double finishTime;
     MessageView* mv;
 
     bool doReset;
     bool isWaitingForSimulationToStop;
+    bool isForcedToStopSimulation;
     Signal<void()> sigSimulationStarted;
     Signal<void()> sigSimulationPaused;
     Signal<void()> sigSimulationResumed;
-    Signal<void()> sigSimulationFinished;
+    Signal<void(bool isForced)> sigSimulationFinished;
 
     WorldLogFileItemPtr worldLogFileItem;
     int nextLogFrame;
@@ -294,27 +326,28 @@ public:
     };
     VirtualElasticString virtualElasticString;
 
-    vector<BodyMotionEnginePtr> bodyMotionEngines;
-    CollisionSeqEnginePtr collisionSeqEngine;
-
+    SimulationLogEnginePtr logEngine;
+    
     Connection aboutToQuitConnection;
 
     CloneMap cloneMap;
         
+    Impl(SimulatorItem* self);
+    Impl(SimulatorItem* self, const Impl& org);
+    ~Impl();
     void findTargetItems(Item* item, bool isUnderBodyItem, ItemList<Item>& out_targetItems);
     void clearSimulation();
     bool startSimulation(bool doReset);
-    virtual void run();
+    virtual void run() override;
     void onSimulationLoopStarted();
     void updateSimBodyLists();
     bool stepSimulationMain();
-    void concurrentControlLoop();
-    void flushResults();
-    int flushMainResults();
-    void stopSimulation(bool doSync);
+    void flushRecords();
+    int flushMainRecords();
+    void stopSimulation(bool isForced, bool doSync);
     void pauseSimulation();
     void restartSimulation();
-    void onSimulationLoopStopped();
+    void onSimulationLoopStopped(bool isForced);
     void setExternalForce(BodyItem* bodyItem, Link* link, const Vector3& point, const Vector3& f, double time);
     void doSetExternalForce();
     void setVirtualElasticString(
@@ -322,16 +355,14 @@ public:
     void setVirtualElasticStringForce();
     void onRealtimeSyncChanged(bool on);
     bool onAllLinkPositionOutputModeChanged(bool on);
-    void setSpecifiedRecordingTimeLength(double length);
     void doPutProperties(PutPropertyFunction& putProperty);
     bool store(Archive& archive);
     bool restore(const Archive& archive);
-    void restoreBodyMotionEngines(const Archive& archive);
-    void addBodyMotionEngine(BodyMotionItem* motionItem);
-    bool setPlaybackTime(double time);
-    void addCollisionSeqEngine(CollisionSeqItem* collisionSeqItem);
+    void restoreTimeSyncItemEngines(const Archive& archive);
+    SimulationLogEngine* getOrCreateLogEngine();
 
     // Functions defined in the ControllerIO class
+    virtual std::string controllerName() const override;
     virtual Body* body() override;
     virtual std::string optionString() const override;
     virtual std::ostream& os() const override;
@@ -339,56 +370,6 @@ public:
     virtual double currentTime() const override;
 };
 
-
-class SimulatedMotionEngineManager
-{
-public:
-    ItemList<SimulatorItem> simulatorItems;
-    ScopedConnection selectionConnection;
-    ScopedConnection timeChangeConnection;
-
-    SimulatedMotionEngineManager(){
-        selectionConnection.reset(
-            RootItem::instance()->sigSelectedItemsChanged().connect(
-                [&](const ItemList<>& selected){ onSelectedItemsChanged(selected); }));
-    }
-
-    void onSelectedItemsChanged(ItemList<SimulatorItem> selected){
-
-        bool changed = false;
-        
-        if(selected.empty()){
-            auto p = simulatorItems.begin();
-            while(p != simulatorItems.end()){
-                if((*p)->isRunning() && (*p)->findRootItem()){
-                    ++p;
-                } else {
-                    p = simulatorItems.erase(p);
-                    changed = true;
-                }
-            }
-        } else {
-            if(simulatorItems != selected){
-                simulatorItems = selected;
-                changed = true;
-            }
-        }
-        if(changed){
-            if(simulatorItems.empty()){
-                timeChangeConnection.disconnect();
-            } else {
-                auto timeBar = TimeBar::instance();
-                timeChangeConnection.reset(
-                    timeBar->sigTimeChanged().connect(
-                        [&](double time){ return setTime(time); }));
-                setTime(timeBar->time());
-            }
-        }
-    }
-
-    bool setTime(double time);
-};
-    
 }
 
 namespace {
@@ -470,7 +451,12 @@ public:
 void SimulatorItem::initializeClass(ExtensionManager* ext)
 {
     ext->itemManager().registerAbstractClass<SimulatorItem>();
-    ext->manage(new SimulatedMotionEngineManager());
+
+    TimeSyncItemEngineManager::instance()
+        ->registerFactory<SimulatorItem, SimulationLogEngine>(
+            [](SimulatorItem* item, SimulationLogEngine* /* engine0 */){
+                return item->impl->getOrCreateLogEngine();
+            });
 
     ItemTreeView::instance()->customizeContextMenu<SimulatorItem>(
         [](SimulatorItem* item, MenuManager& menuManager, ItemFunctionDispatcher menuFunction){
@@ -482,7 +468,7 @@ void SimulatorItem::initializeClass(ExtensionManager* ext)
             menuManager.addItem(_("Resume"))->sigTriggered().connect(
                 [item](){ item->restartSimulation(); });
             menuManager.addItem(_("Finish"))->sigTriggered().connect(
-                [item](){ item->stopSimulation(); });
+                [item](){ item->stopSimulation(true); });
             menuManager.setPath("/");
             menuManager.addSeparator();
             menuFunction.dispatchAs<Item>(item);
@@ -509,12 +495,21 @@ SimulatorItem* SimulatorItem::findActiveSimulatorItemFor(Item* item)
 }
 
 
+namespace {
+
 ControllerInfo::ControllerInfo(ControllerItem* controller, SimulationBody::Impl* simBodyImpl)
     : controller(controller),
       body_(simBodyImpl->body_),
-      simImpl(simBodyImpl->simImpl)
+      simImpl(simBodyImpl->simImpl),
+      isLogEnabled_(false)
 {
 
+}
+
+
+std::string ControllerInfo::controllerName() const
+{
+    return controller ? controller->name() : string();
 }
 
 
@@ -555,11 +550,11 @@ bool ControllerInfo::enableLog()
     logBufFrameOffset = 0;
 
     string logName = simImpl->self->name() + "-" + controller->name();
-    logItem = controller->findChildItem<ReferencedObjectSeqItem>(logName);
+    logItem = controller->findChildItem<ControllerLogItem>(logName);
     if(logItem){
         logItem->resetSeq();
     } else {
-        logItem = new ReferencedObjectSeqItem;
+        logItem = controller->createLogItem();
         logItem->setTemporal();
         logItem->setName(logName);
         controller->addChildItem(logItem);
@@ -570,8 +565,17 @@ bool ControllerInfo::enableLog()
     log->setOffsetTime(0.0);
     
     simImpl->loggedControllerInfos.push_back(this);
+    simImpl->getOrCreateLogEngine()->addSubEnginesFor(logItem);
+
+    isLogEnabled_ = true;
 
     return true;
+}
+
+
+bool ControllerInfo::isLogEnabled() const
+{
+    return isLogEnabled_;
 }
 
 
@@ -612,6 +616,21 @@ void ControllerInfo::flushLog()
         logBuf->clear();
         logBufFrameOffset += numBufFrames;
     }
+}
+
+
+bool ControllerInfo::isNoDelayMode() const
+{
+    return controller->isNoDelayMode();
+}
+
+
+bool ControllerInfo::setNoDelayMode(bool on)
+{
+    controller->setNoDelayMode(on);
+    return on;
+}
+
 }
 
 
@@ -665,24 +684,15 @@ ControllerItem* SimulationBody::controller(int index) const
 }
 
 
-void SimulationBody::Impl::findControlSrcItems(Item* item, vector<Item*>& io_items, bool doPickCheckedItems)
+void SimulationBody::Impl::findControlSrcItems(Item* item, vector<Item*>& io_items)
 {
     while(item){
-        Item* srcItem = nullptr;
-        if(dynamic_cast<ControllerItem*>(item)){
-            srcItem = item;
-        }
-        if(srcItem){
-            bool isChecked = srcItem->isChecked();
-            if(!doPickCheckedItems || isChecked){
-                if(!doPickCheckedItems && isChecked){
-                    io_items.clear();
-                    doPickCheckedItems = true;
-                }
-                io_items.push_back(srcItem);
+        if(!dynamic_cast<BodyItem*>(item)){
+            if(auto controllerItem = dynamic_cast<ControllerItem*>(item)){
+                io_items.push_back(controllerItem);
+            } else if(item->childItem()){
+                findControlSrcItems(item->childItem(), io_items);
             }
-        } else if(item->childItem()){
-            findControlSrcItems(item->childItem(), io_items, doPickCheckedItems);
         }
         item = item->nextItem();
     }
@@ -701,7 +711,7 @@ bool SimulationBody::Impl::initialize(SimulatorItem* simulatorItem, BodyItem* bo
     this->bodyItem = bodyItem;
     deviceStateConnections.disconnect();
     controllerInfos.clear();
-    resultItemPrefix = simImpl->self->name() + "-" + bodyItem->name();
+    recordItemPrefix = simImpl->self->name() + "-" + bodyItem->name();
 
     body_->setCurrentTimeFunction([this](){ return this->simImpl->currentTime(); });
     body_->initializeState();
@@ -715,10 +725,6 @@ bool SimulationBody::Impl::initialize(SimulatorItem* simulatorItem, BodyItem* bo
     }
 
     isActive = true;
-    
-    initializeResultData();
-
-    self->bufferResults(); // put the intial state
     
     return true;
 }
@@ -768,10 +774,10 @@ void SimulationBody::Impl::extractAssociatedItems(bool doReset)
     }
 
     if(controlSrcItems.empty()){
-        parentOfResultItems = bodyItem;
+        parentOfRecordItems = bodyItem;
 
     } else if(controlSrcItems.size() == 1){
-        parentOfResultItems = controlSrcItems.front();
+        parentOfRecordItems = controlSrcItems.front();
 
     } else {
         // find the common owner of all the controllers
@@ -785,7 +791,7 @@ void SimulationBody::Impl::extractAssociatedItems(bool doReset)
                 item = item->parentItem();
             }
             if(depth < minDepth){
-                parentOfResultItems = owner;
+                parentOfRecordItems = owner;
                 minDepth = depth;
             }
         }
@@ -812,31 +818,31 @@ void SimulationBody::cloneShapesOnce()
 }
 
 
-const std::string& SimulationBody::resultItemPrefix() const
+const std::string& SimulationBody::recordItemPrefix() const
 {
-    return impl->resultItemPrefix;
+    return impl->recordItemPrefix;
 }
 
 
-void SimulationBody::Impl::initializeResultData()
+void SimulationBody::Impl::initializeRecording()
 {
-    self->initializeResultBuffers();
+    self->initializeRecordBuffers();
     
-    if(!simImpl->isRecordingEnabled){
-        return;
+    if(simImpl->isRecordingEnabled){
+        self->initializeRecordItems();
     }
 
-    self->initializeResultItems();
+    self->bufferRecords(); // put the intial state
 }
 
 
-void SimulationBody::initializeResultBuffers()
+void SimulationBody::initializeRecordBuffers()
 {
-    impl->initializeResultBuffers();
+    impl->initializeRecordBuffers();
 }
 
 
-void SimulationBody::Impl::initializeResultBuffers()
+void SimulationBody::Impl::initializeRecordBuffers()
 {
     jointPosBuf.resizeColumn(body_->numAllJoints());
     int numLinksToRecord = 0;
@@ -850,7 +856,7 @@ void SimulationBody::Impl::initializeResultBuffers()
     deviceStateConnections.disconnect();
     deviceStateChangeFlag.clear();
     deviceStateChangeFlag.resize(numDevices, true); // set all the bits to store the initial states
-    devicesToNotifyResults.clear();
+    devicesToNotifyRecords.clear();
     
     if(devices.empty() || !simImpl->isDeviceStateOutputEnabled){
         deviceStateBuf.clear();
@@ -879,24 +885,24 @@ void SimulationBody::Impl::initializeResultBuffers()
 }
 
 
-void SimulationBody::initializeResultItems()
+void SimulationBody::initializeRecordItems()
 {
-    impl->initializeResultItems();
+    impl->initializeRecordItems();
 }
 
 
-void SimulationBody::Impl::initializeResultItems()
+void SimulationBody::Impl::initializeRecordItems()
 {
-    if(!parentOfResultItems){
+    if(!parentOfRecordItems){
         return;
     }
 
     bool doAddMotionItem = false;
-    auto motionItem = parentOfResultItems->findChildItem<BodyMotionItem>(resultItemPrefix);
+    auto motionItem = parentOfRecordItems->findChildItem<BodyMotionItem>(recordItemPrefix);
     if(!motionItem){
         motionItem = new BodyMotionItem();
         motionItem->setTemporal();
-        motionItem->setName(resultItemPrefix);
+        motionItem->setName(recordItemPrefix);
         doAddMotionItem = true;
     }
 
@@ -904,22 +910,22 @@ void SimulationBody::Impl::initializeResultItems()
     motion->setFrameRate(simImpl->worldFrameRate);
     motion->setDimension(0, jointPosBuf.colSize(), linkPosBuf.colSize());
     motion->setOffsetTime(0.0);
-    jointPosResults = motion->jointPosSeq();
-    linkPosResultItem = motionItem->linkPosSeqItem();
-    linkPosResults = motion->linkPosSeq();
+    jointPosRecord = motion->jointPosSeq();
+    linkPosRecordItem = motionItem->linkPosSeqItem();
+    linkPosRecord = motion->linkPosSeq();
 
     const int numDevices = deviceStateBuf.colSize();
     if(numDevices == 0 || !simImpl->isDeviceStateOutputEnabled){
         clearMultiDeviceStateSeq(*motion);
     } else {
-        deviceStateResults = getOrCreateMultiDeviceStateSeq(*motion);
-        deviceStateResults->initialize(body_->devices());
+        deviceStateRecord = getOrCreateMultiDeviceStateSeq(*motion);
+        deviceStateRecord->initialize(body_->devices());
     }
 
     if(doAddMotionItem){
-        parentOfResultItems->addChildItem(motionItem);
+        parentOfRecordItems->addChildItem(motionItem);
     }
-    simImpl->addBodyMotionEngine(motionItem);
+    simImpl->logEngine->addSubEnginesFor(motionItem);
 }
 
 
@@ -967,10 +973,10 @@ void SimulationBody::Impl::setActive(bool on)
     if(body_){
         if(on){
             if(!isActive){
-                simImpl->resultBufMutex.lock();
-                self->initializeResultBuffers();
-                self->bufferResults();
-                simImpl->resultBufMutex.unlock();
+                simImpl->recordBufMutex.lock();
+                self->initializeRecordBuffers();
+                self->bufferRecords();
+                simImpl->recordBufMutex.unlock();
                 isActive = true;
                 simImpl->needToUpdateSimBodyLists = true;
             }
@@ -992,13 +998,13 @@ void SimulationBody::notifyUnrecordedDeviceStateChange(Device* device)
 }
 
 
-void SimulationBody::bufferResults()
+void SimulationBody::bufferRecords()
 {
-    impl->bufferResults();
+    impl->bufferRecords();
 }
 
 
-void SimulationBody::Impl::bufferResults()
+void SimulationBody::Impl::bufferRecords()
 {
     if(jointPosBuf.colSize() > 0){
         Deque2D<double>::Row q = jointPosBuf.append();
@@ -1030,18 +1036,18 @@ void SimulationBody::Impl::bufferResults()
 }
 
 
-void SimulationBody::flushResults()
+void SimulationBody::flushRecords()
 {
-    impl->flushResults();
+    impl->flushRecords();
 }
 
 
-void SimulationBody::Impl::flushResults()
+void SimulationBody::Impl::flushRecords()
 {
     if(simImpl->isRecordingEnabled){
-        flushResultsToBodyMotionItems();
+        flushRecordsToBodyMotionItems();
     } else {
-        flushResultsToBody();
+        flushRecordsToBody();
     }
 
     // clear buffers
@@ -1054,10 +1060,10 @@ void SimulationBody::Impl::flushResults()
 }
 
 
-void SimulationBody::Impl::flushResultsToBodyMotionItems()
+void SimulationBody::Impl::flushRecordsToBodyMotionItems()
 {
-    if(!linkPosResults){
-        initializeResultItems();
+    if(!linkPosRecord){
+        initializeRecordItems();
     }
 
     const int ringBufferSize = simImpl->ringBufferSize;
@@ -1068,28 +1074,28 @@ void SimulationBody::Impl::flushResultsToBodyMotionItems()
         bool offsetChanged = false;
         for(int i=0; i < numBufFrames; ++i){
             auto buf = linkPosBuf.row(i);
-            if(linkPosResults->numFrames() >= ringBufferSize){
-                linkPosResults->popFrontFrame();
+            if(linkPosRecord->numFrames() >= ringBufferSize){
+                linkPosRecord->popFrontFrame();
                 offsetChanged = true;
             }
-            std::copy(buf.begin(), buf.end(), linkPosResults->appendFrame().begin());
+            std::copy(buf.begin(), buf.end(), linkPosRecord->appendFrame().begin());
         }
         if(offsetChanged){
-            linkPosResults->setOffsetTimeFrame(nextFrame - linkPosResults->numFrames());
+            linkPosRecord->setOffsetTimeFrame(nextFrame - linkPosRecord->numFrames());
         }
     }
     if(jointPosBuf.colSize() > 0){
         bool offsetChanged = false;
         for(int i=0; i < numBufFrames; ++i){
             auto buf = jointPosBuf.row(i);
-            if(jointPosResults->numFrames() >= ringBufferSize){
-                jointPosResults->popFrontFrame();
+            if(jointPosRecord->numFrames() >= ringBufferSize){
+                jointPosRecord->popFrontFrame();
                 offsetChanged = true;
             }
-            std::copy(buf.begin(), buf.end(), jointPosResults->appendFrame().begin());
+            std::copy(buf.begin(), buf.end(), jointPosRecord->appendFrame().begin());
         }
         if(offsetChanged){
-            jointPosResults->setOffsetTimeFrame(nextFrame - jointPosResults->numFrames());
+            jointPosRecord->setOffsetTimeFrame(nextFrame - jointPosRecord->numFrames());
         }
     }
     if(deviceStateBuf.colSize() > 0){
@@ -1097,20 +1103,20 @@ void SimulationBody::Impl::flushResultsToBodyMotionItems()
         // This loop begins with the second element to skip the first element to keep the unchanged states
         for(int i=1; i < deviceStateBuf.rowSize(); ++i){ 
             auto buf = deviceStateBuf.row(i);
-            if(deviceStateResults->numFrames() >= ringBufferSize){
-                deviceStateResults->popFrontFrame();
+            if(deviceStateRecord->numFrames() >= ringBufferSize){
+                deviceStateRecord->popFrontFrame();
                 offsetChanged = true;
             }
-            std::copy(buf.begin(), buf.end(), deviceStateResults->appendFrame().begin());
+            std::copy(buf.begin(), buf.end(), deviceStateRecord->appendFrame().begin());
         }
         if(offsetChanged){
-            deviceStateResults->setOffsetTimeFrame(nextFrame - deviceStateResults->numFrames());
+            deviceStateRecord->setOffsetTimeFrame(nextFrame - deviceStateRecord->numFrames());
         }
     }
 }
 
 
-void SimulationBody::Impl::flushResultsToBody()
+void SimulationBody::Impl::flushRecordsToBody()
 {
     Body* orgBody = bodyItem->body();
     if(!linkPosBuf.empty()){
@@ -1131,7 +1137,7 @@ void SimulationBody::Impl::flushResultsToBody()
         }
     }
     if(!deviceStateBuf.empty()){
-        devicesToNotifyResults.clear();
+        devicesToNotifyRecords.clear();
         const DeviceList<>& devices = orgBody->devices();
         auto ds = deviceStateBuf.last();
         const int ndevices = devices.size();
@@ -1141,14 +1147,14 @@ void SimulationBody::Impl::flushResultsToBody()
                 Device* device = devices[i];
                 device->copyStateFrom(*s);
                 prevFlushedDeviceStateInDirectMode[i] = s;
-                devicesToNotifyResults.push_back(device);
+                devicesToNotifyRecords.push_back(device);
             }
         }
     }
 }
 
 
-void SimulationBody::Impl::flushResultsToWorldLogFile(int bufferFrame)
+void SimulationBody::Impl::flushRecordsToWorldLogFile(int bufferFrame)
 {
     //if(bufferFrame < linkPosBuf.rowSize()){
     
@@ -1182,12 +1188,12 @@ void SimulationBody::Impl::flushResultsToWorldLogFile(int bufferFrame)
 /**
    This function is called when the no recording mode
 */
-void SimulationBody::Impl::notifyResults(double time)
+void SimulationBody::Impl::notifyRecords(double time)
 {
     if(isDynamic){
         bodyItem->notifyKinematicStateChange(!simImpl->isAllLinkPositionOutputMode);
     }
-    for(Device* device : devicesToNotifyResults){
+    for(Device* device : devicesToNotifyRecords){
         device->notifyStateChange();
     }
     for(Device* device : bodyItem->body()->devices()){
@@ -1202,14 +1208,21 @@ SimulatorItem::SimulatorItem()
 }
 
 
+SimulatorItem::SimulatorItem(const std::string& name)
+    : Item(name)
+{
+    impl = new Impl(this);
+}
+
+
 SimulatorItem::Impl::Impl(SimulatorItem* self)
     : self(self),
       temporalResolutionType(N_TEMPORARL_RESOLUTION_TYPES, CNOID_GETTEXT_DOMAIN_NAME),
       preDynamicsFunctions(this),
       midDynamicsFunctions(this),
       postDynamicsFunctions(this),
-      recordingMode(SimulatorItem::N_RECORDING_MODES, CNOID_GETTEXT_DOMAIN_NAME),
-      timeRangeMode(SimulatorItem::N_TIME_RANGE_MODES, CNOID_GETTEXT_DOMAIN_NAME),
+      recordingMode(NumRecordingModes, CNOID_GETTEXT_DOMAIN_NAME),
+      timeRangeMode(NumTimeRangeModes, CNOID_GETTEXT_DOMAIN_NAME),
       mv(MessageView::instance())
 {
     worldItem = nullptr;
@@ -1224,21 +1237,21 @@ SimulatorItem::Impl::Impl(SimulatorItem* self)
     worldFrameRate = 1.0;
     worldTimeStep_ = 1.0;
     frameAtLastBufferWriting = 0;
-    flushTimer.sigTimeout().connect([&](){ flushResults(); });
+    flushTimer.sigTimeout().connect([&](){ flushRecords(); });
 
-    recordingMode.setSymbol(SimulatorItem::REC_FULL, N_("full"));
-    recordingMode.setSymbol(SimulatorItem::REC_TAIL, N_("tail"));
-    recordingMode.setSymbol(SimulatorItem::REC_NONE, N_("off"));
-    recordingMode.select(SimulatorItem::REC_FULL);
+    recordingMode.setSymbol(FullRecording, N_("full"));
+    recordingMode.setSymbol(TailRecording, N_("tail"));
+    recordingMode.setSymbol(NoRecording, N_("off"));
+    recordingMode.select(FullRecording);
 
-    timeRangeMode.setSymbol(SimulatorItem::TR_UNLIMITED, N_("Unlimited"));
-    timeRangeMode.setSymbol(SimulatorItem::TR_ACTIVE_CONTROL, N_("Active control period"));
-    timeRangeMode.setSymbol(SimulatorItem::TR_SPECIFIED, N_("Specified time"));
-    timeRangeMode.setSymbol(SimulatorItem::TR_TIMEBAR, N_("Time bar range"));
-    timeRangeMode.select(SimulatorItem::TR_UNLIMITED);
+    timeRangeMode.setSymbol(UnlimitedTime, N_("Unlimited"));
+    timeRangeMode.setSymbol(SpecifiedTime, N_("Specified time"));
+    timeRangeMode.setSymbol(TimeBarTime, N_("Time bar range"));
+    timeRangeMode.select(UnlimitedTime);
 
-    specifiedTimeLength = 180.0; // 3 min.
+    timeLength = 180.0; // 3 min.
     useControllerThreadsProperty = true;
+    isActiveControlTimeRangeMode = false;
     isAllLinkPositionOutputMode = true;
     isDeviceStateOutputEnabled = true;
     isDoingSimulationLoop = false;
@@ -1266,8 +1279,9 @@ SimulatorItem::Impl::Impl(SimulatorItem* self, const Impl& org)
     recordingMode = org.recordingMode;
     timeRangeMode = org.timeRangeMode;
 
-    specifiedTimeLength = org.specifiedTimeLength;
+    timeLength = org.timeLength;
     useControllerThreadsProperty = org.useControllerThreadsProperty;
+    isActiveControlTimeRangeMode = org.isActiveControlTimeRangeMode;
     isAllLinkPositionOutputMode = org.isAllLinkPositionOutputMode;
     isDeviceStateOutputEnabled = org.isDeviceStateOutputEnabled;
     isRealtimeSyncMode = org.isRealtimeSyncMode;
@@ -1278,7 +1292,7 @@ SimulatorItem::Impl::Impl(SimulatorItem* self, const Impl& org)
 
 SimulatorItem::~SimulatorItem()
 {
-    impl->stopSimulation(true);
+    impl->stopSimulation(true, true);
     delete impl;
 }
 
@@ -1289,7 +1303,7 @@ SimulatorItem::Impl::~Impl()
 }
 
 
-void SimulatorItem::onPositionChanged()
+void SimulatorItem::onTreePathChanged()
 {
     impl->worldItem = findOwnerItem<WorldItem>();
 }
@@ -1297,7 +1311,7 @@ void SimulatorItem::onPositionChanged()
 
 void SimulatorItem::onDisconnectedFromRoot()
 {
-    impl->stopSimulation(true);
+    impl->stopSimulation(true, true);
     impl->worldItem = nullptr;
 }
 
@@ -1349,9 +1363,32 @@ bool SimulatorItem::isRecordingEnabled() const
 }
 
 
-void SimulatorItem::setTimeRangeMode(int selection)
+void SimulatorItem::setTimeRangeMode(int mode)
 {
-    impl->timeRangeMode.select(selection);
+    if(mode == ActiveControlTime){
+        impl->timeRangeMode.select(UnlimitedTime);
+        setActiveControlTimeRangeMode(true);
+    } else {
+        impl->timeRangeMode.select(mode);
+    }
+}
+
+
+void SimulatorItem::setTimeLength(double length)
+{
+    impl->timeLength = length;
+}
+
+
+void SimulatorItem::setActiveControlTimeRangeMode(bool on)
+{
+    impl->isActiveControlTimeRangeMode = on;
+}
+
+
+bool SimulatorItem::isActiveControlTimeRangeMode() const
+{
+    return impl->isActiveControlTimeRangeMode;
 }
 
 
@@ -1384,16 +1421,6 @@ bool SimulatorItem::isDeviceStateOutputEnabled() const
     return impl->isDeviceStateOutputEnabled;
 }
 
-void SimulatorItem::setSpecifiedRecordingTimeLength(double length)
-{
-    impl->setSpecifiedRecordingTimeLength(length);
-}
-
-void SimulatorItem::Impl::setSpecifiedRecordingTimeLength(double length)
-{
-    specifiedTimeLength = length;
-}
-
 CollisionDetector* SimulatorItem::getOrCreateCollisionDetector()
 {
     if(impl->collisionDetector){
@@ -1409,18 +1436,6 @@ CollisionDetector* SimulatorItem::getOrCreateCollisionDetector()
 CollisionDetector* SimulatorItem::collisionDetector()
 {
     return getOrCreateCollisionDetector();
-}
-
-
-void SimulatorItem::setSelfCollisionEnabled(bool on)
-{
-
-}
-
-
-bool SimulatorItem::isSelfCollisionEnabled() const
-{
-    return false;
 }
 
 
@@ -1498,6 +1513,8 @@ void SimulatorItem::removePostDynamicsFunction(int id)
 }
 
 
+namespace {
+
 int FunctionSet::add(std::function<void()>& func)
 {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1554,8 +1571,10 @@ void FunctionSet::updateFunctions()
         }
     }
     needToUpdate = false;
-}        
-    
+}
+
+}
+
     
 void SimulatorItem::Impl::clearSimulation()
 {
@@ -1602,9 +1621,24 @@ bool SimulatorItem::startSimulation(bool doReset)
 
 bool SimulatorItem::Impl::startSimulation(bool doReset)
 {
+    // Check if there is another active simulation in the same world
+    for(auto& simulatorItem : worldItem->descendantItems<SimulatorItem>()){
+        if(simulatorItem->isRunning()){
+            if(simulatorItem == self){
+                mv->putln(format(_("{0} is doing its simulation."), self->displayName(), MessageView::Warning));
+            } else {
+                mv->putln(
+                    format(_("{0} cannot start the simulation because {1} in the same world is doing its simulation."),
+                           self->displayName(), simulatorItem->displayName()),
+                    MessageView::Error);
+            }
+            return false;
+        }
+    }
+    
     this->doReset = doReset;
     
-    stopSimulation(true);
+    stopSimulation(true, true);
 
     if(!worldItem){
         mv->putln(format(_("{} must be in a WorldItem to do simulation."), self->displayName()),
@@ -1633,7 +1667,7 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
     }
 
     clearSimulation();
-    bodyMotionEngines.clear();
+    getOrCreateLogEngine()->clearSubEngines();
 
     for(size_t i=0; i < targetItems.size(); ++i){
 
@@ -1678,28 +1712,6 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
                 allSimBodies.push_back(simBody);
             }
         }
-    }
-
-    numBufferedFrames = 1;
-    
-    if(isRecordingEnabled && recordCollisionData){
-        collisionPairsBuf.clear();
-        string collisionSeqName = self->name() + "-collisions";
-        auto collisionSeqItem = worldItem->findChildItem<CollisionSeqItem>(collisionSeqName);
-        if(!collisionSeqItem){
-            collisionSeqItem = new CollisionSeqItem();
-            collisionSeqItem->setTemporal();
-            collisionSeqItem->setName(collisionSeqName);
-            worldItem->addChildItem(collisionSeqItem);
-
-            addCollisionSeqEngine(collisionSeqItem);
-        }
-        collisionSeq = collisionSeqItem->collisionSeq();
-        collisionSeq->setFrameRate(worldFrameRate);
-        collisionSeq->setNumParts(1);
-        collisionSeq->setNumFrames(1);
-        CollisionSeq::Frame frame0 = collisionSeq->frame(0);
-        frame0[0]  = std::make_shared<CollisionLinkPairList>();
     }
 
     extForceFunctionId = stdx::nullopt;
@@ -1769,10 +1781,9 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
 
         updateSimBodyLists();
 
-        doStopSimulationWhenNoActiveControllers =
-            timeRangeMode.is(SimulatorItem::TR_ACTIVE_CONTROL) && hasControllers;
+        doStopSimulationWhenNoActiveControllers = isActiveControlTimeRangeMode && hasControllers;
 
-        if(doStopSimulationWhenNoActiveControllers && activeControllers.empty()){
+        if(doStopSimulationWhenNoActiveControllers && activeControllerInfos.empty()){
             mv->putln(_("The simulation cannot be started because all the controllers are inactive."),
                       MessageView::Error);
             result = false;
@@ -1780,39 +1791,75 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
     }
 
     if(result){
+        result = self->completeInitializationOfSimulation();
+    }
+
+    if(result){
+
+        for(auto& simBody : activeSimBodies){
+            if(simBody->body()){
+                simBody->impl->initializeRecording();
+            }
+        }
+
+        numBufferedFrames = 1;
+    
+        if(isRecordingEnabled && recordCollisionData){
+            collisionPairsBuf.clear();
+            string collisionSeqName = self->name() + "-collisions";
+            auto collisionSeqItem = worldItem->findChildItem<CollisionSeqItem>(collisionSeqName);
+            if(!collisionSeqItem){
+                collisionSeqItem = new CollisionSeqItem();
+                collisionSeqItem->setTemporal();
+                collisionSeqItem->setName(collisionSeqName);
+                worldItem->addChildItem(collisionSeqItem);
+                logEngine->addCollisionSeqEngine(collisionSeqItem);
+            }
+            collisionSeq = collisionSeqItem->collisionSeq();
+            collisionSeq->setFrameRate(worldFrameRate);
+            collisionSeq->setNumParts(1);
+            collisionSeq->setNumFrames(1);
+            CollisionSeq::Frame frame0 = collisionSeq->frame(0);
+            frame0[0]  = std::make_shared<CollisionLinkPairList>();
+        }
+        
         frameAtLastBufferWriting = 0;
         isDoingSimulationLoop = true;
         isWaitingForSimulationToStop = false;
+        isForcedToStopSimulation = false;
         stopRequested = false;
         pauseRequested = false;
 
         ringBufferSize = std::numeric_limits<int>::max();
         
         if(timeRangeMode.is(SimulatorItem::TR_SPECIFIED)){
-            maxFrame = specifiedTimeLength / worldTimeStep_;
+            maxFrame = timeLength / worldTimeStep_;
         } else if(timeRangeMode.is(SimulatorItem::TR_TIMEBAR)){
             maxFrame = TimeBar::instance()->maxTime() / worldTimeStep_;
         } else if(isRingBufferMode){
             maxFrame = std::numeric_limits<int>::max();
-            ringBufferSize = specifiedTimeLength / worldTimeStep_;
+            ringBufferSize = timeLength / worldTimeStep_;
         } else {
             maxFrame = std::numeric_limits<int>::max();
         }
 
         useControllerThreads = useControllerThreadsProperty;
         if(useControllerThreads){
-            isExitingControlLoopRequested = false;
-            isControlRequested = false;
-            isControlFinished = false;
-            controlThread = std::thread([&](){ concurrentControlLoop(); });
+            for(auto& info : activeControllerInfos){
+                info->isExitingControlLoopRequested = false;
+                info->isControlRequested = false;
+                info->isControlFinished = false;
+                info->isControlToBeContinued = false;
+                info->controlThread = std::thread([info](){ info->concurrentControlLoop(); });
+            }
         }
 
         aboutToQuitConnection.disconnect();
         aboutToQuitConnection = cnoid::sigAboutToQuit().connect(
-            [&](){ stopSimulation(true); });
+            [&](){ stopSimulation(true, true); });
 
         worldLogFileItem = nullptr;
-         // Check child items first
+        // Check child items first
         auto worldLogFileItems = self->descendantItems<WorldLogFileItem>();
         if(worldLogFileItems.empty()){
             // Check items in the world secondly
@@ -1845,14 +1892,10 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
         }
 
         if(isRecordingEnabled){
-            fillLevelId = timeBar->startFillLevelUpdate();
-        }
-        if(!timeBar->isDoingPlayback()){
-            timeBar->setTime(0.0);
-            timeBar->startPlayback();
+            logEngine->startOngoingTimeUpdate(0.0);
         }
 
-        flushResults();
+        flushRecords();
         start();
         flushTimer.start(1000.0 / timeBar->playbackFrameRate());
 
@@ -1862,6 +1905,8 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
     }
 
     if(!result){
+        mv->notify(format(_("{0} failed to initialize the simulation."), self->displayName()),
+                   MessageView::Error);
         clearSimulation();
     }
 
@@ -1869,9 +1914,44 @@ bool SimulatorItem::Impl::startSimulation(bool doReset)
 }
 
 
+void SimulatorItem::Impl::updateSimBodyLists()
+{
+    activeSimBodies.clear();
+    activeControllerInfos.clear();
+    loggingControllers.clear();
+    hasActiveFreeBodies = false;
+    
+    for(size_t i=0; i < allSimBodies.size(); ++i){
+        SimulationBody* simBody = allSimBodies[i];
+        auto simBodyImpl = simBody->impl;
+        auto& controllerInfos = simBodyImpl->controllerInfos;
+        if(simBodyImpl->isActive){
+            activeSimBodies.push_back(simBody);
+            if(controllerInfos.empty()){
+                hasActiveFreeBodies = true;
+            }
+        }
+        for(auto& info : controllerInfos){
+            activeControllerInfos.push_back(info);
+            if(info->isLogEnabled()){
+                loggingControllers.push_back(info->controller);
+            }
+       }
+    }
+
+    needToUpdateSimBodyLists = false;
+}
+
+
 CloneMap& SimulatorItem::cloneMap()
 {
     return impl->cloneMap;
+}
+
+
+bool SimulatorItem::completeInitializationOfSimulation()
+{
+    return true;
 }
 
 
@@ -2011,44 +2091,21 @@ void SimulatorItem::Impl::run()
     isDoingSimulationLoop = false;
 
     if(useControllerThreads){
-        {
-            std::lock_guard<std::mutex> lock(controlMutex);
-            isExitingControlLoopRequested = true;
+        for(auto& info : activeControllerInfos){
+            {
+                std::lock_guard<std::mutex> lock(info->controlMutex);
+                info->isExitingControlLoopRequested = true;
+            }
+            info->controlCondition.notify_all();
+            info->controlThread.join();
         }
-        controlCondition.notify_all();
-        controlThread.join();
     }
 
     if(!isWaitingForSimulationToStop){
-        callLater([&](){ onSimulationLoopStopped(); });
+        callLater([&](){ onSimulationLoopStopped(isForcedToStopSimulation); });
     }
 
     self->finalizeSimulationThread();
-}
-
-
-void SimulatorItem::Impl::updateSimBodyLists()
-{
-    activeSimBodies.clear();
-    activeControllers.clear();
-    hasActiveFreeBodies = false;
-    
-    for(size_t i=0; i < allSimBodies.size(); ++i){
-        SimulationBody* simBody = allSimBodies[i];
-        auto simBodyImpl = simBody->impl;
-        auto& controllerInfos = simBodyImpl->controllerInfos;
-        if(simBodyImpl->isActive){
-            activeSimBodies.push_back(simBody);
-            if(controllerInfos.empty()){
-                hasActiveFreeBodies = true;
-            }
-        }
-        for(auto& info : controllerInfos){
-            activeControllers.push_back(info->controller);
-       }
-    }
-
-    needToUpdateSimBodyLists = false;
 }
 
 
@@ -2064,26 +2121,39 @@ bool SimulatorItem::Impl::stepSimulationMain()
 
     preDynamicsFunctions.call();
 
-    if(useControllerThreads){
-        if(activeControllers.empty()){
-            isControlFinished = true;
-        } else {
-            for(size_t i=0; i < activeControllers.size(); ++i){
-                activeControllers[i]->input();
-            }
-            {
-                std::lock_guard<std::mutex> lock(controlMutex);                
-                isControlRequested = true;
-            }
-            controlCondition.notify_all();
-        }
-    } else {
-        for(size_t i=0; i < activeControllers.size(); ++i){
-            ControllerItem* controller = activeControllers[i];
+    if(!useControllerThreads){
+        for(auto& info : activeControllerInfos){
+            auto& controller = info->controller;
             controller->input();
             doContinue |= controller->control();
             if(controller->isNoDelayMode()){
                 controller->output();
+            }
+        }
+    } else {
+        bool hasNoDelayModeControllers = false;
+        for(auto& info : activeControllerInfos){
+            auto& controller = info->controller;
+            if(controller->isNoDelayMode()){
+                hasNoDelayModeControllers = true;
+            }
+            info->controller->input();
+            {
+                std::lock_guard<std::mutex> lock(info->controlMutex);                
+                info->isControlRequested = true;
+            }
+            info->controlCondition.notify_all();
+        }
+        if(hasNoDelayModeControllers){
+            // Todo: Process the controller that finishes control earlier first to
+            // reduce the total elapsed time before finishing all the output functions.
+            for(auto& info : activeControllerInfos){
+                if(info->controller->isNoDelayMode()){
+                    if(info->waitForControlInThreadToFinish()){
+                        doContinue = true;
+                    }
+                    info->controller->output();
+                }
             }
         }
     }
@@ -2098,41 +2168,37 @@ bool SimulatorItem::Impl::stepSimulationMain()
     }
 
     if(useControllerThreads){
-        {
-            std::unique_lock<std::mutex> lock(controlMutex);
-            while(!isControlFinished){
-                controlCondition.wait(lock);
+        for(auto& info : activeControllerInfos){
+            if(!info->controller->isNoDelayMode()){
+                if(info->waitForControlInThreadToFinish()){
+                    doContinue = true;
+                }
             }
         }
-        isControlFinished = false;
-        doContinue |= isControlToBeContinued;
     }
 
     postDynamicsFunctions.call();
 
+    for(auto& controller : loggingControllers){
+        controller->log();
+    }
+
     {
-        resultBufMutex.lock();
+        recordBufMutex.lock();
 
         ++numBufferedFrames;
         for(size_t i=0; i < activeSimBodies.size(); ++i){
-            activeSimBodies[i]->bufferResults();
+            activeSimBodies[i]->bufferRecords();
         }
         collisionPairsBuf.push_back(collisionPairs);
         frameAtLastBufferWriting = currentFrame;
 
-        resultBufMutex.unlock();
+        recordBufMutex.unlock();
     }
 
-    if(useControllerThreads){
-        for(size_t i=0; i < activeControllers.size(); ++i){
-            activeControllers[i]->output();
-        }
-    } else {
-        for(size_t i=0; i < activeControllers.size(); ++i){
-            ControllerItem* controller = activeControllers[i];
-            if(!controller->isNoDelayMode()){
-                controller->output(); 
-            }
+    for(auto& info : activeControllerInfos){
+        if(!info->controller->isNoDelayMode()){
+            info->controller->output();
         }
     }
 
@@ -2140,7 +2206,20 @@ bool SimulatorItem::Impl::stepSimulationMain()
 }
 
 
-void SimulatorItem::Impl::concurrentControlLoop()
+namespace {
+
+bool ControllerInfo::waitForControlInThreadToFinish()
+{
+    std::unique_lock<std::mutex> lock(controlMutex);
+    while(!isControlFinished){
+        controlCondition.wait(lock);
+    }
+    isControlFinished = false;
+    return isControlToBeContinued;
+}
+
+
+void ControllerInfo::concurrentControlLoop()
 {
     while(true){
         {
@@ -2158,10 +2237,7 @@ void SimulatorItem::Impl::concurrentControlLoop()
             }
         }
 
-        bool doContinue = false;
-        for(size_t i=0; i < activeControllers.size(); ++i){
-            doContinue |= activeControllers[i]->control();
-        }
+        bool doContinue = controller->control();
         
         {
             std::lock_guard<std::mutex> lock(controlMutex);
@@ -2175,31 +2251,35 @@ exitConcurrentControlLoop:
     return;
 }
 
+}
 
-void SimulatorItem::Impl::flushResults()
+
+void SimulatorItem::Impl::flushRecords()
 {
-    int frame = flushMainResults();
+    int frame = flushMainRecords();
 
     for(auto& info : loggedControllerInfos){
         info->flushLog();
     }
 
     if(isRecordingEnabled){
-        double fillLevel = frame / worldFrameRate;
-        timeBar->updateFillLevel(fillLevelId, fillLevel);
+        logEngine->updateOngoingTime(frame / worldFrameRate);
+        
     } else {
         const double time = frame / worldFrameRate;
         for(size_t i=0; i < activeSimBodies.size(); ++i){
-            activeSimBodies[i]->impl->notifyResults(time);
+            activeSimBodies[i]->impl->notifyRecords(time);
         }
-        timeBar->setTime(time);
+        if(self->isSelected()){
+            timeBar->setTime(time);
+        }
     }
 }
 
 
-int SimulatorItem::Impl::flushMainResults()
+int SimulatorItem::Impl::flushMainRecords()
 {
-    resultBufMutex.lock();
+    recordBufMutex.lock();
 
     if(worldLogFileItem){
         if(numBufferedFrames > 0){
@@ -2209,7 +2289,7 @@ int SimulatorItem::Impl::flushMainResults()
                 while(time >= nextLogTime){
                     worldLogFileItem->beginFrameOutput(time);
                     for(size_t i=0; i < activeSimBodies.size(); ++i){
-                        activeSimBodies[i]->impl->flushResultsToWorldLogFile(bufFrame);
+                        activeSimBodies[i]->impl->flushRecordsToWorldLogFile(bufFrame);
                     }
                     worldLogFileItem->endFrameOutput();
                     nextLogTime = ++nextLogFrame * logTimeStep;
@@ -2219,7 +2299,7 @@ int SimulatorItem::Impl::flushMainResults()
     }
     
     for(auto& simBody : activeSimBodies){
-        simBody->flushResults();
+        simBody->flushRecords();
     }
 
     bool offsetChanged;
@@ -2243,7 +2323,7 @@ int SimulatorItem::Impl::flushMainResults()
     
     numBufferedFrames = 0;
     
-    resultBufMutex.unlock();
+    recordBufMutex.unlock();
 
     return frame;
 }
@@ -2257,7 +2337,12 @@ void SimulatorItem::pauseSimulation()
 
 void SimulatorItem::Impl::pauseSimulation()
 {
+    flushTimer.stop();
+    if(isRecordingEnabled){
+        logEngine->stopOngoingTimeUpdate();
+    }
     pauseRequested = true;
+    flushRecords();
 }
 
 
@@ -2269,28 +2354,35 @@ void SimulatorItem::restartSimulation()
 
 void SimulatorItem::Impl::restartSimulation()
 {
-    pauseRequested = false;
+    if(pauseRequested){
+        if(isRecordingEnabled){
+            logEngine->startOngoingTimeUpdate();
+        }
+        pauseRequested = false;
+        flushTimer.start(1000.0 / timeBar->playbackFrameRate());
+    }
 }
 
 
-void SimulatorItem::stopSimulation()
+void SimulatorItem::stopSimulation(bool isForced)
 {
-    impl->stopSimulation(false);
+    impl->stopSimulation(isForced, false);
 }
 
 
-void SimulatorItem::Impl::stopSimulation(bool doSync)
+void SimulatorItem::Impl::stopSimulation(bool isForced, bool doSync)
 {
     if(isDoingSimulationLoop){
         if(doSync){
             isWaitingForSimulationToStop = true;
         }
+        isForcedToStopSimulation = isForced;
         stopRequested = true;
         
         if(doSync){
             wait();
             isWaitingForSimulationToStop = false;
-            onSimulationLoopStopped();
+            onSimulationLoopStopped(isForced);
         }
     }
     aboutToQuitConnection.disconnect();
@@ -2303,7 +2395,7 @@ void SimulatorItem::finalizeSimulation()
 }
 
 
-void SimulatorItem::Impl::onSimulationLoopStopped()
+void SimulatorItem::Impl::onSimulationLoopStopped(bool isForced)
 {
     flushTimer.stop();
     
@@ -2320,11 +2412,9 @@ void SimulatorItem::Impl::onSimulationLoopStopped()
         subSimulator->finalizeSimulation();
     }
 
-    flushResults();
+    flushRecords();
 
-    if(isRecordingEnabled){
-        timeBar->stopFillLevelUpdate(fillLevelId);
-    }
+    logEngine->stopOngoingTimeUpdate();
 
     mv->notify(format(_("Simulation by {0} has finished at {1} [s]."), self->displayName(), finishTime));
 
@@ -2335,7 +2425,7 @@ void SimulatorItem::Impl::onSimulationLoopStopped()
 
     clearSimulation();
 
-    sigSimulationFinished();
+    sigSimulationFinished(isForced);
 }
 
 
@@ -2377,14 +2467,14 @@ double SimulatorItem::Impl::currentTime() const
 
 int SimulatorItem::simulationFrame() const
 {
-    QMutexLocker locker(&impl->resultBufMutex);
+    QMutexLocker locker(&impl->recordBufMutex);
     return impl->frameAtLastBufferWriting;
 }
 
 
 double SimulatorItem::simulationTime() const
 {
-    QMutexLocker locker(&impl->resultBufMutex);
+    QMutexLocker locker(&impl->recordBufMutex);
     return impl->frameAtLastBufferWriting / impl->worldFrameRate;
 }
 
@@ -2392,6 +2482,12 @@ double SimulatorItem::simulationTime() const
 double SimulatorItem::Impl::timeStep() const
 {
     return worldTimeStep_;
+}
+
+
+std::string SimulatorItem::Impl::controllerName() const
+{
+    return string();
 }
 
 
@@ -2431,7 +2527,7 @@ SignalProxy<void()> SimulatorItem::sigSimulationResumed()
 }
 
 
-SignalProxy<void()> SimulatorItem::sigSimulationFinished()
+SignalProxy<void(bool isForced)> SimulatorItem::sigSimulationFinished()
 {
     return impl->sigSimulationFinished;
 }
@@ -2483,7 +2579,7 @@ void SimulatorItem::clearExternalForces()
 void SimulatorItem::Impl::doSetExternalForce()
 {
     std::lock_guard<std::mutex> lock(extForceMutex);
-    extForceInfo.link->addExternalForce(extForceInfo.f, extForceInfo.point);
+    extForceInfo.link->addExternalForceAtLocalPosition(extForceInfo.f, extForceInfo.point);
     if(extForceInfo.time > 0.0){
         extForceInfo.time -= worldTimeStep_;
         if(extForceInfo.time <= 0.0){
@@ -2554,13 +2650,13 @@ void SimulatorItem::Impl::setVirtualElasticStringForce()
 }
 
 
-void SimulatorItem::setForcedPosition(BodyItem* bodyItem, const Position& T)
+void SimulatorItem::setForcedPosition(BodyItem* /* bodyItem */, const Isometry3& /* T */)
 {
 
 }
 
 
-bool SimulatorItem::isForcedPositionActiveFor(BodyItem* bodyItem) const
+bool SimulatorItem::isForcedPositionActiveFor(BodyItem* /* bodyItem */) const
 {
     return false;
 }
@@ -2617,11 +2713,13 @@ void SimulatorItem::Impl::doPutProperties(PutPropertyFunction& putProperty)
                 [&](bool on){ onRealtimeSyncChanged(on); return true; });
     putProperty(_("Time range"), timeRangeMode,
                 [&](int index){ return timeRangeMode.select(index); });
-    putProperty(_("Time length"), specifiedTimeLength,
-                [&](double length){ setSpecifiedRecordingTimeLength(length); return true; });
+    putProperty(_("Time length"), timeLength,
+                [&](double length){ self->setTimeLength(length); return true; });
+    putProperty(_("Active control period only"), isActiveControlTimeRangeMode,
+                [&](bool on){ self->setActiveControlTimeRangeMode(on); return true; });
     putProperty(_("Recording"), recordingMode,
                 [&](int index){ return recordingMode.select(index); });
-    putProperty(_("All link positions"), isAllLinkPositionOutputMode,
+    putProperty(_("All link position recording"), isAllLinkPositionOutputMode,
                 [&](bool on){ return onAllLinkPositionOutputModeChanged(on); });
     putProperty(_("Device state output"), isDeviceStateOutputEnabled,
                 changeProperty(isDeviceStateOutputEnabled));
@@ -2637,6 +2735,7 @@ void SimulatorItem::Impl::doPutProperties(PutPropertyFunction& putProperty)
 bool SimulatorItem::store(Archive& archive)
 {
     return impl->store(archive);
+
 }
 
 
@@ -2650,30 +2749,27 @@ bool SimulatorItem::Impl::store(Archive& archive)
     archive.write("realtimeSync", isRealtimeSyncMode);
     archive.write("recording", recordingMode.selectedSymbol(), DOUBLE_QUOTED);
     archive.write("timeRangeMode", timeRangeMode.selectedSymbol(), DOUBLE_QUOTED);
-    archive.write("timeLength", specifiedTimeLength);
+    archive.write("timeLength", timeLength);
+    archive.write("active_control_time_range_mode", isActiveControlTimeRangeMode);
     archive.write("allLinkPositionOutputMode", isAllLinkPositionOutputMode);
     archive.write("deviceStateOutput", isDeviceStateOutputEnabled);
     archive.write("controllerThreads", useControllerThreadsProperty);
     archive.write("recordCollisionData", recordCollisionData);
     archive.write("controllerOptions", controllerOptionString_, DOUBLE_QUOTED);
-
+    
     ListingPtr idseq = new Listing();
     idseq->setFlowStyle(true);
-    for(size_t i=0; i < bodyMotionEngines.size(); ++i){
-        BodyMotionEnginePtr engine = bodyMotionEngines[i];
-        ValueNodePtr id = archive.getItemId(engine->motionItem());
-        if(id){
+    for(auto& engine : getOrCreateLogEngine()->subEngines){
+        if(ValueNodePtr id = archive.getItemId(engine->item())){
             idseq->append(id);
         }
     }
     if(!idseq->empty()){
-        archive.insert("motionItems", idseq);
+        archive.insert("time_sync_items", idseq);
     }
 
-    if(collisionSeqEngine)
-    {
-        ValueNodePtr id = archive.getItemId(collisionSeqEngine->collisionSeqItem());
-        if(id){
+    if(auto engine = logEngine->collisionSeqEngine){
+        if(ValueNodePtr id = archive.getItemId(engine->collisionSeqItem())){
             archive.insert("collisionSeqItem", id);
         }
     }
@@ -2700,18 +2796,15 @@ bool SimulatorItem::Impl::restore(const Archive& archive)
     } else {
         temporalResolutionType.select(RESOLUTION_TIMEBAR);
     }
-    
-    if(archive.read("onlyActiveControlPeriod", boolValue) && boolValue){
-        timeRangeMode.select(SimulatorItem::TR_ACTIVE_CONTROL);
-    } else if(archive.read("timeRangeMode", symbol)){
-        if(!timeRangeMode.select(symbol)){
-            if(symbol == "Specified period"){
-                timeRangeMode.select(SimulatorItem::TR_SPECIFIED);
-            } else if(symbol == "TimeBar range"){
-                timeRangeMode.select(SimulatorItem::TR_TIMEBAR);
-            }
+
+    if(archive.read("timeRangeMode", symbol)){
+        if(timeRangeMode.select(symbol)){
+            self->setTimeRangeMode(timeRangeMode.which());
+        } else if(symbol == "Active control period"){ // Old
+            self->setTimeRangeMode(ActiveControlTime);
         }
     }
+    isActiveControlTimeRangeMode = archive.get("active_control_time_range_mode", isActiveControlTimeRangeMode);
 
     if(archive.read("recording", symbol)){
         recordingMode.select(symbol);
@@ -2726,87 +2819,135 @@ bool SimulatorItem::Impl::restore(const Archive& archive)
         }
     }
     archive.read("realtimeSync", isRealtimeSyncMode);
-    archive.read("timeLength", specifiedTimeLength);
+    archive.read("timeLength", timeLength);
     self->setAllLinkPositionOutputMode(archive.get("allLinkPositionOutputMode", isAllLinkPositionOutputMode));
     archive.read("deviceStateOutput", isDeviceStateOutputEnabled);
     archive.read("recordCollisionData", recordCollisionData);
     archive.read("controllerThreads", useControllerThreadsProperty);
     archive.read("controllerOptions", controllerOptionString_);
 
-    archive.addPostProcess([&](){ restoreBodyMotionEngines(archive); });
+    archive.addPostProcess([&](){ restoreTimeSyncItemEngines(archive); });
     
     return true;
 }
 
 
-void SimulatorItem::Impl::restoreBodyMotionEngines(const Archive& archive)
+void SimulatorItem::Impl::restoreTimeSyncItemEngines(const Archive& archive)
 {
-    bodyMotionEngines.clear();
+    getOrCreateLogEngine()->clearSubEngines();
 
-    const Listing& idseq = *archive.findListing("motionItems");
+    const Listing& idseq = *archive.findListing("time_sync_items");
     if(idseq.isValid()){
         for(int i=0; i < idseq.size(); ++i){
             ValueNode* id = idseq.at(i);
             if(id){
-                auto motionItem = dynamic_cast<BodyMotionItem*>(archive.findItem(id));
-                if(motionItem){
-                    addBodyMotionEngine(motionItem);
+                if(auto item = archive.findItem(id)){
+                    logEngine->addSubEnginesFor(item);
                 }
             }
         }
     }
 
-    collisionSeqEngine = nullptr;
     ValueNode* id;
     id = archive.find("collisionSeqItem");
     if(id->isValid()){
         auto collisionSeqItem = dynamic_cast<CollisionSeqItem*>(archive.findItem(id));
         if(collisionSeqItem){
-            addCollisionSeqEngine(collisionSeqItem);
+            logEngine->addCollisionSeqEngine(collisionSeqItem);
         }
     }
 }
 
 
-void SimulatorItem::Impl::addBodyMotionEngine(BodyMotionItem* motionItem)
+SimulationLogEngine* SimulatorItem::Impl::getOrCreateLogEngine()
 {
-    if(auto bodyItem = motionItem->findOwnerItem<BodyItem>()){
-        bodyMotionEngines.push_back(new BodyMotionEngine(bodyItem, motionItem));
+    if(!logEngine){
+        logEngine = new SimulationLogEngine(this);
+    }
+    return logEngine;
+}
+
+
+namespace {
+
+SimulationLogEngine::SimulationLogEngine(SimulatorItem::Impl* itemImpl)
+    : TimeSyncItemEngine(itemImpl->self),
+      itemImpl(itemImpl)
+{
+    manager = TimeSyncItemEngineManager::instance();
+    doKeepPlayback = false;
+}
+
+
+void SimulationLogEngine::clearSubEngines()
+{
+    subEngines.clear();
+    collisionSeqEngine.reset();
+}
+
+
+void SimulationLogEngine::addSubEnginesFor(Item* item)
+{
+    manager->createEngines(item, subEngines);
+}
+
+
+void SimulationLogEngine::addCollisionSeqEngine(CollisionSeqItem* collisionSeqItem)
+{
+    if(itemImpl->worldItem){
+        collisionSeqEngine = new CollisionSeqEngine(itemImpl->worldItem, collisionSeqItem);
     }
 }
 
 
-void SimulatorItem::Impl::addCollisionSeqEngine(CollisionSeqItem* collisionSeqItem)
+void SimulationLogEngine::onPlaybackStarted(double /* time */)
 {
-    if(worldItem){
-        collisionSeqEngine = new CollisionSeqEngine(worldItem, collisionSeqItem);
-    }
+    doKeepPlayback = true;
+    notifyKinematicStateUpdate();
 }
 
 
-bool SimulatorItem::Impl::setPlaybackTime(double time)
+bool SimulationLogEngine::isTimeSyncAlwaysMaintained() const
+{
+    return doKeepPlayback;
+}
+
+
+bool SimulationLogEngine::onTimeChanged(double time)
 {
     bool processed = false;
-    if(!bodyMotionEngines.empty()){
-        for(auto& engine : bodyMotionEngines){
+    auto& si = itemImpl;
+    if(!subEngines.empty()){
+        for(auto& engine : subEngines){
             processed |= engine->onTimeChanged(time);
         }
-    } else if(worldLogFileItem){
-        processed |= worldLogFileItem->recallStateAtTime(time);
+    } else if(si->worldLogFileItem){
+        processed |= si->worldLogFileItem->recallStateAtTime(time);
     }
     if(collisionSeqEngine){
         processed |= collisionSeqEngine->onTimeChanged(time);
     }
-
     return processed;
 }
 
 
-bool SimulatedMotionEngineManager::setTime(double time)
+void SimulationLogEngine::onPlaybackStopped(double /* time */, bool /* isStoppedManually */)
 {
-    bool isActive = false;
-    for(size_t i=0; i < simulatorItems.size(); ++i){
-        isActive |= simulatorItems[i]->impl->setPlaybackTime(time);
+    doKeepPlayback = false;
+    notifyKinematicStateUpdate();
+}
+
+
+void SimulationLogEngine::notifyKinematicStateUpdate()
+{
+    auto& si = itemImpl;
+    if(si->worldItem){
+        for(auto& bodyItem : si->worldItem->descendantItems<BodyItem>()){
+            if(!bodyItem->body()->isStaticModel()){
+                bodyItem->notifyKinematicStateUpdate(false);
+            }
+        }
     }
-    return isActive;
+}
+
 }

@@ -5,46 +5,16 @@
 
 #include "FireDevice.h"
 #include "SceneFire.h"
-#include <cnoid/YAMLBodyLoader>
-#include <cnoid/SceneDevice>
-#include <cnoid/EigenArchive>
+#include "SceneEffectDeviceTypeRegistration.h"
 #include <cnoid/Body>
+#include <cnoid/MathUtil>
 
 using namespace std;
 using namespace cnoid;
 
 namespace {
 
-YAMLBodyLoader::NodeTypeRegistration
-registerFireDevice(
-    "FireDevice",
-    [](YAMLBodyLoader& loader, Mapping& node){
-        FireDevicePtr fire = new FireDevice;
-        fire->particleSystem().readParameters(loader.sceneReader(), node);
-        return loader.readDevice(fire, node);
-    });
-
-SceneDevice::FactoryRegistration<FireDevice>
-registerSceneFireDeviceFactory(
-    [](Device* device){
-        auto fireDevice = static_cast<FireDevice*>(device);
-        auto sceneFire = new SceneFire;
-        auto sceneDevice = new SceneDevice(fireDevice, sceneFire);
-
-        sceneDevice->setFunctionOnStateChanged(
-            [sceneFire, fireDevice](){
-                sceneFire->particleSystem() = fireDevice->particleSystem();
-                sceneFire->notifyUpdate();
-            });
-
-        sceneDevice->setFunctionOnTimeChanged(
-            [sceneFire](double time){
-                sceneFire->setTime(time);
-                sceneFire->notifyUpdate();
-            });
-            
-        return sceneDevice;
-    });
+SceneEffectDeviceTypeRegistration<FireDevice, SceneFire> snowDeviceRegistration("FireDevice");;
 
 }
 
@@ -69,7 +39,7 @@ FireDevice::FireDevice(const FireDevice& org, bool copyStateOnly)
 }
 
 
-const char* FireDevice::typeName()
+const char* FireDevice::typeName() const
 {
     return "FireDevice";
 }

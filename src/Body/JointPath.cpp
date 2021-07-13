@@ -15,47 +15,50 @@ using namespace std;
 using namespace cnoid;
 
 
-double JointPath::numericalIKdefaultDeltaScale()
+double JointPath::numericalIkDefaultDeltaScale()
 {
     return 0.9;
 }
 
-double JointPath::numericalIKdefaultTruncateRatio()
-{
-    return TruncatedSVD<MatrixXd>::defaultTruncateRatio();
-}
-
-int JointPath::numericalIKdefaultMaxIterations()
+int JointPath::numericalIkDefaultMaxIterations()
 {
     return 50;
 }
 
-double JointPath::numericalIKdefaultMaxIKerror()
+double JointPath::numericalIkDefaultMaxIkError()
+{
+    return 1.0e-7;
+}
+
+double JointPath::numericalIkDefaultDampingConstant()
 {
     return 1.0e-6;
 }
 
-double JointPath::numericalIKdefaultDampingConstant()
+//! \deprecated
+double JointPath::numericalIkDefaultTruncateRatio()
 {
-    return 1.0e-6;
+    return TruncatedSVD<MatrixXd>::defaultTruncateRatio();
 }
-
 
 namespace cnoid {
 
 class NumericalIK
 {
 public:
-    bool isBestEffortIKmode;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    
+    bool isBestEffortIkMode;
     double deltaScale;
     int maxIterations;
     int iteration; 
-    double maxIKerrorSqr;
+    double maxIkErrorSqr;
     double dampingConstantSqr;
+    vector<double> q0;
+    Isometry3 T0;
     MatrixXd J;
     VectorXd dTask;
     VectorXd dq;
-    vector<double> q0;
     MatrixXd JJ;
     Eigen::ColPivHouseholderQR<MatrixXd> QR;
     TruncatedSVD<MatrixXd> svd;
@@ -63,14 +66,14 @@ public:
     std::function<void(MatrixXd& out_Jacobian)> jacobianFunc;
 
     NumericalIK() {
-        deltaScale = JointPath::numericalIKdefaultDeltaScale();
-        maxIterations = JointPath::numericalIKdefaultMaxIterations();
+        deltaScale = JointPath::numericalIkDefaultDeltaScale();
+        maxIterations = JointPath::numericalIkDefaultMaxIterations();
         iteration = 0;
         dTask.resize(6);
-        isBestEffortIKmode = false;
-        double e = JointPath::numericalIKdefaultMaxIKerror();
-        maxIKerrorSqr = e * e;
-        double d = JointPath::numericalIKdefaultDampingConstant();
+        isBestEffortIkMode = false;
+        double e = JointPath::numericalIkDefaultMaxIkError();
+        maxIkErrorSqr = e * e;
+        double d = JointPath::numericalIkDefaultDampingConstant();
         dampingConstantSqr = d * d;
     }
 
@@ -111,6 +114,7 @@ void JointPath::initialize()
 {
     needForwardKinematicsBeforeIK = false;
     numericalIK = nullptr;
+    isCustomIkDisabled_ = false;
 }    
 
 
@@ -224,48 +228,54 @@ NumericalIK* JointPath::getOrCreateNumericalIK()
 }
 
 
-bool JointPath::isBestEffortIKmode() const
+bool JointPath::isBestEffortIkMode() const
 {
-    return numericalIK ? numericalIK->isBestEffortIKmode : false;
+    return numericalIK ? numericalIK->isBestEffortIkMode : false;
 }
 
 
-void JointPath::setBestEffortIKmode(bool on)
+void JointPath::setBestEffortIkMode(bool on)
 {
-    getOrCreateNumericalIK()->isBestEffortIKmode = on;
+    getOrCreateNumericalIK()->isBestEffortIkMode = on;
 }
 
 
-void JointPath::setNumericalIKmaxIKerror(double e)
+void JointPath::setNumericalIkMaxIkError(double e)
 {
-    getOrCreateNumericalIK()->maxIKerrorSqr = e * e;
+    getOrCreateNumericalIK()->maxIkErrorSqr = e * e;
 }
 
 
-void JointPath::setNumericalIKdeltaScale(double s)
+void JointPath::setNumericalIkDeltaScale(double s)
 {
     getOrCreateNumericalIK()->deltaScale = s;
 }
 
 
-void JointPath::setNumericalIKtruncateRatio(double r)
-{
-    getOrCreateNumericalIK()->svd.setTruncateRatio(r);
-}
-
-    
-void JointPath::setNumericalIKmaxIterations(int n)
+void JointPath::setNumericalIkMaxIterations(int n)
 {
     getOrCreateNumericalIK()->maxIterations = n;
 }
 
 
-void JointPath::setNumericalIKdampingConstant(double lambda)
+void JointPath::setNumericalIkDampingConstant(double lambda)
 {
     getOrCreateNumericalIK()->dampingConstantSqr = lambda * lambda;
 }
 
 
+/**
+   \deprecated
+   This parameter is used when SVD is used to solve a numerical IK, but the current
+   implementation uses the damped least square method instead of SVD by default.
+   Therefore this parameter is meaningless in the current implementation.
+*/
+void JointPath::setNumericalIkTruncateRatio(double r)
+{
+    getOrCreateNumericalIK()->svd.setTruncateRatio(r);
+}
+
+    
 void JointPath::customizeTarget
 (int numTargetElements,
  std::function<double(VectorXd& out_error)> errorFunc,
@@ -278,7 +288,7 @@ void JointPath::customizeTarget
 }
 
 
-JointPath& JointPath::setBaseLinkGoal(const Position& T)
+JointPath& JointPath::setBaseLinkGoal(const Isometry3& T)
 {
     linkPath_.baseLink()->setPosition(T);
     needForwardKinematicsBeforeIK = true;
@@ -288,15 +298,15 @@ JointPath& JointPath::setBaseLinkGoal(const Position& T)
 
 bool JointPath::calcInverseKinematics()
 {
-    if(numericalIK->errorFunc){
-        Position T; // dummy
+    if(numericalIK && numericalIK->errorFunc){
+        Isometry3 T; // dummy
         return calcInverseKinematics(T);
     }
     return false;
 }
 
 
-bool JointPath::calcInverseKinematics(const Position& T)
+bool JointPath::calcInverseKinematics(const Isometry3& T)
 {
     const bool USE_USUAL_INVERSE_SOLUTION_FOR_6x6_NON_BEST_EFFORT_PROBLEM = false;
     const bool USE_SVD_FOR_BEST_EFFORT_IK = false;
@@ -306,7 +316,10 @@ bool JointPath::calcInverseKinematics(const Position& T)
             return false;
         }
         if(baseLink() == endLink()){
-            baseLink()->setPosition(T);
+            endLink()->setPosition(T);
+            if(endLink()->isFreeJoint() && !endLink()->isRoot()){
+                endLink()->setOffsetPosition(endLink()->parent()->T().inverse() * T);
+            }
             return true;
         } else {
             // \todo implement here
@@ -330,10 +343,11 @@ bool JointPath::calcInverseKinematics(const Position& T)
     }
 
     nuIK->q0.resize(n);
-    if(!nuIK->isBestEffortIKmode){
+    if(!nuIK->isBestEffortIkMode){
         for(int i=0; i < n; ++i){
             nuIK->q0[i] = joints_[i]->q();
         }
+        nuIK->T0 = target->T();
     }
 
     double prevErrsqr = std::numeric_limits<double>::max();
@@ -341,12 +355,12 @@ bool JointPath::calcInverseKinematics(const Position& T)
 
     bool useUsualInverseSolution = false;
     if(USE_USUAL_INVERSE_SOLUTION_FOR_6x6_NON_BEST_EFFORT_PROBLEM){
-        if(!nuIK->isBestEffortIKmode && (n == 6) && (nuIK->dTask.size() == 6)){
+        if(!nuIK->isBestEffortIkMode && (n == 6) && (nuIK->dTask.size() == 6)){
             useUsualInverseSolution = true;
         }
     }
         
-    if(USE_SVD_FOR_BEST_EFFORT_IK && !useUsualInverseSolution && !nuIK->isBestEffortIKmode){
+    if(USE_SVD_FOR_BEST_EFFORT_IK && !useUsualInverseSolution && !nuIK->isBestEffortIkMode){
         // disable truncation
         nuIK->svd.setTruncateRatio(std::numeric_limits<double>::max());
     }
@@ -361,12 +375,14 @@ bool JointPath::calcInverseKinematics(const Position& T)
             nuIK->dTask.segment<3>(3) = target->R() * omegaFromRot(target->R().transpose() * T.linear());
             errorSqr = nuIK->dTask.squaredNorm();
         }
-        if(errorSqr < nuIK->maxIKerrorSqr){
+        if(errorSqr < nuIK->maxIkErrorSqr){
             completed = true;
+            target->T() = T;
             break;
         }
-        if(prevErrsqr - errorSqr < nuIK->maxIKerrorSqr){
-            if(nuIK->isBestEffortIKmode && (errorSqr > prevErrsqr)){
+        if(prevErrsqr - errorSqr < nuIK->maxIkErrorSqr){
+            if(nuIK->isBestEffortIkMode && (errorSqr > prevErrsqr)){
+                // Revert the joint displacements to the previous state in this iteration
                 for(int j=0; j < n; ++j){
                     joints_[j]->q() = nuIK->q0[j];
                 }
@@ -390,7 +406,7 @@ bool JointPath::calcInverseKinematics(const Position& T)
             }
         }
 
-        if(nuIK->isBestEffortIKmode){
+        if(nuIK->isBestEffortIkMode){
             for(int j=0; j < n; ++j){
                 double& q = joints_[j]->q();
                 nuIK->q0[j] = q;
@@ -405,13 +421,14 @@ bool JointPath::calcInverseKinematics(const Position& T)
         calcForwardKinematics();
     }
 
-    if(!completed && !nuIK->isBestEffortIKmode){
+    if(!completed && !nuIK->isBestEffortIkMode){
         for(int i=0; i < n; ++i){
             joints_[i]->q() = nuIK->q0[i];
         }
         calcForwardKinematics();
+        target->T() = nuIK->T0;
     }
-    
+
     return completed;
 }
 
@@ -448,27 +465,14 @@ bool JointPath::hasAnalyticalIK() const
 }
 
 
-void JointPath::setNumericalIKenabled(bool on)
-{
-    if(on){
-        getOrCreateNumericalIK();
-    } else {
-        if(numericalIK){
-            delete numericalIK;
-            numericalIK = nullptr;
-        }
-    }
-}
-
-
 bool JointPath::calcInverseKinematics
 (const Vector3& base_p, const Matrix3& base_R, const Vector3& end_p, const Matrix3& end_R)
 {
-    Position T_base;
+    Isometry3 T_base;
     T_base.linear() = base_R;
     T_base.translation() = base_p;
 
-    Position T_end;
+    Isometry3 T_end;
     T_end.linear() = end_R;
     T_end.translation() = end_p;
     
@@ -524,9 +528,9 @@ public:
         return (ikTypeId != 0);
     }
     
-    virtual bool calcInverseKinematics(const Position& T) override
+    virtual bool calcInverseKinematics(const Isometry3& T) override
     {
-        if(isNumericalIkEnabled() || ikTypeId == 0){
+        if(isCustomIkDisabled() || ikTypeId == 0){
             return JointPath::calcInverseKinematics(T);
         }
         

@@ -25,7 +25,6 @@ class ItemTreeArchiver::Impl
 {
 public:
     MessageView* mv;
-    ostream& os;
     int itemIdCounter;
     int numArchivedItems;
     int numRestoredItems;
@@ -35,10 +34,10 @@ public:
     ArchivePtr store(Archive& parentArchive, Item* item);
     ArchivePtr storeIter(Archive& parentArchive, Item* item, bool& isComplete);
     void storeAddons(Archive& archive, Item* item);
-    ItemList<> restore(Archive& archive, Item* parentItem, const std::set<std::string>& optionalPlugins);
-    void restoreItemIter(Archive& archive, Item* parentItem, ItemList<>& restoredItems);
+    void restore(Archive& archive, Item* parentItem, const std::set<std::string>& optionalPlugins);
+    void restoreItemIter(Archive& archive, Item* parentItem);
     ItemPtr restoreItem(
-        Archive& archive, Item* parentItem, ItemList<>& restoredItems, string& out_itemName, bool& io_isOptional);
+        Archive& archive, Item* parentItem, string& itemName, string& classame, bool& io_isOptional);
     void restoreAddons(Archive& archive, Item* item);
     void restoreItemStates(Archive& archive, Item* item);
 };
@@ -54,8 +53,7 @@ ItemTreeArchiver::ItemTreeArchiver()
 
 
 ItemTreeArchiver::Impl::Impl()
-    : mv(MessageView::instance()),
-      os(mv->cout())
+    : mv(MessageView::instance())
 {
     
 }
@@ -232,53 +230,58 @@ void ItemTreeArchiver::Impl::storeAddons(Archive& archive, Item* item)
 }
 
 
-ItemList<> ItemTreeArchiver::restore(Archive* archive, Item* parentItem, const std::set<std::string>& optionalPlugins)
+void ItemTreeArchiver::restore(Archive* archive, Item* parentItem, const std::set<std::string>& optionalPlugins)
 {
-    return impl->restore(*archive, parentItem, optionalPlugins);
+    impl->restore(*archive, parentItem, optionalPlugins);
 }
 
 
-ItemList<> ItemTreeArchiver::Impl::restore
+void ItemTreeArchiver::Impl::restore
 (Archive& archive, Item* parentItem, const std::set<std::string>& optionalPlugins)
 {
     numArchivedItems = 0;
     numRestoredItems = 0;
     pOptionalPlugins = &optionalPlugins;
-    ItemList<> restoredItems;
 
     archive.setCurrentParentItem(nullptr);
     try {
-        restoreItemIter(archive, parentItem, restoredItems);
+        restoreItemIter(archive, parentItem);
     } catch (const ValueNode::Exception& ex){
         mv->putln(ex.message(), MessageView::Error);
     }
     archive.setCurrentParentItem(nullptr);
-
-    numRestoredItems = restoredItems.size();
-    return restoredItems;
 }
 
 
-void ItemTreeArchiver::Impl::restoreItemIter(Archive& archive, Item* parentItem, ItemList<>& restoredItems)
+void ItemTreeArchiver::Impl::restoreItemIter(Archive& archive, Item* parentItem)
 {
     ItemPtr item;
     string itemName;
+    string className;
     bool isOptional = false;
     std::vector<std::function<void()>> processesOnSubTreeRestored;
     archive.setPointerToProcessesOnSubTreeRestored(&processesOnSubTreeRestored);
 
     try {
-        item = restoreItem(archive, parentItem, restoredItems, itemName, isOptional);
+        item = restoreItem(archive, parentItem, itemName, className, isOptional);
     } catch (const ValueNode::Exception& ex){
         mv->putln(ex.message(), MessageView::Error);
     }
     
     if(!item){
         if(!isOptional){
-            if(itemName.empty()){
-                mv->putln(_("Item cannot be restored."), MessageView::Error);
+            if(!itemName.empty()){
+                if(!className.empty()){
+                    mv->putln(format(_("{0} \"{1}\" cannot be restored."), className, itemName), MessageView::Error);
+                } else {
+                    mv->putln(format(_("\"{0}\" cannot be restored."), itemName), MessageView::Error);
+                }
             } else {
-                mv->putln(format(_("\"{}\" cannot be restored."), itemName), MessageView::Error);
+                if(!className.empty()){
+                    mv->putln(format(_("An instance of {0} cannot be restored."), className), MessageView::Error);
+                } else {
+                    mv->putln(_("An instance of unkown item type cannot be restored."), MessageView::Error);
+                }                    
             }
         }
     } else {
@@ -291,7 +294,7 @@ void ItemTreeArchiver::Impl::restoreItemIter(Archive& archive, Item* parentItem,
             for(int i=0; i < children->size(); ++i){
                 Archive* childArchive = dynamic_cast<Archive*>(children->at(i)->toMapping());
                 childArchive->inheritSharedInfoFrom(archive);
-                restoreItemIter(*childArchive, item, restoredItems);
+                restoreItemIter(*childArchive, item);
             }
         }
         for(auto& func : processesOnSubTreeRestored){
@@ -302,19 +305,20 @@ void ItemTreeArchiver::Impl::restoreItemIter(Archive& archive, Item* parentItem,
 
 
 ItemPtr ItemTreeArchiver::Impl::restoreItem
-(Archive& archive, Item* parentItem, ItemList<>& restoredItems, string& out_itemName, bool& io_isOptional)
+(Archive& archive, Item* parentItem, string& itemName, string& className, bool& io_isOptional)
 {
-    string& name = out_itemName;
-    if(!archive.read("name", name)){
-        return nullptr;
-    }
+    archive.read("name", itemName);
 
     const bool isSubItem = archive.get("isSubItem", false);
     if(isSubItem){
-        ItemPtr subItem = parentItem->findChildItem(name, [](Item* item){ return item->isSubItem(); });
+        if(itemName.empty()){
+            mv->putln(_("The archive has an empty-name sub item, which cannot be processed."), MessageView::Error);
+            return nullptr;
+        }
+        ItemPtr subItem = parentItem->findChildItem(itemName, [](Item* item){ return item->isSubItem(); });
         if(!subItem){
             mv->putln(
-                format(_("Sub item \"{}\" is not found. Its children cannot be restored."), name),
+                format(_("Sub item \"{}\" is not found. Its children cannot be restored."), itemName),
                 MessageView::Error);
         }
         restoreItemStates(archive, subItem);
@@ -322,7 +326,6 @@ ItemPtr ItemTreeArchiver::Impl::restoreItem
     }
     
     string pluginName;
-    string className;
     if(!(archive.read("plugin", pluginName) && archive.read("class", className))){
         mv->putln(_("Archive is broken."), MessageView::Error);
         return nullptr;
@@ -342,7 +345,7 @@ ItemPtr ItemTreeArchiver::Impl::restoreItem
 
     ++numArchivedItems;
         
-    item->setName(name);
+    item->setName(itemName);
     bool isRootItem = dynamic_pointer_cast<RootItem>(item);
     if(isRootItem){
         item = parentItem;
@@ -353,7 +356,7 @@ ItemPtr ItemTreeArchiver::Impl::restoreItem
             item->setAttribute(Item::Attached);
         }
         
-        mv->putln(format(_("Restoring {0} \"{1}\""), className, name));
+        mv->putln(format(_("Restoring {0} \"{1}\""), className, itemName));
         mv->flush();
 
         ValueNodePtr dataNode = archive.find("data");
@@ -375,7 +378,7 @@ ItemPtr ItemTreeArchiver::Impl::restoreItem
         if(item){
             parentItem->addChildItem(item);
             restoreItemStates(archive, item);
-            restoredItems.push_back(item);
+            ++numRestoredItems;
         }
     }
 
@@ -406,7 +409,7 @@ void ItemTreeArchiver::Impl::restoreAddons(Archive& archive, Item* item)
                                          name, moduleName), MessageView::Error);
                     } else {
                         if(!item->setAddon(addon)){
-                            mv->putln(format(_("Addon \"{0}\" is cannot be added to item \"{1}\"."),
+                            mv->putln(format(_("Addon \"{0}\" cannot be added to item \"{1}\"."),
                                              name, item->displayName()), MessageView::Error);
                         } else {
                             if(!addon->restore(*addonArchive)){

@@ -16,7 +16,7 @@ class TankJoystickController : public SimpleController
 {
     SimpleControllerIO* io;
     bool usePseudoContinousTrackMode;
-    Link::ActuationMode turretActuationMode;
+    int turretActuationMode;
     Link* trackL;
     Link* trackR;
     Link* turretJoint[2];
@@ -50,17 +50,17 @@ public:
         Body* body = io->body();
 
         usePseudoContinousTrackMode = true;
-        turretActuationMode = Link::ActuationMode::JOINT_TORQUE;
+        turretActuationMode = Link::JointEffort;
         for(auto opt : io->options()){
             if(opt == "wheels"){
                 usePseudoContinousTrackMode = false;
             }
             if(opt == "position"){
-                turretActuationMode = Link::ActuationMode::JOINT_DISPLACEMENT;
+                turretActuationMode = Link::JointDisplacement;
                 os << "The joint-position command mode is used." << endl;
             }
             if(opt == "velocity"){
-                turretActuationMode = Link::ActuationMode::JOINT_VELOCITY;
+                turretActuationMode = Link::JointVelocity;
                 os << "The joint-velocity command mode is used." << endl;
             }
         }
@@ -79,15 +79,8 @@ public:
             return false;
         }
 
-        if(usePseudoContinousTrackMode){
-            trackL->setActuationMode(Link::JOINT_SURFACE_VELOCITY);
-            trackR->setActuationMode(Link::JOINT_SURFACE_VELOCITY);
-        } else {
-            trackL->setActuationMode(Link::JOINT_VELOCITY);
-            trackR->setActuationMode(Link::JOINT_VELOCITY);
-        }
-        io->enableOutput(trackL);
-        io->enableOutput(trackR);
+        io->enableOutput(trackL, JointVelocity);
+        io->enableOutput(trackR, JointVelocity);
         
         turretJoint[0] = body->link("TURRET_Y");
         turretJoint[1] = body->link("TURRET_P");
@@ -155,13 +148,13 @@ public:
                 pos = 0.0;
             }
 
-            if(turretActuationMode == Link::JOINT_DISPLACEMENT){
+            if(turretActuationMode == Link::JointDisplacement){
                 joint->q_target() = joint->q() + pos * dt;
 
-            } else if(turretActuationMode == Link::JOINT_VELOCITY){
+            } else if(turretActuationMode == Link::JointVelocity){
                 joint->dq_target() = pos;
 
-            } else if(turretActuationMode == Link::JOINT_TORQUE){
+            } else if(turretActuationMode == Link::JointEffort){
                 double q = joint->q();
                 double dq = (q - qprev[i]) / dt;
                 double dqref = 0.0;

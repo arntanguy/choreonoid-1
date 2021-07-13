@@ -41,6 +41,10 @@ public:
     void setRootItem(Item* item);
     void setRootItemUpdateFunction(std::function<Item*(bool doCreate)> func);
 
+    //! \note This functions does not update the tree widget items
+    void setRootItemVisible(bool on);
+    bool isRootItemVisible() const;
+
     void setDragDropEnabled(bool on);
     void setCheckColumnShown(bool on);
 
@@ -113,14 +117,19 @@ public:
         return getItems();
     }
 
+    void setSelectionSyncGroup(const std::string& id);
+
     SignalProxy<void(const ItemList<>&)> sigSelectionChanged();
 
     ItemList<> getSelectedItems() const;
     template <class ItemType> ItemList<ItemType> getSelectedItems() {
         return getSelectedItems();
     }
-    void selectAllItems();
+
+    //! \return true if the selected items are changed
     bool selectOnly(Item* item);
+    
+    void selectAllItems();
     void clearSelection();
     void setSelectedItemsChecked(bool on);
     void toggleSelectedItemChecks();

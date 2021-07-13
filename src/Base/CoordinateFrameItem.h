@@ -25,7 +25,7 @@ public:
     CoordinateFrameItem(const CoordinateFrameItem& org);
     virtual ~CoordinateFrameItem();
 
-    virtual std::string displayName() const;
+    virtual std::string displayName() const override;
 
     CoordinateFrameListItem* frameListItem();
     CoordinateFrameList* frameList();
@@ -50,13 +50,16 @@ public:
 
     // LocatableItem function
     virtual LocationProxyPtr getLocationProxy() override;
+
+    bool isLocationEditable() const;
+    void setLocationEditable(bool on);
     
     class Impl;
 
 protected:
     virtual Item* doDuplicate() const override;
     virtual void onAddedToParent() override;
-    virtual void onRemovedFromParent(Item* parentItem) override;
+    virtual void onRemovedFromParent(Item* parentItem, bool isParentBeingDeleted) override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
 
 private:

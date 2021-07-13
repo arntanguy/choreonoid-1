@@ -17,7 +17,7 @@ class SceneRenderer;
 class Archive;
 class MenuManager;
 class SceneWidgetEvent;
-class SceneWidgetEditable;
+class SceneWidgetEventHandler;
 class SceneWidgetRoot;
 class Menu;
 class InteractiveCameraTransform;
@@ -33,13 +33,18 @@ public:
 
     static void forEachInstance(SgNode* node, std::function<void(SceneWidget* sceneWidget, const SgNodePath& path)> function);
 
+    void setModeSyncEnabled(bool on);
+
     SceneWidgetRoot* sceneRoot();
     SgGroup* scene();
     SgGroup* systemNodeGroup();
 
     SceneRenderer* renderer();
 
-    void draw();
+    void renderScene(bool doImmediately = false);
+
+    [[deprecated("Use renderScene(true).")]]
+    void draw() { renderScene(true); }
 
     SignalProxy<void()> sigStateChanged() const;
 
@@ -51,18 +56,21 @@ public:
     // ID 1 is used as the default (common) customo mode ID that can be used for any customo mode.
     static int issueUniqueCustomModeId();
 
-    void activateCustomMode(SceneWidgetEditable* modeHandler, int modeId = 1);
-    SceneWidgetEditable* activeCustomModeHandler();
+    void activateCustomMode(SceneWidgetEventHandler* modeHandler, int modeId = 1);
+    SceneWidgetEventHandler* activeCustomModeHandler();
     int activeCustomMode() const;
     // If modeHandler is nullptr, any current custom mode is deactivated.
-    void deactivateCustomMode(SceneWidgetEditable* modeHandler = nullptr);
+    void deactivateCustomMode(SceneWidgetEventHandler* modeHandler = nullptr);
 
-    const SceneWidgetEvent& latestEvent() const;
+    SceneWidgetEvent* latestEvent();
     Vector3 lastClickedPoint() const;
 
-    enum ViewpointControlMode { THIRD_PERSON_MODE, FIRST_PERSON_MODE  };
-    void setViewpointControlMode(ViewpointControlMode mode);
-    ViewpointControlMode viewpointControlMode() const;
+    enum ViewpointOperationMode {
+        ThirdPersonMode,
+        FirstPersonMode
+    };
+    void setViewpointOperationMode(ViewpointOperationMode mode);
+    ViewpointOperationMode viewpointOperationMode() const;
 
     SgPosTransform* builtinCameraTransform(void);
     SgPerspectiveCamera* builtinPerspectiveCamera() const;
@@ -79,16 +87,20 @@ public:
         
     void viewAll();
 
+    // This is same as SgPolygonDrawStyle::PolygonElement
     enum PolygonElement {
         PolygonFace = 1,
         PolygonEdge = 2,
         PolygonVertex = 4
     };
-    void setPolygonDisplayElements(int elementFlags);
-    int polygonDisplayElements() const;
+    void setVisiblePolygonElements(int elementFlags);
+    int visiblePolygonElements() const;
 
-    void setCollisionLinesVisible(bool on);
-    bool collisionLinesVisible() const;
+    void setHighlightingEnabled(bool on);
+    bool isHighlightingEnabled() const;
+
+    void setCollisionLineVisibility(bool on);
+    bool collisionLineVisibility() const;
 
     void setHeadLightIntensity(double value);
     void setWorldLightIntensity(double value);
@@ -130,7 +142,7 @@ public:
 
     Menu* contextMenu();
     void showContextMenuAtPointerPosition();
-    SignalProxy<void(const SceneWidgetEvent& event, MenuManager& menuManager)> sigContextMenuRequest();
+    SignalProxy<void(SceneWidgetEvent* event, MenuManager* menuManager)> sigContextMenuRequest();
 
     void showConfigDialog();
     QVBoxLayout* configDialogVBox();

@@ -30,7 +30,6 @@ if(UNIX)
   set_source_files_properties(AudioItem.cpp PROPERTIES COMPILE_DEFINITIONS "CNOID_MEDIA_PLUGIN_USE_LIBSNDFILE")
 
   set(libraries 
-    CnoidUtil CnoidBase 
     ${GSTREAMER_LIBRARIES}
     ${SNDFILE_LIBRARIES}
     X11
@@ -51,7 +50,7 @@ elseif(WIN32)
     DSMediaView.cpp
     AudioItem.cpp
     )
-  set(libraries CnoidUtil CnoidBase Strmiids.lib)
+  set(libraries Strmiids.lib)
 endif()
 
 set(headers
@@ -64,8 +63,6 @@ set(target CnoidMediaPlugin)
 choreonoid_make_gettext_mo_files(${target} mofiles)
 choreonoid_add_plugin(${target} ${sources} ${mofiles} HEADERS ${headers})
 target_link_libraries(${target} ${libraries})
-
-message(STATUS "libraries = ${libraries}")
 
 if(ENABLE_PYTHON)
   add_subdirectory(pybind11)

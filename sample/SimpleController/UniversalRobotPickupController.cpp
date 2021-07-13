@@ -94,7 +94,7 @@ class URobotPickupController : public SimpleController
     Body* ioBody;
     double dt;
 
-    Link::ActuationMode mainActuationMode;
+    int mainActuationMode;
     ARM_MODEL arm_model;
 
     struct JointInfo {
@@ -128,7 +128,7 @@ public:
 
     bool initializeJoints(SimpleControllerIO* io, JointSpec* specs)
     {
-        for(int i=0; i<MAX_NUM_JOINTS; i++){
+        for(int i=0; i < MAX_NUM_JOINTS; ++i){
             JointInfo info;
             if(specs[i].name!=""){
                 auto joint = ioBody->link(specs[i].name);
@@ -142,7 +142,7 @@ public:
                     info.joint = joint;
                     info.q_ref = info.q_old = joint->q();
 
-                    if(mainActuationMode == Link::JOINT_TORQUE){
+                    if(mainActuationMode == Link::JointTorque){
                         info.kp = specs[i].kp_torque;
                         info.kd = specs[i].kd_torque;
                     }
@@ -159,7 +159,7 @@ public:
         ioBody = io->body();
         dt = io->timeStep();
 
-        mainActuationMode = Link::JOINT_TORQUE;
+        mainActuationMode = Link::JointTorque;
 
         jointInfos.clear();
 
@@ -226,9 +226,10 @@ public:
 
         if(phase <= 4){
             p = wristInterpolator.interpolate(time);
-
-            if(baseToWrist->calcInverseKinematics(
-                   Vector3(p.head<3>()), rotFromRpy(Vector3(p.tail<3>())))){
+            Isometry3 T;
+            T.linear() = rotFromRpy(Vector3(p.tail<3>()));
+            T.translation() = p.head<3>();
+            if(baseToWrist->calcInverseKinematics(T)){
                 for(int i=0; i < baseToWrist->numJoints(); ++i){
                     Link* joint = baseToWrist->joint(i);
                     jointInfos[i].q_ref = joint->q();

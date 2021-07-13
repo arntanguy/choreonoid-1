@@ -1,15 +1,16 @@
 #ifndef CNOID_BASE_SCENE_POINT_SELECTION_MODE_H
 #define CNOID_BASE_SCENE_POINT_SELECTION_MODE_H
 
-#include "SceneWidgetEditable.h"
+#include "SceneWidgetEventHandler.h"
 #include <cnoid/EigenTypes>
+#include <cnoid/Signal>
 #include <vector>
 #include <memory>
 #include "exportdecl.h"
 
 namespace cnoid {
 
-class CNOID_EXPORT ScenePointSelectionMode : public SceneWidgetEditable
+class CNOID_EXPORT ScenePointSelectionMode : public SceneWidgetEventHandler
 {
     class Impl;
     
@@ -60,24 +61,24 @@ public:
     const std::vector<PointInfoPtr>& selectedPoints() const;
     void clearSelection();
 
+    SignalProxy<void(const std::vector<PointInfoPtr>& points)> sigPointSelectionAdded();
+
 protected:
-    virtual std::vector<SgNode*> getTargetSceneNodes(const SceneWidgetEvent& event);
+    virtual std::vector<SgNode*> getTargetSceneNodes(SceneWidgetEvent* event);
 
-    //virtual void onSelectionModeActivated(const SceneWidgetEvent& event);
-    //virtual void onSelectionModeDeactivated(const SceneWidgetEvent& event);
+    //virtual void onSelectionModeActivated(SceneWidgetEvent* event);
+    //virtual void onSelectionModeDeactivated(SceneWidgetEvent* event);
 
-    // SceneWidgetEditable functions
-    virtual void onSceneModeChanged(const SceneWidgetEvent& event) override;
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onButtonReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onDoubleClickEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual void onPointerLeaveEvent(const SceneWidgetEvent& event) override;
-    virtual bool onKeyPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onKeyReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menu) override;
-    virtual bool onUndoRequest() override;
-    virtual bool onRedoRequest() override;
+    // SceneWidgetEventHandler functions
+    virtual void onSceneModeChanged(SceneWidgetEvent* event) override;
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onButtonReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onDoubleClickEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual void onPointerLeaveEvent(SceneWidgetEvent* event) override;
+    virtual bool onKeyPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onKeyReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menu) override;
 
 private:
     Impl* impl;

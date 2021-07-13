@@ -36,6 +36,10 @@ set(sources
   ItemPropertyWidget.cpp
   ItemPropertyView.cpp
   TargetItemPicker.cpp
+  UnifiedEditHistory.cpp
+  EditRecord.cpp
+  ItemEditRecordManager.cpp
+  UnifiedEditHistoryView.cpp
   StringListComboBox.cpp
   DisplayedValueFormatManager.cpp
   PositionWidget.cpp
@@ -57,6 +61,7 @@ set(sources
   ActionGroup.cpp
   Widget.cpp
   SpinBox.cpp
+  DoubleSpinBox.cpp
   FloatingNumberBox.cpp
   ScrollBar.cpp
   Slider.cpp
@@ -106,7 +111,7 @@ set(sources
   GLSLSceneRenderer.cpp
   SceneWidget.cpp
   SceneWidgetEvent.cpp
-  SceneWidgetEditable.cpp
+  SceneWidgetEventHandler.cpp
   ScenePointSelectionMode.cpp
   InteractiveCameraTransform.cpp
   SceneProjector.cpp
@@ -118,6 +123,7 @@ set(sources
   SceneBar.cpp
   SceneItem.cpp
   SceneItemFileIO.cpp
+  GeneralSceneFileImporterBase.cpp
   PointSetItem.cpp
   MultiPointSetItem.cpp
   PositionTagGroupItem.cpp
@@ -155,6 +161,7 @@ set(headers
   ActionGroup.h
   Widget.h
   SpinBox.h
+  DoubleSpinBox.h
   FloatingNumberBox.h
   ScrollBar.h
   Slider.h
@@ -198,6 +205,9 @@ set(headers
   RenderableItem.h
   ImageableItem.h
   TargetItemPicker.h
+  UnifiedEditHistory.h
+  EditRecord.h
+  ItemEditRecordManager.h
   DisplayedValueFormatManager.h
   PositionWidget.h
   PutPropertyFunction.h
@@ -233,11 +243,11 @@ set(headers
   LazyCaller.h
   SceneWidget.h
   SceneWidgetEvent.h
+  SceneWidgetEventHandler.h
   SceneProjector.h
   SceneDragProjector.h
   PositionDragger.h
   SceneBar.h
-  SceneWidgetEditable.h
   ScenePointSelectionMode.h
   InteractiveCameraTransform.h
   RectRegionMarker.h
@@ -248,6 +258,7 @@ set(headers
   SceneView.h
   SceneItem.h
   SceneItemFileIO.h
+  GeneralSceneFileImporterBase.h
   PointSetItem.h
   MultiPointSetItem.h
   PositionTagGroupItem.h
@@ -272,10 +283,8 @@ set(qtheaders
   Action.h
   ActionGroup.h
   Widget.h
-  SpinBox.h
   FloatingNumberBox.h
   ScrollBar.h
-  Slider.h
   Dial.h
   Splitter.h
   Buttons.h
@@ -290,7 +299,6 @@ set(qtheaders
   ItemSelectionModel.h
   Timer.h
   SocketNotifier.h
-  InfoBar.h
   StringListComboBox.h
   TextEdit.h
   )

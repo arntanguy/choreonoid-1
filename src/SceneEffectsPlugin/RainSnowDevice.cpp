@@ -5,55 +5,15 @@
 
 #include "RainSnowDevice.h"
 #include "SceneRainSnow.h"
-#include <cnoid/YAMLBodyLoader>
-#include <cnoid/SceneDevice>
+#include "SceneEffectDeviceTypeRegistration.h"
 
 using namespace std;
 using namespace cnoid;
 
 namespace {
 
-template <class DeviceType>
-bool readDevice(YAMLBodyLoader& loader, Mapping& node)
-{
-    ref_ptr<DeviceType> device = new DeviceType;
-    device->particleSystem().readParameters(loader.sceneReader(), node);
-    return loader.readDevice(device, node);
-}
-
-template <class DeviceType, class SceneNodeType>
-SceneDevice* createSceneDevice(Device* device)
-{
-    auto customDevice = static_cast<DeviceType*>(device);
-    auto sceneNode = new SceneNodeType;
-    auto sceneDevice = new SceneDevice(device, sceneNode);
-
-    sceneDevice->setFunctionOnStateChanged(
-        [sceneNode, customDevice](){
-            sceneNode->particleSystem() = customDevice->particleSystem();
-            sceneNode->notifyUpdate();
-        });
-
-    sceneDevice->setFunctionOnTimeChanged(
-        [sceneNode](double time){
-            sceneNode->setTime(time);
-            sceneNode->notifyUpdate();
-        });
-            
-    return sceneDevice;
-}
-
-YAMLBodyLoader::NodeTypeRegistration
-registerSnowDevice("SnowDevice", readDevice<SnowDevice>);
-
-SceneDevice::FactoryRegistration<SnowDevice>
-registerSceneSmokeDeviceFactory(createSceneDevice<SnowDevice, SceneSnow>);
-
-YAMLBodyLoader::NodeTypeRegistration
-registerRainDevice("RainDevice", readDevice<RainDevice>);
-
-SceneDevice::FactoryRegistration<RainDevice>
-registerSceneRainDeviceFactory(createSceneDevice<RainDevice, SceneRain>);
+SceneEffectDeviceTypeRegistration<SnowDevice, SceneSnow> snowDeviceRegistration("SnowDevice");;
+SceneEffectDeviceTypeRegistration<RainDevice, SceneRain> rainDeviceRegistration("RainDevice");;
 
 }
 
@@ -109,6 +69,18 @@ double* RainSnowDevice::writeState(double* out_buf) const
 }
 
 
+bool RainSnowDevice::on() const
+{
+    return on_;
+}
+
+
+void RainSnowDevice::on(bool on)
+{
+    on_ = on;
+}
+
+
 RainDevice::RainDevice()
 {
     particleSystem().setParticleSize(0.02f);
@@ -122,7 +94,7 @@ RainDevice::RainDevice(const RainDevice& org, bool copyStateOnly)
 }
 
 
-const char* RainDevice::typeName()
+const char* RainDevice::typeName() const
 {
     return "RainDevice";
 }
@@ -170,7 +142,7 @@ SnowDevice::SnowDevice(const SnowDevice& org, bool copyStateOnly)
 }
 
 
-const char* SnowDevice::typeName()
+const char* SnowDevice::typeName() const
 {
     return "SnowDevice";
 }

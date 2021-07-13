@@ -2,6 +2,7 @@
   @author Shin'ichiro Nakaoka
 */
 
+#include "PyQObjectHolder.h"
 #include "PyQString.h"
 #include "../Buttons.h"
 #include "../Action.h"
@@ -14,19 +15,17 @@ namespace cnoid {
 
 void exportPyQtExTypes(py::module m)
 {
-    py::class_<ToolButton, QToolButton>(m, "ToolButton")
+    py::class_<ToolButton, PyQObjectHolder<ToolButton>, QToolButton>(m, "ToolButton")
         .def(py::init<>())
         .def(py::init<QWidget*>())
         .def(py::init<const QString&>())
         .def(py::init<const QString&, QWidget*>())
         .def_property_readonly("sigClicked", &ToolButton::sigClicked)
-        .def_property_readonly("clicked", &ToolButton::sigClicked)
-        .def_property_readonly("toggled", &ToolButton::sigToggled)
         ;
 
-    py::class_<Timer, QTimer>(m, "Timer")
-        .def(py::init<QObject*>(), py::arg("parent")=(QObject*)(0) )
-        .def_property_readonly("timeout", &Timer::sigTimeout)
+    py::class_<Timer, PyQObjectHolder<Timer>, QTimer>(m, "Timer")
+        .def(py::init<QObject*>(), py::arg("parent") = (QObject*)(nullptr))
+        .def_property_readonly("sigTimeout", &Timer::sigTimeout)
         ;
 }
 

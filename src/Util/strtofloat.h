@@ -1,12 +1,18 @@
+#ifndef CNOID_UTIL_STRTOF_H
+#define CNOID_UTIL_STRTOF_H
+
 // Replacement for 'strtod()' function in Visual C++
 // This is neccessary because the implementation of VC++6.0 uses 'strlen()' in the function,
 // so that it becomes too slow for a string buffer which has long length.
+
+#ifndef _MSC_VER
+#include <cstdlib>
+#endif
 
 namespace cnoid {
 
 #ifndef _MSC_VER
 
-#include <cstdlib>
 inline float strtof(const char* nptr, char** endptr){
     return std::strtof(nptr, endptr);
 }
@@ -85,3 +91,5 @@ inline double strtod(const char* nptr, char** endptr) {
 #endif
 
 }
+
+#endif

@@ -17,17 +17,29 @@ using fmt::format;
 
 namespace {
 
-Signal<void(CoordinateFrameListItem* frameListItem)> sigInstanceAddedOrUpdated_;
+class ListAssociationSignalInfo : public Referenced
+{
+public:
+    Signal<void(CoordinateFrameListItem* frameListItem, bool on)> signal;
+    ScopedConnection connection;
+};
+typedef ref_ptr<ListAssociationSignalInfo> ListAssociationSignalInfoPtr;
+
+unordered_map<ItemPtr, ListAssociationSignalInfoPtr> listAssociationSignalInfoMap;
 
 class FrameMarker : public CoordinateFrameMarker
 {
 public:
     CoordinateFrameListItem::Impl* impl;
+    weak_ref_ptr<CoordinateFrameItem> weakFrameItem;
+    ScopedConnection frameItemConnection;
     bool isGlobal;
     bool isOn;
     int transientHolderCounter;
     
     FrameMarker(CoordinateFrameListItem::Impl* impl, CoordinateFrame* frame);
+    void updateFrameItem(CoordinateFrameItem* frameItem, bool on);
+    void updateFrameLock();
     virtual void onFrameUpdated(int flags) override;
 };
 
@@ -45,12 +57,19 @@ public:
     int itemizationMode;
     ScopedConnectionSet frameListConnections;
     std::function<std::string(const CoordinateFrameItem* item)> frameItemDisplayNameFunction;
+
+    struct AssociatedItemInfo
+    {
+        ListAssociationSignalInfoPtr signalInfo;
+        bool isAssociated;
+    };
+    unordered_map<weak_ref_ptr<Item>, AssociatedItemInfo> associatedItemInfoMap;
+    
     bool isUpdatingFrameItems;
 
     SgGroupPtr frameMarkerGroup;
     SgPosTransformPtr relativeFrameMarkerGroup;
     unordered_map<CoordinateFramePtr, FrameMarkerPtr> visibleFrameMarkerMap;
-    SgUpdate sgUpdate;
     ScopedConnection parentLocationConnection;
     Signal<void(int index, bool on)> sigFrameMarkerVisibilityChanged;
 
@@ -69,9 +88,10 @@ public:
     };
 
     Impl(CoordinateFrameListItem* self, CoordinateFrameList* frameList, int itemizationMode);
+    void notifyRegisteredItemsOfListAssociation(bool doCheckDisassociation);
+    void checkListDisassociation(bool doDisassociateAll);
     void setItemizationMode(int mode);
     void updateFrameItems();
-    void arrangeFrameItems();
     CoordinateFrameItem* createFrameItem(CoordinateFrame* frame);
     CoordinateFrameItem* findFrameItemAt(int index, Item*& out_insertionPosition);
     CoordinateFrameItem* findFrameItemAt(int index);
@@ -79,7 +99,9 @@ public:
     void onFrameRemoved(int index);
     bool onFrameItemAdded(CoordinateFrameItem* frameItem);
     void setFrameMarkerVisible(CoordinateFrame* frame, bool on, bool isTransient);
-    void updateParentFrameForFrameMarkers(const Position& T);
+    void updateParentFrameForFrameMarkers(const Isometry3& T);
+    void storeLockedFrameIndices(Archive& archive);
+    void completeFrameItemRestoration(const Archive& archive);
 };
 
 }
@@ -89,13 +111,21 @@ void CoordinateFrameListItem::initializeClass(ExtensionManager* ext)
 {
     auto& im = ext->itemManager();
     im.registerClass<CoordinateFrameListItem>(N_("CoordinateFrameListItem"));
+    im.addCreationPanel<CoordinateFrameListItem>();
 }
 
 
-SignalProxy<void(CoordinateFrameListItem* frameListItem)>
-CoordinateFrameListItem::sigInstanceAddedOrUpdated()
+SignalProxy<void(CoordinateFrameListItem* frameListItem, bool on)>
+CoordinateFrameListItem::sigListAssociationWith(Item* item)
 {
-    return ::sigInstanceAddedOrUpdated_;
+    auto& info = listAssociationSignalInfoMap[item];
+    if(!info){
+        info = new ListAssociationSignalInfo;
+        info->connection =
+            item->sigDisconnectedFromRoot().connect(
+                [item](){ listAssociationSignalInfoMap.erase(item); });
+    }
+    return info->signal;
 }
 
 
@@ -146,9 +176,69 @@ Item* CoordinateFrameListItem::doDuplicate() const
 }
 
 
-void CoordinateFrameListItem::onPositionChanged()
+void CoordinateFrameListItem::onTreePositionChanged()
 {
-    ::sigInstanceAddedOrUpdated_(this);
+    impl->notifyRegisteredItemsOfListAssociation(true);
+}
+
+
+void CoordinateFrameListItem::onDisconnectedFromRoot()
+{
+    impl->checkListDisassociation(true);
+}
+
+
+void CoordinateFrameListItem::Impl::notifyRegisteredItemsOfListAssociation(bool doCheckDisassociation)
+{
+    if(doCheckDisassociation){
+        // Clear flags to check if each item is still associated
+        for(auto& kv : associatedItemInfoMap){
+            kv.second.isAssociated = false;
+        }
+    }
+    if(Item* item = self->parentItem()){
+        do {
+            auto p = listAssociationSignalInfoMap.find(item);
+            if(p != listAssociationSignalInfoMap.end()){
+                weak_ref_ptr<Item> witem = item;
+                auto& itemInfo = associatedItemInfoMap[witem];
+                if(!itemInfo.signalInfo){
+                    auto& signalInfo = p->second;
+                    signalInfo->signal(self, true); // notify item of association
+                    itemInfo.signalInfo = signalInfo;
+                }
+                itemInfo.isAssociated = true;
+            }
+            item = item->parentItem();
+        } while(item);
+    }
+    if(doCheckDisassociation){
+        checkListDisassociation(false);
+    }
+}
+
+
+void CoordinateFrameListItem::Impl::checkListDisassociation(bool doDisassociateAll)
+{
+    auto iter = associatedItemInfoMap.begin();
+    while(iter != associatedItemInfoMap.end()){
+        bool doRemove = false;
+        auto item = iter->first.lock();
+        if(!item){
+            doRemove = true;
+        } else {
+            auto& itemInfo = iter->second;
+            if(doDisassociateAll || !itemInfo.isAssociated){
+                itemInfo.signalInfo->signal(self, false); // notify item of disassociation
+                doRemove = true;
+            }
+        }
+        if(doRemove){
+            iter = associatedItemInfoMap.erase(iter);
+        } else {
+            ++iter;
+        }
+    }
 }
 
 
@@ -230,22 +320,6 @@ void CoordinateFrameListItem::Impl::updateFrameItems()
     }
 
     isUpdatingFrameItems = false;
-}
-
-
-/**
-   Currently this function only adds the default frame item if it does not exist.
-   This function should be improved so that any other lacking frame items can be added,
-   and extra frame items can be removed, and the order of the items can be corrected.
-*/
-void CoordinateFrameListItem::Impl::arrangeFrameItems()
-{
-    if(frameList->hasFirstElementAsDefaultFrame()){
-        auto firstFrameItem = findFrameItemAt(0);
-        if(!firstFrameItem || !frameList->isDefaultFrameId(firstFrameItem->frame()->id())){
-            self->insertChild(self->childItem(), createFrameItem(frameList->frameAt(0)));
-        }
-    }
 }
 
 
@@ -422,9 +496,7 @@ void CoordinateFrameListItem::useAsBaseFrames()
 {
     if(!impl->frameList->isForBaseFrames()){
         impl->frameList->setFrameType(CoordinateFrameList::Base);
-        if(isConnectedToRoot()){
-            ::sigInstanceAddedOrUpdated_(this);
-        }
+        impl->notifyRegisteredItemsOfListAssociation(false);
     }
 }
 
@@ -433,9 +505,7 @@ void CoordinateFrameListItem::useAsOffsetFrames()
 {
     if(!impl->frameList->isForOffsetFrames()){
         impl->frameList->setFrameType(CoordinateFrameList::Offset);
-        if(isConnectedToRoot()){
-            ::sigInstanceAddedOrUpdated_(this);
-        }
+        impl->notifyRegisteredItemsOfListAssociation(false);
     }
 }
 
@@ -463,7 +533,7 @@ LocationProxyPtr CoordinateFrameListItem::getFrameParentLocationProxy()
 }
 
 
-bool CoordinateFrameListItem::getRelativeFramePosition(const CoordinateFrame* frame, Position& out_T) const
+bool CoordinateFrameListItem::getRelativeFramePosition(const CoordinateFrame* frame, Isometry3& out_T) const
 {
     if(frame->isGlobal()){
         if(auto parentLocation = const_cast<CoordinateFrameListItem*>(this)->getFrameParentLocationProxy()){
@@ -478,7 +548,7 @@ bool CoordinateFrameListItem::getRelativeFramePosition(const CoordinateFrame* fr
 }
 
 
-bool CoordinateFrameListItem::getGlobalFramePosition(const CoordinateFrame* frame, Position& out_T) const
+bool CoordinateFrameListItem::getGlobalFramePosition(const CoordinateFrame* frame, Isometry3& out_T) const
 {
     if(!frame->isGlobal()){
         if(auto parentLocation = const_cast<CoordinateFrameListItem*>(this)->getFrameParentLocationProxy()){
@@ -530,25 +600,26 @@ void CoordinateFrameListItem::Impl::setFrameMarkerVisible(CoordinateFrame* frame
     bool changed = false;
     bool relativeMarkerChanged = false;
     FrameMarker* marker = nullptr;
+    SgTmpUpdate update;
+    
     auto p = visibleFrameMarkerMap.find(frame);
     if(p != visibleFrameMarkerMap.end()){
         marker = p->second;
-        if(!isTransient && !marker->isOn){
+        if(!isTransient && (on != marker->isOn)){
             changed = true;
         }
     } else if(on){
         marker = new FrameMarker(this, frame);
-        marker->isOn = false;
-        marker->transientHolderCounter = 0;
         visibleFrameMarkerMap[frame] = marker;
         if(marker->isGlobal){
-            frameMarkerGroup->addChild(marker, true);
+            frameMarkerGroup->addChild(marker, update);
         } else {
-            relativeFrameMarkerGroup->addChild(marker, true);
+            relativeFrameMarkerGroup->addChild(marker, update);
             relativeMarkerChanged = true;
         }
         changed = true;
     }
+
     if(on){
         if(!isTransient){
             marker->isOn = true;
@@ -557,18 +628,15 @@ void CoordinateFrameListItem::Impl::setFrameMarkerVisible(CoordinateFrame* frame
         }
     } else if(marker){
         if(!isTransient){
-            if(marker->isOn){
-                marker->isOn = false;
-                changed = true;
-            }
+            marker->isOn = false;
         } else {
             marker->transientHolderCounter -= 1;
         }
         if(!marker->isOn && marker->transientHolderCounter <= 0){
             if(marker->isGlobal){
-                frameMarkerGroup->removeChild(marker, true);
+                frameMarkerGroup->removeChild(marker, update);
             } else {
-                relativeFrameMarkerGroup->removeChild(marker, true);
+                relativeFrameMarkerGroup->removeChild(marker, update);
                 relativeMarkerChanged = true;
             }
             visibleFrameMarkerMap.erase(p);
@@ -604,20 +672,25 @@ void CoordinateFrameListItem::Impl::setFrameMarkerVisible(CoordinateFrame* frame
                 self->setChecked(false);
             }
         }
+
+        int frameIndex = frameList->indexOf(frame);
+        CoordinateFrameItem* frameItem = nullptr;
+        if(itemizationMode != NoItemization){
+            frameItem = findFrameItemAt(frameIndex);
+        }
+        
         if(!isTransient){
-            int frameIndex = -1;
             if(!sigFrameMarkerVisibilityChanged.empty()){
-                frameIndex = frameList->indexOf(frame);
                 sigFrameMarkerVisibilityChanged(frameIndex, on);
             }
             if(itemizationMode != NoItemization){
-                if(frameIndex < 0){
-                    frameIndex = frameList->indexOf(frame);
-                }
-                if(auto frameItem = findFrameItemAt(frameIndex)){
+                if(frameItem){
                     frameItem->setVisibilityCheck(on);
                 }
             }
+        }
+        if(frameItem){
+            marker->updateFrameItem(frameItem, on);
         }
     }
 }
@@ -648,20 +721,53 @@ SignalProxy<void(int index, bool on)> CoordinateFrameListItem::sigFrameMarkerVis
 }
 
 
-void CoordinateFrameListItem::Impl::updateParentFrameForFrameMarkers(const Position& T)
+void CoordinateFrameListItem::Impl::updateParentFrameForFrameMarkers(const Isometry3& T)
 {
     relativeFrameMarkerGroup->setPosition(T);
-    relativeFrameMarkerGroup->notifyUpdate(sgUpdate);
+    relativeFrameMarkerGroup->notifyUpdate();
 }
 
+
+namespace {
 
 FrameMarker::FrameMarker(CoordinateFrameListItem::Impl* impl, CoordinateFrame* frame)
     : CoordinateFrameMarker(frame),
       impl(impl)
 {
     isGlobal = frame->isGlobal();
+    isOn = false;
+    transientHolderCounter = 0;
 }
 
+
+void FrameMarker::updateFrameItem(CoordinateFrameItem* frameItem, bool on)
+{
+    weakFrameItem.reset();
+    frameItemConnection.disconnect();
+    if(frameItem && on){
+        frameItemConnection =
+            frameItem->sigUpdated().connect(
+                [&](){ updateFrameLock(); });
+        weakFrameItem = frameItem;
+    }
+    updateFrameLock();
+}
+
+
+void FrameMarker::updateFrameLock()
+{
+    bool updated = false;
+    if(weakFrameItem){
+        if(auto item = weakFrameItem.lock()){
+            setDragEnabled(item->isLocationEditable());
+            updated = true;
+        }
+    }
+    if(!updated){
+        setDragEnabled(true);
+    }
+}
+    
 
 void FrameMarker::onFrameUpdated(int flags)
 {
@@ -669,18 +775,21 @@ void FrameMarker::onFrameUpdated(int flags)
         bool isCurrentGlobal = frame()->isGlobal();
         if(isCurrentGlobal != isGlobal){
             FrameMarkerPtr holder = this;
+            SgTmpUpdate update;
             if(isCurrentGlobal){
-                impl->relativeFrameMarkerGroup->removeChild(this, true);
-                impl->frameMarkerGroup->addChild(this, true);
+                impl->relativeFrameMarkerGroup->removeChild(this, update);
+                impl->frameMarkerGroup->addChild(this, update);
             } else {
-                impl->frameMarkerGroup->removeChild(this, true);
-                impl->relativeFrameMarkerGroup->addChild(this, true);
+                impl->frameMarkerGroup->removeChild(this, update);
+                impl->relativeFrameMarkerGroup->addChild(this, update);
             }
             isGlobal = isCurrentGlobal;
         }
     }
 
     CoordinateFrameMarker::onFrameUpdated(flags);
+}
+
 }
 
 
@@ -692,16 +801,44 @@ void CoordinateFrameListItem::doPutProperties(PutPropertyFunction& putProperty)
 
 bool CoordinateFrameListItem::store(Archive& archive)
 {
-    if(impl->itemizationMode == SubItemization){
-        archive.write("itemization", "sub");
-    } else if(impl->itemizationMode == IndependentItemization){
-        archive.write("itemization", "independent");
-    }
     impl->frameList->writeHeader(archive);
-    if(impl->itemizationMode != IndependentItemization){
+    
+    if(impl->itemizationMode == IndependentItemization){
+        archive.write("itemization", "independent");
+    } else {
+        if(impl->itemizationMode == SubItemization){
+            archive.write("itemization", "sub");
+            impl->storeLockedFrameIndices(archive);
+        }
         impl->frameList->writeFrames(archive);
     }
+    
     return true;
+}
+
+
+/**
+   \note The index 0 is usually the default frame, but the information on the default
+   frame is not stored in the archive. This means the index of the first frame stored
+   in the archive is 1, which is a bit confusing.
+*/
+void CoordinateFrameListItem::Impl::storeLockedFrameIndices(Archive& archive)
+{
+    ListingPtr indices = new Listing;
+    int n = frameList->numFrames();
+    int index = frameList->hasFirstElementAsDefaultFrame() ? 1 : 0;
+    while(index < n){
+        if(auto frameItem = self->findFrameItemAt(index)){
+            if(!frameItem->isLocationEditable()){
+                indices->append(index);
+            }
+        }
+        ++index;
+    }
+    if(!indices->empty()){
+        indices->setFlowStyle();
+        archive.insert("locked_frame_indices", indices);
+    }
 }
 
 
@@ -718,8 +855,33 @@ bool CoordinateFrameListItem::restore(const Archive& archive)
     impl->frameList->resetIdCounter();
     bool result = impl->frameList->read(archive);
     if(result){
-        archive.addProcessOnSubTreeRestored(
-            [&](){ impl->arrangeFrameItems(); });
+        if(impl->itemizationMode != NoItemization){
+            archive.addProcessOnSubTreeRestored(
+                [&](){ impl->completeFrameItemRestoration(archive); });
+        }
     }
     return result;
+}
+
+
+void CoordinateFrameListItem::Impl::completeFrameItemRestoration(const Archive& archive)
+{
+    if(frameList->hasFirstElementAsDefaultFrame()){
+        auto firstFrameItem = findFrameItemAt(0);
+        if(!firstFrameItem || !frameList->isDefaultFrameId(firstFrameItem->frame()->id())){
+            self->insertChild(self->childItem(), createFrameItem(frameList->frameAt(0)));
+        }
+    }
+
+    if(itemizationMode == SubItemization){
+        auto& locked = *archive.findListing("locked_frame_indices");
+        if(locked.isValid()){
+            for(int i=0; i < locked.size(); ++i){
+                int index = locked[i].toInt();
+                if(auto frameItem = self->findFrameItemAt(index)){
+                    frameItem->setLocationEditable(false);
+                }
+            }
+        }
+    }
 }

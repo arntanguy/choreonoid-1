@@ -12,10 +12,10 @@
 
 namespace cnoid {
 
-class SceneRendererImpl;
-
 class CNOID_EXPORT SceneRenderer
 {
+    class Impl;
+
 public:
     SceneRenderer();
     virtual ~SceneRenderer();
@@ -46,19 +46,22 @@ public:
     int numCameras() const;
     SgCamera* camera(int index);
     const SgNodePath& cameraPath(int index) const;
-    virtual const Affine3& currentCameraPosition() const;
+    const Isometry3& cameraPosition(int index) const;
+    const Isometry3& currentCameraPosition() const;
     SignalProxy<void()> sigCamerasChanged() const;
     SgCamera* currentCamera() const;
     int currentCameraIndex() const;
     void setCurrentCamera(int index);
     bool setCurrentCamera(SgCamera* camera);
     SignalProxy<void()> sigCurrentCameraChanged();
-    bool getSimplifiedCameraPathStrings(int index, std::vector<std::string>& out_pathStrings);
+    std::vector<std::string> simplifiedCameraPathStrings(int cameraIndex);
+    bool getSimplifiedCameraPathStrings(int cameraIndex, std::vector<std::string>& out_pathStrings);
     int findCameraPath(const std::vector<std::string>& simplifiedPathStrings);
     bool setCurrentCameraPath(const std::vector<std::string>& simplifiedPathStrings);
+    void setCurrentCameraAutoRestorationMode(bool on);
 
     int numLights() const;
-    void getLightInfo(int index, SgLight*& out_light, Affine3& out_position) const;
+    void getLightInfo(int index, SgLight*& out_light, Isometry3& out_position) const;
     void setAsDefaultLight(SgLight* light);
     void unsetDefaultLight(SgLight* light);
     SgLight* headLight();
@@ -78,20 +81,26 @@ public:
        This function updates the information on preprocessed nodes such as
        cameras, lights, and fogs.
     */
-    virtual void extractPreprocessedNodes();
+    void extractPreprocessedNodes();
+
+    /*
+       This flag variable is used to check if the tree of preprocessed nodes
+       must be updated when the extractPreprocessedNodes function is executed.
+       You can skip the redundant update process by setting false to the flag
+       when the tree is not changed.
+    */
+    void setFlagVariableToUpdatePreprocessedNodeTree(bool& flag);
     
     void render();
     bool pick(int x, int y);
 
     virtual bool isRenderingPickingImage() const;
     
-    Signal<void()>& sigRenderingRequest();
-
     class CNOID_EXPORT PropertyKey {
         int id;
     public:
         PropertyKey(const std::string& key);
-        friend class SceneRendererImpl;
+        friend class SceneRenderer::Impl;
     };
     
     void setProperty(PropertyKey key, bool value);
@@ -104,10 +113,9 @@ public:
 protected:
     virtual void doRender() = 0;
     virtual bool doPick(int x, int y);
-    virtual void onSceneGraphUpdated(const SgUpdate& update);
 
 private:
-    SceneRendererImpl* impl;
+    Impl* impl;
 };
 
 }

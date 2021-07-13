@@ -15,33 +15,44 @@ typedef ref_ptr<LocationProxy> LocationProxyPtr;
 class CNOID_EXPORT LocationProxy : public Referenced
 {
 public:
-    LocationProxy();
-    virtual ~LocationProxy();
-
     enum LocationType {
         InvalidLocation,
         GlobalLocation,
         ParentRelativeLocation,
+        // This is basically same as ParentRelativeCoordinate, but
+        // this maeks the global coordinate unavailable in the user interface
         OffsetLocation
     };
-    virtual int getType() const = 0;
+
+    virtual ~LocationProxy();
+
+    LocationType locationType() const { return locationType_; }
+    void setLocationType(LocationType type) { locationType_ = type; }
     virtual std::string getName() const;
-    virtual Position getLocation() const = 0;
+    virtual Isometry3 getLocation() const = 0;
     virtual bool isEditable() const;
     virtual void setEditable(bool on);
-    virtual void setLocation(const Position& T);
+    virtual bool setLocation(const Isometry3& T);
+    virtual void finishLocationEditing();
     virtual Item* getCorrespondingItem();
-    virtual LocationProxyPtr getParentLocationProxy();
+    virtual LocationProxyPtr getParentLocationProxy() const;
     virtual void expire();
     virtual SignalProxy<void()> sigLocationChanged() = 0;
     virtual SignalProxy<void()> sigAttributeChanged();
     virtual SignalProxy<void()> sigExpired();
+    Isometry3 getGlobalLocation() const;
+    Isometry3 getGlobalLocationOf(const Isometry3 T) const;
+    bool setGlobalLocation(const Isometry3& T);
     void notifyAttributeChange();
     bool requestEdit();
 
     static SignalProxy<bool(LocationProxyPtr location), LogicalSum> sigEditRequest();
 
+protected:
+    LocationProxy(LocationType type);
+
 private:
+    LocationType locationType_;
     bool isEditable_;
     Signal<void()> sigAttributeChanged_;
     Signal<void()> sigExpired_;

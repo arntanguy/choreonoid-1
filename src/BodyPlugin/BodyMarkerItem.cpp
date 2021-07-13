@@ -48,8 +48,8 @@ public:
     BodyMarkerItem* self;
     BodyItem* bodyItem;
     Link* targetLink;
-    Position T_node;
-    Position localPosition;
+    Isometry3 T_node;
+    Isometry3 localPosition;
     SceneMarkerPtr marker;
     SgSwitchableGroupPtr switchableMarker;
     SgUpdate markerUpdate;
@@ -110,7 +110,7 @@ BodyMarkerItemImpl::BodyMarkerItemImpl(BodyMarkerItem* self)
 
     marker = new SceneMarker;
     switchableMarker = new SgSwitchableGroup;
-    switchableMarker->turnOff();
+    switchableMarker->setTurnedOn(false);
     switchableMarker->addChild(marker);
 }
 
@@ -133,11 +133,9 @@ BodyMarkerItem::~BodyMarkerItem()
 
 bool BodyMarkerItem::setName(const std::string& name)
 {
-    if(Item::setName(name)){
-        impl->switchableMarker->setName(name);
-        return true;
-    }
-    return false;
+    impl->switchableMarker->setName(name);
+    Item::setName(name);
+    return true;
 }
 
 
@@ -147,7 +145,7 @@ Item* BodyMarkerItem::doDuplicate() const
 }
 
 
-void BodyMarkerItem::onPositionChanged()
+void BodyMarkerItem::onTreePathChanged()
 {
     impl->setBodyItem(findOwnerItem<BodyItem>());
 }
@@ -271,13 +269,14 @@ bool BodyMarkerItemImpl::updateTarget()
             connection.reset(
                 bodyItem->sigKinematicStateChanged().connect(
                     [&](){ updateMarkerPosition(); } ));
-            switchableMarker->turnOn();
+            SgUpdate update;
+            switchableMarker->setTurnedOn(true, update);
             updateMarkerPosition();
         }
     }
 
     if(!isValid){
-        switchableMarker->turnOff(true);
+        switchableMarker->setTurnedOn(false);
     }
 
     return isValid;
@@ -308,7 +307,7 @@ bool BodyMarkerItemImpl::findNode()
 bool BodyMarkerItemImpl::findNode(SgNode* node, Affine3 T)
 {
     if(node->name() == targetNodeName){
-        T_node = T;
+        T_node = convertToIsometryWithOrthonormalization(T);
         return true;
     }
     if(auto group = dynamic_cast<SgGroup*>(node)){
@@ -327,7 +326,7 @@ bool BodyMarkerItemImpl::findNode(SgNode* node, Affine3 T)
 }
 
 
-void BodyMarkerItem::setOffsetPosition(const Position& T)
+void BodyMarkerItem::setOffsetPosition(const Isometry3& T)
 {
     impl->localPosition = T;
     impl->updateMarkerPosition();
@@ -436,9 +435,9 @@ bool BodyMarkerItemImpl::restore(const Archive& archive)
     if(read(archive, "translation", translation)){
         localPosition.translation() = translation;
     }
-    AngleAxis a;
-    if(readDegreeAngleAxis(archive, "rotation", a)){
-        localPosition.linear() = a.toRotationMatrix();
+    AngleAxis aa;
+    if(readDegreeAngleAxis(archive, "rotation", aa)){
+        localPosition.linear() = aa.toRotationMatrix();
     }
 
     double size;

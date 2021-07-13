@@ -91,7 +91,6 @@ class SlotHolderBase : public Referenced
 {
 public:
     SlotHolderBase() : isBlocked(false) { }
-    virtual ~SlotHolderBase() { }
     virtual void disconnect() = 0;
     virtual bool connected() const = 0;
     virtual void changeOrder(int orderId) = 0;
@@ -188,15 +187,15 @@ public:
         : func(func), prev(nullptr), owner(nullptr) {
     }
 
-    virtual void disconnect() {
+    virtual void disconnect() override {
         if(owner) owner->remove(this);
     }
 
-    virtual bool connected() const {
+    virtual bool connected() const override {
         return owner != nullptr;
     }
 
-    virtual void changeOrder(int orderId) {
+    virtual void changeOrder(int orderId) override {
         if(owner) owner->changeOrder(this, orderId);
     }
 };
@@ -210,10 +209,9 @@ class Connection
 
 public:
     Connection() { }
-    
     Connection(signal_private::SlotHolderBase* slot) : slot(slot) { }
-
     Connection(const Connection& org) : slot(org.slot) { }
+    Connection(Connection&&) = default;
 
     Connection& operator=(const Connection& rhs) {
         slot = rhs.slot;
@@ -255,6 +253,26 @@ public:
         }
         return *this;
     }
+
+    class ScopedBlock {
+        Connection* pConnection;
+    public:
+        ScopedBlock(Connection& connection)
+            : pConnection(&connection) {
+            connection.block();
+        }
+        ScopedBlock(ScopedBlock&& org) : pConnection(org.pConnection){
+            org.pConnection = nullptr;
+        }
+        ScopedBlock(const ScopedBlock&) = delete;
+        ScopedBlock& operator=(const ScopedBlock&) = delete;
+        ~ScopedBlock(){
+            if(pConnection){
+                pConnection->unblock();
+            }
+        }
+    };
+    ScopedBlock scopedBlock(){ return ScopedBlock(*this); }
 };
 
 
@@ -264,6 +282,7 @@ class ScopedConnection
     
 public:
     ScopedConnection() { }
+    ScopedConnection(ScopedConnection&&) = default;
     ScopedConnection(const ScopedConnection& org) = delete;
     ScopedConnection(const Connection& org) { connection_ = org; }
     ~ScopedConnection() { connection_.disconnect(); }
@@ -297,11 +316,11 @@ private:
     SlotHolderPtr firstSlot;
     SlotHolderType* lastSlot;
 
-    Signal(const Signal& org);
-    Signal& operator=(const Signal& rhs);
-
 public:
     Signal() : lastSlot(nullptr) { }
+    Signal(Signal&&) = default;
+    Signal(const Signal& org) = delete;
+    Signal& operator=(const Signal& rhs) = delete;
 
     ~Signal() {
         disconnect_all_slots();
@@ -386,6 +405,16 @@ public:
 
     bool empty() const {
         return (firstSlot == nullptr);
+    }
+
+    int numConnections() const {
+        int n = 0;
+        auto slot = firstSlot;
+        while(slot){
+            ++n;
+            slot = slot->next;
+        }
+        return n;
     }
     
     result_type operator()(Args... args){

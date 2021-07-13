@@ -116,6 +116,8 @@ public:
 }
 
 
+namespace {
+
 FrameListModel::FrameListModel(CoordinateFrameListView::Impl* view)
     : QAbstractTableModel(view),
       view(view),
@@ -276,7 +278,7 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
             return frame->note().c_str();
 
         case PositionColumn: {
-            Position T;
+            Isometry3 T;
             if(frameListItem->getRelativeFramePosition(frame, T)){
                 auto p = T.translation();
                 auto rpy = degree(rpyFromRot(T.linear()));
@@ -513,6 +515,8 @@ QSize CheckItemDelegate::sizeHint(const QStyleOptionViewItem& option, const QMod
     return size;
 }
 
+}
+
 
 void CoordinateFrameListView::initializeClass(ExtensionManager* ext)
 {
@@ -557,6 +561,7 @@ CoordinateFrameListView::Impl::Impl(CoordinateFrameListView* self)
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTabKeyNavigation(true);
     setCornerButtonEnabled(true);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     globalCheckDelegate = new CheckItemDelegate(this);
     setItemDelegateForColumn(GlobalCheckColumn, globalCheckDelegate);
@@ -578,9 +583,7 @@ CoordinateFrameListView::Impl::Impl(CoordinateFrameListView* self)
     hheader->setSectionResizeMode(PositionColumn, QHeaderView::ResizeToContents);
     hheader->setSectionResizeMode(GlobalCheckColumn, QHeaderView::ResizeToContents);
     hheader->setSectionResizeMode(VisibleCheckColumn, QHeaderView::ResizeToContents);
-    auto vheader = verticalHeader();
-    vheader->setSectionResizeMode(QHeaderView::ResizeToContents);
-    vheader->hide();
+    verticalHeader()->hide();
 
     connect(this, &QTableView::pressed,
             [this](const QModelIndex& index){

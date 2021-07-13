@@ -1,8 +1,10 @@
 #include "MprStatementViewBase.h"
+#include "MprStatementPanel.h"
 #include "MprProgramViewBase.h"
 #include "MprProgramItemBase.h"
 #include "MprStatement.h"
 #include <cnoid/Archive>
+#include <fmt/format.h>
 #include <QBoxLayout>
 #include <QLabel>
 #include <QScrollArea>
@@ -11,21 +13,9 @@
 
 using namespace std;
 using namespace cnoid;
+using fmt::format;
 
 namespace cnoid {
-
-class MprStatementPanel::Impl
-{
-public:
-    MprStatementPanel* self;
-    MprProgramItemBasePtr programItem;
-    MprStatementPtr statement;
-    ScopedConnection statementUpdateConnection;
-
-    Impl(MprStatementPanel* self);
-    void activate(MprProgramItemBase* programItem, MprStatement* statement);
-    void deactivate();
-};
 
 class MprStatementViewBase::Impl
 {
@@ -34,10 +24,12 @@ public:
 
     MprProgramItemBasePtr currentProgramItem;
     MprStatementPtr currentStatement;
-
+    vector<MprStatementPtr> additionalStatements;
+    MprStatementPanel* currentPanel;
     ScopedConnection programViewConnection;
     QScrollArea scrollArea;
-    QLabel statementLabel;
+    QLabel captionLabel;
+    bool needToUpdateCaption;
 
     map<std::type_index, PanelFactoryFunction> panelFactoryMap;
     map<std::type_index, MprStatementPanel*> panelMap;
@@ -46,81 +38,12 @@ public:
     ~Impl();
     void onActivated();
     MprStatementPanel* getOrCreateStatementPanel(MprStatement* statement);
-    void setStatement(MprProgramItemBase* programItem, MprStatement* statement);
+    void onSelectedStatementsChanged(
+        MprProgramViewBase* programView, const std::vector<MprStatementPtr>& statements);
+    void updateAdditionalStatements(const std::vector<MprStatementPtr>& statements);
+    void setCaption(const std::string& caption);
 };
 
-}
-
-
-MprStatementPanel::MprStatementPanel()
-{
-    impl = new Impl(this);
-    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-}
-
-
-MprStatementPanel::~MprStatementPanel()
-{
-    delete impl;
-}
-
-
-MprStatementPanel::Impl::Impl(MprStatementPanel* self)
-    : self(self)
-{
-
-}
-
-
-void MprStatementPanel::Impl::activate
-(MprProgramItemBase* programItem_, MprStatement* statement_)
-{
-    programItem = programItem_;
-    statement = statement_;
-
-    statementUpdateConnection =
-        programItem->program()->sigStatementUpdated().connect(
-            [this](MprStatement* updated){
-                if(updated == statement){
-                    self->onStatementUpdated();
-                }
-            });
-
-    self->onActivated();
-}
-
-
-void MprStatementPanel::Impl::deactivate()
-{
-    self->onDeactivated();
-    
-    programItem.reset();
-    statement.reset();
-    statementUpdateConnection.disconnect();
-}
-
-
-void MprStatementPanel::onDeactivated()
-{
-
-}
-
-
-void MprStatementPanel::onStatementUpdated()
-{
-
-}
-
-
-MprProgramItemBase* MprStatementPanel::currentProgramItem()
-{
-    return impl->programItem;
-}
-
-
-MprStatement* MprStatementPanel::getCurrentStatement()
-{
-    return impl->statement;
 }
 
 
@@ -139,7 +62,8 @@ MprStatementViewBase::Impl::Impl(MprStatementViewBase* self)
     auto vbox = new QVBoxLayout;
     vbox->setSpacing(0);
 
-    vbox->addWidget(&statementLabel);
+    captionLabel.setFrameStyle(QFrame::Box | QFrame::Sunken);
+    vbox->addWidget(&captionLabel);
 
     scrollArea.setFrameShape(QFrame::NoFrame);
     scrollArea.setStyleSheet("QScrollArea {background: transparent;}");
@@ -150,7 +74,8 @@ MprStatementViewBase::Impl::Impl(MprStatementViewBase* self)
 
     self->setLayout(vbox);
 
-    currentProgramItem = nullptr;
+    currentPanel = nullptr;
+    needToUpdateCaption = true;
 }
 
 
@@ -178,21 +103,23 @@ void MprStatementViewBase::onActivated()
 void MprStatementViewBase::Impl::onActivated()
 {
     auto programView = self->getProgramView();
-    
-    programViewConnection =
-        programView->sigCurrentStatementChanged().connect(
-            [=](MprStatement* statement){
-                setStatement(programView->currentProgramItem(), statement); });
 
-    setStatement(programView->currentProgramItem(), programView->currentStatement());
+    programViewConnection =
+        programView->sigSelectedStatementsChanged().connect(
+            [=](std::vector<MprStatementPtr>& statements){
+                onSelectedStatementsChanged(programView, statements);
+            });
+
+    onSelectedStatementsChanged(programView, programView->selectedStatements());
 }
 
 
 void MprStatementViewBase::onDeactivated()
 {
+    impl->currentProgramItem.reset();
+    impl->currentStatement.reset();
+    impl->additionalStatements.clear();
     impl->programViewConnection.disconnect();
-    impl->currentProgramItem = nullptr;
-    impl->currentStatement = nullptr;
 }
 
 
@@ -225,39 +152,73 @@ MprStatementPanel* MprStatementViewBase::Impl::getOrCreateStatementPanel(MprStat
 }
 
 
-void MprStatementViewBase::Impl::setStatement(MprProgramItemBase* programItem, MprStatement* statement)
+void MprStatementViewBase::Impl::onSelectedStatementsChanged
+(MprProgramViewBase* programView, const std::vector<MprStatementPtr>& statements)
 {
-    if(programItem == currentProgramItem && statement == currentStatement){
-        return;
-    }
+    auto programItem = programView->currentProgramItem();
+    auto statement = programView->currentStatement();
+    needToUpdateCaption = true;
 
-    auto prevPanel = dynamic_cast<MprStatementPanel*>(scrollArea.widget());
-    if(prevPanel){
-        prevPanel->impl->deactivate();
-    }
+    if(currentPanel && programItem == currentProgramItem && statement == currentStatement){
+        updateAdditionalStatements(statements);
 
-    MprStatementPanel* panel = nullptr;
-
-    if(statement){
-        statementLabel.setText(statement->label(0).c_str());
-        panel = getOrCreateStatementPanel(statement);
-        if(panel){
-            panel->impl->activate(programItem, statement);
-        }
     } else {
-        statementLabel.setText("---");
+        if(currentPanel){
+            currentPanel->deactivate();
+        }
+        auto prevPanel = currentPanel;
+        currentPanel = nullptr;
+
+        if(statement){
+            currentPanel = getOrCreateStatementPanel(statement);
+            if(currentPanel){
+                currentPanel->activate(
+                    programItem, statement,
+                    [&](const std::string& caption) { setCaption(caption); });
+                updateAdditionalStatements(statements);
+            }
+        }
+
+        if(currentPanel != prevPanel){
+            scrollArea.takeWidget();
+            if(currentPanel){
+                scrollArea.setWidget(currentPanel);
+                currentPanel->setAutoFillBackground(false);
+            }
+        }
+
+        currentProgramItem = programItem;
+        currentStatement = statement;
     }
 
-    if(panel != prevPanel){
-        scrollArea.takeWidget();
-        if(panel){
-            scrollArea.setWidget(panel);
-            panel->setAutoFillBackground(false);
+    if(needToUpdateCaption){
+        if(statement){
+            setCaption(format("<b>{0}</b>", statement->label(0)));
+        } else {
+            setCaption("---");
+        }            
+    }
+}
+
+
+void MprStatementViewBase::Impl::updateAdditionalStatements(const std::vector<MprStatementPtr>& statements)
+{
+    additionalStatements.clear();
+    if(statements.size() >= 2){
+        for(auto& statement : statements){
+            if(statement != currentStatement){
+                additionalStatements.push_back(statement);
+            }
         }
     }
+    currentPanel->onAdditionalStatementsUpdated(additionalStatements);
+}
 
-    currentProgramItem = programItem;
-    currentStatement = statement;
+
+void MprStatementViewBase::Impl::setCaption(const std::string& caption)
+{
+    captionLabel.setText(caption.c_str());
+    needToUpdateCaption = false;
 }
 
 

@@ -45,7 +45,7 @@ void BodyMotionPoseProvider::initialize(Body* body__, std::shared_ptr<BodyMotion
             Link* link = legged->footLink(i);
             auto ikPath = JointPath::getCustomPath(body_, body_->rootLink(), link);
             if(ikPath){
-                if(ikPath->hasAnalyticalIK() || ikPath->numJoints() == 6){
+                if(ikPath->hasCustomIK() || ikPath->numJoints() == 6){
                     footLinks.push_back(link);
                     ikPaths.push_back(ikPath);
                 }
@@ -94,7 +94,7 @@ bool BodyMotionPoseProvider::updateMotion()
         
         for(size_t i=0; i < footLinks.size(); ++i){
             Link* footLink = footLinks[i];
-            Affine3& p = footLinkPositions->at(frame, i);
+            Isometry3& p = footLinkPositions->at(frame, i);
             p.translation() = footLink->p();
             p.linear() = footLink->R();
         }
@@ -139,14 +139,14 @@ bool BodyMotionPoseProvider::seek
     }
     
     const SE3& waist = motion->linkPosSeq()->at(frame, 0);
-    p_waist = waist.translation();
-    R_waist = waist.rotation();
+    T_waist.translation() = waist.translation();
+    T_waist.linear() = Matrix3(waist.rotation());
     if(applyWaistTranslation){
-        p_waist += waistTranslation;
+        T_waist.translation() += waistTranslation;
         for(size_t i=0; i < footLinks.size(); ++i){
-            const Affine3& foot = footLinkPositions->at(frame, i);
+            const Isometry3& foot = footLinkPositions->at(frame, i);
             auto ikPath = ikPaths[i];
-            ikPath->calcInverseKinematics(p_waist, R_waist, foot.translation(), foot.linear());
+            ikPath->setBaseLinkGoal(T_waist).calcInverseKinematics(foot);
             for(int j=0; j < ikPath->numJoints(); ++j){
                 Link* joint = ikPath->joint(j);
                 qTranslated[joint->jointId()] = joint->q();
@@ -156,7 +156,7 @@ bool BodyMotionPoseProvider::seek
 
     if(zmpSeq){
         if(zmpSeq->isRootRelative()){
-            ZMP_.noalias() = R_waist * zmpSeq->at(frame) + p_waist;
+            ZMP_.noalias() = T_waist.linear() * zmpSeq->at(frame) + T_waist.translation();
         } else {
             ZMP_.noalias() = zmpSeq->at(frame);
         }
@@ -184,10 +184,9 @@ int BodyMotionPoseProvider::baseLinkIndex() const
 }
 
 
-bool BodyMotionPoseProvider::getBaseLinkPosition(Position& out_T) const
+bool BodyMotionPoseProvider::getBaseLinkPosition(Isometry3& out_T) const
 {
-    out_T.linear() = R_waist;
-    out_T.translation() = p_waist;
+    out_T = T_waist;
     return true;
 }
 

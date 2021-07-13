@@ -153,7 +153,6 @@ void LightingItemImpl::genarateLightShape()
     SgMaterial* material = new SgMaterial;
     material->setDiffuseColor(Vector3f(1.0f, 1.0f, 0.0f));
     material->setAmbientIntensity(0.2f);
-    material->setShininess(0.2f);
     dlightShape = new SgGroup;
     MeshGenerator meshGenerator;
     SgShape* sphere = new SgShape;
@@ -198,10 +197,10 @@ void LightingItemImpl::genarateLightShape()
 
     slightShape = new SgGroup;
     SgShape* box = new SgShape;
-    box->setMesh(meshGenerator.generateBox(Vector3(0.07, 0.07, 0.07), false));
+    box->setMesh(meshGenerator.generateBox(Vector3(0.07, 0.07, 0.07)));
     box->setMaterial(material);
     SgShape* cone = new SgShape;
-    cone->setMesh(meshGenerator.generateCone(0.07, 0.07, true, true, false));
+    cone->setMesh(meshGenerator.generateCone(0.07, 0.07));
     cone->setMaterial(material);
     SgPosTransform* coneT = new SgPosTransform;
     coneT->setRotation(AngleAxis(radian(90), Vector3(1, 0, 0)));
@@ -260,7 +259,7 @@ LightingItemImpl::LightingItemImpl(LightingItem* self, const LightingItemImpl& o
 bool LightingItemImpl::updateLightType(LightType type)
 {
     lightType.select(type);
-    scene->clearChildren(false);
+    scene->clearChildren();
     switch(lightType.which()){
     case DIRECTIONAL :
         light = new SgDirectionalLight;
@@ -292,9 +291,10 @@ bool LightingItemImpl::updateLightType(LightType type)
     light->setAmbientIntensity(ambientIntensity);
     light->on(on);
     if(showMarker){
-        scene->addChild(lightShape, false);
+        scene->addChild(lightShape);
     }
-    scene->addChild(light, true);
+    SgTmpUpdate update;
+    scene->addChild(light, update);
 
     return true;
 }
@@ -469,10 +469,11 @@ bool LightingItemImpl::onCutOffExponentPropertyChanged(float value)
 bool LightingItemImpl::onShowMarkerPropertyChanged(bool on)
 {
     showMarker = on;
+    SgTmpUpdate update;
     if(showMarker){
-        scene->addChildOnce(lightShape, true);
+        scene->addChildOnce(lightShape, update);
     }else{
-        scene->removeChild(lightShape, true);
+        scene->removeChild(lightShape, update);
     }
     return true;
 }

@@ -135,6 +135,8 @@ public:
 }
 
 
+namespace {
+
 ConnectionMapModel::ConnectionMapModel(QObject* parent)
     : QAbstractTableModel(parent)
 {
@@ -493,6 +495,8 @@ SignalDeviceComboBox::SignalDeviceComboBox
     }
 }
 
+}
+
 
 void IoConnectionView::initializeClass(ExtensionManager* ext)
 {
@@ -539,6 +543,7 @@ IoConnectionView::Impl::Impl(IoConnectionView* self)
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTabKeyNavigation(true);
     setCornerButtonEnabled(true);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setItemDelegate(new CustomizedItemDelegate(this));
     setEditTriggers(

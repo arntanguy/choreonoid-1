@@ -4,6 +4,8 @@
 */
 
 #include "SpotLight.h"
+#include "StdBodyFileUtil.h"
+#include <cnoid/EigenArchive>
 
 using namespace cnoid;
 
@@ -23,7 +25,7 @@ SpotLight::SpotLight()
 }
 
 
-const char* SpotLight::typeName()
+const char* SpotLight::typeName() const
 {
     return "SpotLight";
 }
@@ -100,4 +102,49 @@ double* SpotLight::writeState(double* out_buf) const
     out_buf[4] = cutOffAngle_;
     out_buf[5] = cutOffExponent_;
     return out_buf + 6;
+}
+
+
+bool SpotLight::readSpecifications(const Mapping* info)
+{
+    if(!PointLight::readSpecifications(info)){
+        return false;
+    }
+    read(info, "direction", direction_);
+    info->readAngle({ "beam_width", "beamWidth" }, beamWidth_);
+    info->readAngle({ "cut_off_angle", "cutOffAngle" }, cutOffAngle_);
+    info->read({ "cut_off_exponent", "cutOffExponent" }, cutOffExponent_);
+    return true;
+}
+
+
+bool SpotLight::writeSpecifications(Mapping* info) const
+{
+    if(!PointLight::writeSpecifications(info)){
+        return false;
+    }
+    write(info, "direction", direction_);
+    info->write("beam_width", degree(beamWidth_));
+    info->write("cut_off_angle", degree(cutOffAngle_));
+    info->write("cut_off_exponent", cutOffExponent_);
+    return true;
+}
+
+
+namespace {
+
+StdBodyFileDeviceTypeRegistration<SpotLight>
+registerHolderDevice(
+    "SpotLight",
+     [](StdBodyLoader* loader, const Mapping* info){
+         SpotLightPtr light = new SpotLight;
+         if(light->readSpecifications(info)){
+            return loader->readDevice(light, info);
+        }
+        return false;
+    },
+    [](StdBodyWriter* writer, Mapping* info, const SpotLight* light)
+    {
+        return light->writeSpecifications(info);
+    });
 }

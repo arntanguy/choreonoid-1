@@ -10,7 +10,6 @@
 
 namespace cnoid {
 
-class SimpleControllerItemImpl;
 class SimpleController;
 
 class CNOID_EXPORT SimpleControllerItem : public ControllerItem
@@ -33,17 +32,18 @@ public:
     virtual void output() override;
     virtual void stop() override;
 
+    class Impl;
+
 protected:
     virtual Item* doDuplicate() const override;
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
     virtual void onDisconnectedFromRoot() override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
     virtual bool store(Archive& archive) override;
     virtual bool restore(const Archive& archive) override;
         
 private:
-    SimpleControllerItemImpl* impl;
-    friend class SimpleControllerItemImpl;
+    Impl* impl;
 };
         
 typedef ref_ptr<SimpleControllerItem> SimpleControllerItemPtr;

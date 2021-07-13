@@ -12,8 +12,10 @@ set(sources
   MprProgram.cpp
   MprStatementRegistration.cpp
   MprStatement.cpp
+  MprStructuredStatement.cpp
   MprBasicStatements.cpp
   MprPositionStatement.cpp
+  MprTagTraceStatement.cpp
   MprVariable.cpp
   MprVariableList.cpp
   MprProgramItemBase.cpp
@@ -22,6 +24,10 @@ set(sources
   MprProgramViewBase.cpp
   MprProgramViewDelegates.cpp
   MprStatementViewBase.cpp
+  MprStatementPanel.cpp
+  MprPositionStatementPanel.cpp
+  MprTagTraceStatementPanel.cpp
+  MprTagTraceStatementTagGroupResolver.cpp
   MprPositionListView.cpp
   MprVariableListView.cpp
   )
@@ -31,8 +37,10 @@ set(headers
   MprPositionList.h
   MprStatementRegistration.h
   MprStatement.h
+  MprStructuredStatement.h
   MprBasicStatements.h
   MprPositionStatement.h
+  MprTagTraceStatement.h
   MprVariable.h
   MprVariableList.h
   MprProgramItemBase.h
@@ -40,6 +48,10 @@ set(headers
   MprMultiVariableListItem.h
   MprProgramViewBase.h
   MprStatementViewBase.h
+  MprStatementPanel.h
+  MprPositionStatementPanel.h
+  MprTagTraceStatementPanel.h
+  MprTagTraceStatementTagGroupResolver.h
   MprPositionListView.h
   MprVariableListView.h
   exportdecl.h

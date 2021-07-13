@@ -10,12 +10,15 @@ namespace cnoid {
 class CNOID_EXPORT FileDialog : public QDialog
 {
 public:
+    FileDialog();
     FileDialog(QWidget* parent, Qt::WindowFlags f = 0);
     ~FileDialog();
 
     void updatePresetDirectories();
     bool selectFilePath(const std::string& filePath);
     void insertOptionPanel(QWidget* panel);
+
+    SignalProxy<void(int index)> sigFilterSelected();
     SignalProxy<bool(int result), LogicalProduct> sigAboutToFinished();
 
     virtual int exec() override;
@@ -38,6 +41,9 @@ public:
     void setNameFilters(const QStringList& filters);
     void setOption(QFileDialog::Option option, bool on = true);
     void setViewMode(QFileDialog::ViewMode mode);
+
+    // Util functions
+    void selectNameFilter(int index);
     
 private:
     class Impl;

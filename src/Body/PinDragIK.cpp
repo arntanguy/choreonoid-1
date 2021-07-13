@@ -146,7 +146,7 @@ public:
     void enableJointRangeConstraints(bool on);
     bool initialize();
             
-    bool calcInverseKinematics(const Position& T);
+    bool calcInverseKinematics(const Isometry3& T);
             
     IKStepResult calcOneStep(const Vector3& v, const Vector3& omega);
     void solveConstraints();
@@ -386,36 +386,34 @@ bool PinDragIKImpl::initialize()
     
     targetJointPath = make_shared<JointPath>(baseLink, targetLink);
 
-    pinPropertyMap.erase(targetLink);
-
     C = 0;
 
     constraintWeightsSqrt.clear();
     PinPropertyMap::iterator p = pinPropertyMap.begin();
     while(p != pinPropertyMap.end()){
         Link* link = p->first;
-        PinProperty& property = p->second;
-        property.jointPath = make_shared<JointPath>(baseLink, link);
-        if(property.jointPath->empty()){
-            return false;
-        }
-
-        double weightSqrt = sqrt(property.weight);
-
-        if(property.axes & PinDragIK::TRANSLATION_3D){
-            property.p = link->p();
-            for(int i=0; i < 3; i++){
-                constraintWeightsSqrt.push_back(weightSqrt);
+        if(link != targetLink){
+            PinProperty& property = p->second;
+            property.jointPath = make_shared<JointPath>(baseLink, link);
+            if(property.jointPath->empty()){
+                return false;
             }
-            C += 3;
-        }
+            double weightSqrt = sqrt(property.weight);
 
-        if(property.axes & PinDragIK::ROTATION_3D){
-            property.R = link->R();
-            for(int i=0; i < 3; i++){
-                constraintWeightsSqrt.push_back(weightSqrt);
+            if(property.axes & PinDragIK::TRANSLATION_3D){
+                property.p = link->p();
+                for(int i=0; i < 3; i++){
+                    constraintWeightsSqrt.push_back(weightSqrt);
+                }
+                C += 3;
             }
-            C += 3;
+            if(property.axes & PinDragIK::ROTATION_3D){
+                property.R = link->R();
+                for(int i=0; i < 3; i++){
+                    constraintWeightsSqrt.push_back(weightSqrt);
+                }
+                C += 3;
+            }
         }
         p++;
     }
@@ -462,13 +460,13 @@ bool PinDragIKImpl::initialize()
 }
 
 
-bool PinDragIK::calcInverseKinematics(const Position& T)
+bool PinDragIK::calcInverseKinematics(const Isometry3& T)
 {
     return impl->calcInverseKinematics(T);
 }
 
 
-bool PinDragIKImpl::calcInverseKinematics(const Position& T)
+bool PinDragIKImpl::calcInverseKinematics(const Isometry3& T)
 {
     for(int i=0; i < NJ; i++){
         q_org[i] = body_->joint(i)->q();
@@ -480,9 +478,11 @@ bool PinDragIKImpl::calcInverseKinematics(const Position& T)
     
     for(PinPropertyMap::iterator p = pinPropertyMap.begin(); p != pinPropertyMap.end(); p++){
         Link* link = p->first;
-        PinProperty& property = p->second;
-        property.prevStep_p = link->p();
-        property.prevStep_R = link->R();
+        if(link != targetLink){
+            PinProperty& property = p->second;
+            property.prevStep_p = link->p();
+            property.prevStep_R = link->R();
+        }
     }
 
     IKStepResult result = (C > 0) ? PINS_CONVERGED : PINS_NOT_CONVERGED;
@@ -581,19 +581,21 @@ PinDragIKImpl::IKStepResult PinDragIKImpl::calcOneStep(const Vector3& v, const V
     double maxErrorSqr = 0.0;
     for(PinPropertyMap::iterator p = pinPropertyMap.begin(); p != pinPropertyMap.end(); p++){
         Link* link = p->first;
-        PinProperty& property = p->second;
-        double errsqr = 0.0;
-        if(property.axes & PinDragIK::TRANSLATION_3D){
-            const Vector3 dp = property.prevStep_p - link->p();
-            errsqr += dp.squaredNorm();
-            property.prevStep_p = link->p();
+        if(link != targetLink){
+            PinProperty& property = p->second;
+            double errsqr = 0.0;
+            if(property.axes & PinDragIK::TRANSLATION_3D){
+                const Vector3 dp = property.prevStep_p - link->p();
+                errsqr += dp.squaredNorm();
+                property.prevStep_p = link->p();
+            }
+            if(property.axes & PinDragIK::ROTATION_3D){
+                const Vector3 omega = omegaFromRot(link->R().transpose() * property.prevStep_R);
+                errsqr += omega.squaredNorm();
+                property.prevStep_R = link->R();
+            }
+            maxErrorSqr = std::max(errsqr, maxErrorSqr);
         }
-        if(property.axes & PinDragIK::ROTATION_3D){
-            const Vector3 omega = omegaFromRot(link->R().transpose() * property.prevStep_R);
-            errsqr += omega.squaredNorm();
-            property.prevStep_R = link->R();
-        }
-        maxErrorSqr = std::max(errsqr, maxErrorSqr);
     }
     
     return (maxErrorSqr < ikErrorSqrThresh) ? PINS_CONVERGED : PINS_NOT_CONVERGED;
@@ -735,27 +737,25 @@ void PinDragIKImpl::addPinConstraints()
     int row = 0;
 
     for(PinPropertyMap::iterator p = pinPropertyMap.begin(); p != pinPropertyMap.end(); p++){
-
         Link* link = p->first;
-        PinProperty& property = p->second;
-
-        setJacobianForOnePath(Jaux, row, *property.jointPath, property.axes);
-        if(isBaseLinkFreeMode){
-            setJacobianForFreeRoot(Jaux, row, *property.jointPath, property.axes);
-        }
-
-        if(property.axes & PinDragIK::TRANSLATION_3D){
-            const Vector3 dp = property.p - link->p();
-            dPaux[row++] = dp[0];
-            dPaux[row++] = dp[1];
-            dPaux[row++] = dp[2];
-        }
-    
-        if(property.axes & PinDragIK::ROTATION_3D){
-            const Vector3 omega = link->R() * omegaFromRot(link->R().transpose() * property.R);
-            dPaux[row++] = omega[0];
-            dPaux[row++] = omega[1];
-            dPaux[row++] = omega[2];
+        if(link != targetLink){
+            PinProperty& property = p->second;
+            setJacobianForOnePath(Jaux, row, *property.jointPath, property.axes);
+            if(isBaseLinkFreeMode){
+                setJacobianForFreeRoot(Jaux, row, *property.jointPath, property.axes);
+            }
+            if(property.axes & PinDragIK::TRANSLATION_3D){
+                const Vector3 dp = property.p - link->p();
+                dPaux[row++] = dp[0];
+                dPaux[row++] = dp[1];
+                dPaux[row++] = dp[2];
+            }
+            if(property.axes & PinDragIK::ROTATION_3D){
+                const Vector3 omega = link->R() * omegaFromRot(link->R().transpose() * property.R);
+                dPaux[row++] = omega[0];
+                dPaux[row++] = omega[1];
+                dPaux[row++] = omega[2];
+            }
         }
     }
 }

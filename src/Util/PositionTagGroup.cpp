@@ -1,6 +1,10 @@
 #include "PositionTagGroup.h"
 #include "ValueTree.h"
+#include "UTF8.h"
+#include "Tokenizer.h"
+#include "EigenUtil.h"
 #include <fmt/format.h>
+#include <fstream>
 #include "gettext.h"
 
 using namespace std;
@@ -12,19 +16,20 @@ namespace cnoid {
 class PositionTagGroup::Impl
 {
 public:
+    string name;
     Signal<void(int index)> sigTagAdded;
     Signal<void(int index, PositionTag* tag)> sigTagRemoved;
-    Signal<void(int index)> sigTagUpdated;
-    Signal<void(const Position& T)> sigOffsetPositionChanged;
+    Signal<void(int index)> sigTagPositionChanged;
+    Signal<void(int index)> sigTagPositionUpdated;
     
     Impl();
+    Impl(const Impl& org);
 };
 
 }
 
 
 PositionTagGroup::PositionTagGroup()
-    : T_offset_(Position::Identity())
 {
     impl = new Impl;
 }
@@ -37,9 +42,8 @@ PositionTagGroup::Impl::Impl()
 
 
 PositionTagGroup::PositionTagGroup(const PositionTagGroup& org)
-    : T_offset_(org.T_offset_)
 {
-    impl = new Impl;
+    impl = new Impl(*org.impl);
 
     tags_.reserve(org.tags_.size());
     for(auto& tag : org.tags_){
@@ -48,9 +52,34 @@ PositionTagGroup::PositionTagGroup(const PositionTagGroup& org)
 }
 
 
+PositionTagGroup::Impl::Impl(const Impl& org)
+    : name(org.name)
+{
+
+}
+
+
 PositionTagGroup::~PositionTagGroup()
 {
     delete impl;
+}
+
+
+Referenced* PositionTagGroup::doClone(CloneMap*) const
+{
+    return new PositionTagGroup(*this);
+}
+
+
+const std::string& PositionTagGroup::name() const
+{
+    return impl->name;
+}
+
+
+void PositionTagGroup::setName(const std::string& name)
+{
+    impl->name = name;
 }
 
 
@@ -71,6 +100,21 @@ void PositionTagGroup::insert(int index, PositionTag* tag)
     tags_.insert(tags_.begin() + index, tag);
 
     impl->sigTagAdded(index);
+}
+
+
+void PositionTagGroup::insert(int index, PositionTagGroup* group)
+{
+    int size = tags_.size();
+    if(index > size){
+        index = size;
+    }
+    auto it = tags_.begin() + index;
+    for(auto& tag : *group){
+        it = tags_.insert(it, tag);
+        impl->sigTagAdded(index++);
+        it++;
+    }
 }
 
 
@@ -104,29 +148,34 @@ SignalProxy<void(int index, PositionTag* tag)> PositionTagGroup::sigTagRemoved()
 }
 
 
-SignalProxy<void(int index)> PositionTagGroup::sigTagUpdated()
+SignalProxy<void(int index)> PositionTagGroup::sigTagPositionChanged()
 {
-    return impl->sigTagUpdated;
+    return impl->sigTagPositionChanged;
 }
 
 
-SignalProxy<void(const Position& T)> PositionTagGroup::sigOffsetPositionChanged()
+SignalProxy<void(int index)> PositionTagGroup::sigTagPositionUpdated()
 {
-    return impl->sigOffsetPositionChanged;
+    return impl->sigTagPositionUpdated;
 }
 
 
-void PositionTagGroup::notifyTagUpdate(int index)
+void PositionTagGroup::notifyTagPositionChange(int index)
 {
     if(static_cast<size_t>(index) < tags_.size()){
-        impl->sigTagUpdated(index);
+        impl->sigTagPositionChanged(index);
     }
 }
 
 
-void PositionTagGroup::notifyOffsetPositionUpdate()
+void PositionTagGroup::notifyTagPositionUpdate(int index, bool doNotifyPositionChange)
 {
-    impl->sigOffsetPositionChanged(T_offset_);
+    if(static_cast<size_t>(index) < tags_.size()){
+        if(doNotifyPositionChange){
+            impl->sigTagPositionChanged(index);
+        }
+        impl->sigTagPositionUpdated(index);
+    }
 }
 
 
@@ -144,6 +193,8 @@ bool PositionTagGroup::read(const Mapping* archive)
         versionNode->throwException(format(_("Format version {0} is not supported."), version));
     }
 
+    archive->read("name", impl->name);
+
     clearTags();
 
     auto listing = archive->findListing("tags");
@@ -155,22 +206,87 @@ bool PositionTagGroup::read(const Mapping* archive)
             }
         }
     }
+
+    return true;
+}
+
+
+bool PositionTagGroup::write(Mapping* archive) const
+{
+    archive->write("type", "PositionTagGroup");
+    archive->write("format_version", 1.0);
+    archive->write("name", impl->name);
+
+    if(!tags_.empty()){
+        auto listing = archive->createListing("tags");
+        for(auto& tag : tags_){
+            MappingPtr node = new Mapping;
+            if(!tag->write(node)){
+                return false;
+            }
+            listing->append(node);
+        }
+    }
     
     return true;
 }
 
 
-void PositionTagGroup::write(Mapping* archive) const
+bool PositionTagGroup::loadCsvFile
+(const std::string& filename, CsvFormat csvFormat, std::ostream& os)
 {
-    archive->write("type", "PositionTagGroup");
-    archive->write("format_version", 1.0);
+    ifstream is(fromUTF8(filename).c_str());
+    if(!is){
+        os << format(_("\"{}\" cannot be opened."), filename) << endl;
+        return false;
+    }
+  
+    int lineNumber = 0;
+    string line;
+    Tokenizer<CharSeparator<char>> tokens(CharSeparator<char>(","));
+    vector<Vector6> data;
 
-    if(!tags_.empty()){
-        auto listing = archive->createListing("tags");
-        for(auto& tag : tags_){
-            auto node = new Mapping;
-            tag->write(node);
-            listing->append(node);
+    try {
+        while(getline(is, line)){
+            lineNumber++;
+            tokens.assign(line);
+            Vector6 xyzrpy;
+            int i = 0;
+            for(auto& token : tokens){
+                if(i > 5){
+                    os << format(_("Too many elements at line {0} of \"{1}\"."), lineNumber, filename) << endl;
+                    return false;
+                }
+                xyzrpy[i++] = std::stod(token);
+            }
+            while(i < 6){
+                xyzrpy[i++] = 0.0;
+            }
+            data.push_back(xyzrpy);
         }
     }
+    catch(std::logic_error& ex){
+        os << format(_("{0} at line {1} of \"{2}\"."), ex.what(), lineNumber, filename) << endl;
+        return false;
+    }
+
+    if(csvFormat == XYZMMRPYDEG){
+        for(auto& xyzrpy : data){
+            auto tag = new PositionTag;
+            tag->setTranslation(xyzrpy.head<3>() / 1000.0);
+            tag->setRotation(rotFromRpy(radian(xyzrpy.tail<3>())));
+            append(tag);
+        }
+    } else if(csvFormat == XYZMM){
+        for(auto& xyzrpy : data){
+            auto tag = new PositionTag;
+            tag->setTranslation(xyzrpy.head<3>() / 1000.0);
+            append(tag);
+        }
+    } else {
+        os << _("Unsupported CSV format is specified.") << endl;
+        return false;
+    }
+        
+    return true;
 }

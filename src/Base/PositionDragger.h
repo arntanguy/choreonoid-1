@@ -5,12 +5,12 @@
 #ifndef CNOID_BASE_POSITION_DRAGGER_H
 #define CNOID_BASE_POSITION_DRAGGER_H
 
-#include "SceneWidgetEditable.h"
+#include "SceneWidgetEventHandler.h"
 #include "exportdecl.h"
 
 namespace cnoid {
 
-class CNOID_EXPORT PositionDragger : public SgPosTransform, public SceneWidgetEditable
+class CNOID_EXPORT PositionDragger : public SgPosTransform, public SceneWidgetEventHandler
 {
 public:
     enum AxisBit {
@@ -27,45 +27,61 @@ public:
     };
 
     enum HandleType {
-        StandardHandle = 0,
-        PositiveOnlyHandle = 1,
+        PositiveOnlyHandle = 0,
+        SymmetricHandle = 1,
         WideHandle = 2,
+        StandardHandle = PositiveOnlyHandle,
     };
         
     PositionDragger(int axes = AllAxes, int handleType = StandardHandle);
     PositionDragger(const PositionDragger& org) = delete;
 
     //! \param T Local position from the virtual origin to the dragger central position
-    void setOffset(const Affine3& T);
+    void setOffset(const Isometry3& T);
 
-    void setDraggableAxes(int axisBitSet);
+    void setDraggableAxes(int axisBitSet, SgUpdateRef update);
     int draggableAxes() const;
     SignalProxy<void(int axisBitSet)> sigDraggableAxesChanged();
 
     double handleSize() const;
     void setHandleSize(double s);
     void setHandleWidthRatio(double w); // width ratio
-    //void setHandleWidth(double w); // constant width
 
     double rotationHandleSizeRatio() const;
     void setRotationHandleSizeRatio(double r);
 
-    //! \deprecated. Use the setHandleSize and setRotationHandlerSizeRatio functions.
+    [[deprecated("Use setHandleSize and setRotationHandlerSizeRatio")]]
     void setRadius(double r, double translationAxisRatio = 2.0f);
-    //! \deprecated. Use the handleSize and rotationHandleSizeRatio function.
+    [[deprecated("Use handleSize")]]
     double radius() const;
     
     bool adjustSize();
     bool adjustSize(const BoundingBox& bb);
+
+    void setPixelSize(int length, int width);
+
+    /**
+       \todo Implement the following function, which ajudsts the size considering
+       the PPI of the display, and use it for the fixed size marker.
+       \note The unit of the parameters is meter.
+    */
+    //void setScreenFixedSize(double length, double width);
+    
+    bool isScreenFixedSizeMode() const;
+
+    //! \deprecated Use setPixelSize.
+    [[deprecated("Use setPixelSize")]]
+    void setFixedPixelSizeMode(bool on, double pixelSizeRatio = 1.0);
+
+    //! \deprecated Use isScreenFixedSizeMode.
+    [[deprecated("Use isScreenFixedSizeMode")]]
+    bool isFixedPixelSizeMode() const;
 
     void setTransparency(float t);
     float transparency() const;
 
     void setOverlayMode(bool on);
     bool isOverlayMode() const;
-
-    void setFixedPixelSizeMode(bool on, double pixelSizeRatio = 1.0);
-    bool isFixedPixelSizeMode() const;
     
     bool isContainerMode() const;
     void setContainerMode(bool on);
@@ -75,40 +91,52 @@ public:
 
     enum DisplayMode { DisplayAlways, DisplayInEditMode, DisplayInFocus, DisplayNever };
     DisplayMode displayMode() const;
-    void setDisplayMode(DisplayMode mode);
+    void setDisplayMode(DisplayMode mode, SgUpdateRef update = nullptr);
 
+    //! \deprecated
+    [[deprecated("This function does nothing.")]]
     void setUndoEnabled(bool on);
+    //! \deprecated
+    [[deprecated("This function always returns false.")]]
     bool isUndoEnabled() const;
+    //! \deprecated
+    [[deprecated("This function does nothing.")]]
     void storeCurrentPositionToHistory();
 
     bool isDragEnabled() const;
     void setDragEnabled(bool on);
     bool isDragging() const;
 
+    //! \deprecated
     [[deprecated("Use globalDraggingPosition to get the global coordinate, or "
                  "draggingPosition to get the local position in the parent node coordinate.")]]
-    Affine3 draggedPosition() const { return globalDraggingPosition(); }
+    Isometry3 draggedPosition() const { return globalDraggingPosition(); }
 
-    Affine3 draggingPosition() const;
-    Affine3 globalDraggingPosition() const;
+    Isometry3 draggingPosition() const;
+    Isometry3 globalDraggingPosition() const;
     
     SignalProxy<void()> sigDragStarted();
     SignalProxy<void()> sigPositionDragged();
     SignalProxy<void()> sigDragFinished();
 
-    virtual void onSceneModeChanged(const SceneWidgetEvent& event) override;
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onButtonReleaseEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual void onPointerLeaveEvent(const SceneWidgetEvent& event) override;
-    virtual void onFocusChanged(const SceneWidgetEvent& event, bool on) override;
-    virtual bool onUndoRequest() override;
-    virtual bool onRedoRequest() override;
+    virtual void onSceneModeChanged(SceneWidgetEvent* event) override;
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onButtonReleaseEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual void onPointerLeaveEvent(SceneWidgetEvent* event) override;
+    virtual void onFocusChanged(SceneWidgetEvent* event, bool on) override;
 
-    // Thw following functions are deprecated. Use displayMode and setDisplayMode instead.
-    void setDraggerAlwaysShown(bool on);
+    //! \deprecated
+    [[deprecated("Use setDisplayMode.")]]
+    void setDraggerAlwaysShown(bool on, SgUpdateRef update);
+    //! \deprecated
+    [[deprecated("Use displayMode.")]]
     bool isDraggerAlwaysShown() const;
-    void setDraggerAlwaysHidden(bool on);
+    //! \deprecated
+    [[deprecated("Use setDisplayMode.")]]
+    void setDraggerAlwaysHidden(bool on, SgUpdateRef update);
+    //! \deprecated
+    [[deprecated("Use displayMode.")]]
     bool isDraggerAlwaysHidden() const;
 
     class Impl;

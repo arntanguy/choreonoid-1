@@ -6,8 +6,10 @@
 #ifndef CNOID_BODY_LINK_H
 #define CNOID_BODY_LINK_H
 
-#include <cnoid/CloneableReferenced>
+#include <cnoid/ClonableReferenced>
 #include <cnoid/EigenTypes>
+#include <cnoid/SceneUpdate>
+#include <vector>
 #include "exportdecl.h"
 
 namespace cnoid {
@@ -21,7 +23,7 @@ class Mapping;
 class Link;
 typedef ref_ptr<Link> LinkPtr;
 
-class CNOID_EXPORT Link : public CloneableReferenced
+class CNOID_EXPORT Link : public ClonableReferenced
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -43,83 +45,83 @@ public:
     virtual void initializeState();
 
     const std::string& name() const { return name_; }
-
     int index() const { return index_; }
     bool isValid() const { return (index_ >= 0); }
-
-    Link* parent() const { return parent_; }
-    Link* sibling() const { return sibling_; }
-    Link* child() const { return child_; }
-        
     bool isRoot() const { return !parent_; }
-    bool isBodyRoot() const;
+    bool isStatic() const;
+    bool isFixedToRoot() const;
+    bool isOwnerOf(const Link* link) const;
+    bool isEndLink() const { return !child_; }
 
     Body* body() { return body_; }
     const Body* body() const { return body_; }
+    Link* parent() const { return parent_; }
+    Link* sibling() const { return sibling_; }
+    Link* child() const { return child_; }
 
-    bool hasParentBody() const { return parent_ && (body_ != parent_->body_); }
+    Isometry3& T() { return T_; }
+    const Isometry3& T() const { return T_; }
 
-    Position& T() { return T_; }
-    const Position& T() const { return T_; }
-
-    Position& position() { return T_; }
-    const Position& position() const { return T_; }
+    Isometry3& position() { return T_; }
+    const Isometry3& position() const { return T_; }
 
     template<class Scalar, int Mode, int Options>
-        void setPosition(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
-        T_ = T.template cast<Position::Scalar>();
+    void setPosition(const Eigen::Transform<Scalar, 3, Mode, Options>& T){
+        T_ = T.template cast<Isometry3::Scalar>();
     }
-
+    template<class Derived>
+    void setPosition(const Eigen::MatrixBase<Derived>& T){
+        T_ = T.template cast<Isometry3::Scalar>();
+    }
     template<typename Derived1, typename Derived2>
-        void setPosition(const Eigen::MatrixBase<Derived1>& rotation, const Eigen::MatrixBase<Derived2>& translation) {
+    void setPosition(const Eigen::MatrixBase<Derived1>& rotation, const Eigen::MatrixBase<Derived2>& translation){
         T_.linear() = rotation;
         T_.translation() = translation;
     }
 
-    Position::TranslationPart p() { return T_.translation(); }
-    Position::ConstTranslationPart p() const { return T_.translation(); }
-    Position::TranslationPart translation() { return T_.translation(); }
-    Position::ConstTranslationPart translation() const { return T_.translation(); }
+    Isometry3::TranslationPart p() { return T_.translation(); }
+    Isometry3::ConstTranslationPart p() const { return T_.translation(); }
+    Isometry3::TranslationPart translation() { return T_.translation(); }
+    Isometry3::ConstTranslationPart translation() const { return T_.translation(); }
 
     template<typename Derived>
     void setTranslation(const Eigen::MatrixBase<Derived>& p) {
-        T_.translation() = p.template cast<Affine3::Scalar>();
+        T_.translation() = p.template cast<Isometry3::Scalar>();
     }
 
-    Position::LinearPart R() { return T_.linear(); }
-    Position::ConstLinearPart R() const { return T_.linear(); }
-    Position::LinearPart rotation() { return T_.linear(); }
-    Position::ConstLinearPart rotation() const { return T_.linear(); }
+    Isometry3::LinearPart R() { return T_.linear(); }
+    Isometry3::ConstLinearPart R() const { return T_.linear(); }
+    Isometry3::LinearPart rotation() { return T_.linear(); }
+    Isometry3::ConstLinearPart rotation() const { return T_.linear(); }
 
     template<typename Derived>
     void setRotation(const Eigen::MatrixBase<Derived>& R) {
-        T_.linear() = R.template cast<Affine3::Scalar>();
+        T_.linear() = R.template cast<Isometry3::Scalar>();
     }
-
     template<typename T>
     void setRotation(const Eigen::AngleAxis<T>& a) {
-        T_.linear() = a.template cast<Affine3::Scalar>().toRotationMatrix();
+        T_.linear() = a.template cast<Isometry3::Scalar>().toRotationMatrix();
+    }
+    template<typename Derived>
+    void setRotation(const Eigen::QuaternionBase<Derived>& q) {
+        T_.linear() = q.template cast<Isometry3::Scalar>().toRotationMatrix();
     }
     
     // To, Ro?
-    const Position& Tb() const { return Tb_; }
-    const Position& offsetPosition() const { return Tb_; }
+    const Isometry3& Tb() const { return Tb_; }
+    const Isometry3& offsetPosition() const { return Tb_; }
         
-    Position::ConstTranslationPart b() const { return Tb_.translation(); }
-    Position::ConstTranslationPart offsetTranslation() const { return Tb_.translation(); }
+    Isometry3::ConstTranslationPart b() const { return Tb_.translation(); }
+    Isometry3::ConstTranslationPart offsetTranslation() const { return Tb_.translation(); }
 
-    Position::ConstLinearPart Rb() const { return Tb_.linear(); }
-    Position::ConstLinearPart offsetRotation() const { return Tb_.linear(); }
+    Isometry3::ConstLinearPart Rb() const { return Tb_.linear(); }
+    Isometry3::ConstLinearPart offsetRotation() const { return Tb_.linear(); }
 
     [[deprecated("This func. always returns the identity matrix")]]
-    Matrix3& Rs() { return Rs_; }
-    [[deprecated("This func. always returns the identity matrix")]]
-    const Matrix3& Rs() const { return Rs_; }
+    Matrix3 Rs() const { return Matrix3::Identity(); }
 
     enum JointType {
-        /// rotational joint (1 dof)
         RevoluteJoint = 0,
-        /// translational joint (1 dof)
         PrismaticJoint = 1,
         /// 6-DOF root link
         FreeJoint = 2,
@@ -127,14 +129,12 @@ public:
           Joint types below here are treated as a fixed joint
           when a code for processing a joint type is not given
         */
-        /// fixed joint(0 dof)
         FixedJoint = 3,
 
         /**
-           special joint for simplified simulation of a continuous track
-           \deprecated
+           Special joint for simplified simulation of a continuous track
         */
-        PseudoContinousTrack = 4,
+        PseudoContinuousTrackJoint = 4,
 
         // Deprecated
         REVOLUTE_JOINT = RevoluteJoint,
@@ -143,23 +143,33 @@ public:
         SLIDE_JOINT = PrismaticJoint,
         FREE_JOINT = FreeJoint,
         FIXED_JOINT = FixedJoint,
-        PSEUDO_CONTINUOUS_TRACK = PseudoContinousTrack
+        PSEUDO_CONTINUOUS_TRACK = PseudoContinuousTrackJoint
     };
 
+#if !defined(__GNUC__) || __GNUC__ > 5
+    [[deprecated("Use Link::PseudoContinuousTrack.")]]
+#endif
+    static constexpr int PseudoContinousTrack = PseudoContinuousTrackJoint;
+
     int jointId() const { return jointId_; }
+    const std::string& jointName() const;
+    const std::string& jointSpecificName() const { return jointSpecificName_; }
         
-    JointType jointType() const { return jointType_; }
-    bool isFixedJoint() const { return (jointType_ >= FIXED_JOINT); }
-    bool isFreeJoint() const { return jointType_ == FREE_JOINT; }
-    bool isRevoluteJoint() const { return jointType_ == REVOLUTE_JOINT; }
-    bool isPrismaticJoint() const { return jointType_ == PRISMATIC_JOINT; }
+    JointType jointType() const { return static_cast<JointType>(jointType_); }
+    const char* jointTypeLabel() const;
+    const char* jointTypeSymbol() const;
+    [[deprecated("Use jointTypeLabel or jointTypeSymbol")]]
+    const char* jointTypeString(bool useUnderscore = false) const;
+    bool isFixedJoint() const { return (jointType_ >= FixedJoint); }
+    bool isFreeJoint() const { return jointType_ == FreeJoint; }
+    bool isRevoluteJoint() const { return jointType_ == RevoluteJoint; }
+    bool isPrismaticJoint() const { return jointType_ == PrismaticJoint; }
+    bool hasJoint() const { return jointType_ <= 1; }
 
     /// deprecated
-    bool isRotationalJoint() const { return jointType_ == ROTATIONAL_JOINT; }
+    bool isRotationalJoint() const { return jointType_ == RevoluteJoint; }
     /// deprecated
-    bool isSlideJoint() const { return jointType_ == SLIDE_JOINT; }
-
-    std::string jointTypeString(bool useUnderscore = false) const;
+    bool isSlideJoint() const { return jointType_ == PrismaticJoint; }
         
     const Vector3& a() const { return a_; }    
     const Vector3& jointAxis() const { return a_; }
@@ -168,32 +178,70 @@ public:
     /// Equivalent rotor inertia: n^2*Jm [kg.m^2]
     double Jm2() const { return Jm2_; }
 
-    enum ActuationMode {
-        NoActuation = 0,
-        JointTorque = 1,
-        JointForce = 1,
-        JointEffort = 1,
-        JointAngle = 2,
-        JointDisplacement = 2,
-        JointVelocity = 3,
-        JointSurfaceVelocity = 4,
-        LinkPosition = 5,
+    enum StateFlag {
+
+        // States
+        StateNone = 0,
+        JointDisplacement = 1 << 0,
+        JointAngle = JointDisplacement,
+        JointVelocity = 1 << 1,
+        JointAcceleration = 1 << 2,
+        JointEffort = 1 << 3,
+        JointForce = JointEffort,
+        JointTorque = JointEffort,
+        LinkPosition = 1 << 4,
+        LinkTwist = 1 << 5,
+        LinkExtWrench = 1 << 6,
+        LinkContactState = 1 << 7,
+
+        // Options
+        HighGainActuation = 1 << 8,
+
+        // Don't use this
+        DeprecatedJointSurfaceVelocity = 1 << 9,
+
+        MaxStateTypeBit = 9,
+        NumStateTypes = 10,
 
         // Deprecated
-        NO_ACTUATION = NoActuation,
+        NO_ACTUATION = StateNone,
         JOINT_TORQUE = JointTorque,
         JOINT_FORCE = JointForce,
         JOINT_EFFORT = JointEffort,
         JOINT_ANGLE = JointAngle,
         JOINT_DISPLACEMENT = JointDisplacement,
         JOINT_VELOCITY = JointVelocity,
-        JOINT_SURFACE_VELOCITY = JointSurfaceVelocity, // For pseudo continous tracks
-        LINK_POSITION = LinkPosition,
+        LINK_POSITION = LinkPosition
     };
 
-    ActuationMode actuationMode() const { return actuationMode_; }
-    void setActuationMode(ActuationMode mode) { actuationMode_ = mode; }
-    std::string actuationModeString() const;
+#if !defined(__GNUC__) || __GNUC__ > 5
+    [[deprecated("Use Link::JointVelocity as the actuation mode and Link::PseudoContinuousTrackJoint as the joint type.")]]
+#endif
+    static constexpr int JOINT_SURFACE_VELOCITY = DeprecatedJointSurfaceVelocity;
+
+    // \ret Logical sum of the correpsonding StateFlag bits
+    short actuationMode() const { return actuationMode_; }
+    // \param mode Logical sum of the correpsonding StateFlag bits
+    void setActuationMode(short mode) { actuationMode_ = mode; }
+
+    [[deprecated("Just use the link name as a prefix or use the int type as a variable.")]]
+    typedef StateFlag ActuationMode;
+    
+    /**
+       The special mode which can be used to calculate contact forces only.
+       In order for this mode to work correctly, the mode should be specified for all the movable links.
+       The mode is currently supported by AISTSimulator.
+    */
+    static constexpr short AllStateHighGainActuationMode =
+        LinkPosition | LinkTwist | LinkExtWrench | JointDisplacement | JointVelocity | JointEffort | HighGainActuation;
+
+    // \ret Logical sum of the correpsonding StateFlag bits
+    short sensingMode() const { return sensingMode_; }
+    // \param mode Logical sum of the correpsonding StateFlag bits
+    void setSensingMode(short mode) { sensingMode_ = mode; }
+    void mergeSensingMode(short mode) { sensingMode_ |= mode; }
+
+    static std::string getStateModeString(short mode);
     
     double q() const { return q_; }
     double& q() { return q_; }
@@ -240,6 +288,13 @@ public:
     ///< inertia tensor (self local, around c)
     const Matrix3& I() const { return I_; }    
 
+    const Vector6& externalWrench() const { return F_ext_; }
+    Vector6& externalWrench() { return F_ext_; }
+    Vector6::ConstFixedSegmentReturnType<3>::Type externalForce() const { return F_ext_.head<3>(); }
+    Vector6::FixedSegmentReturnType<3>::Type externalForce() { return F_ext_.head<3>(); }
+    Vector6::ConstFixedSegmentReturnType<3>::Type externalTorque() const { return F_ext_.tail<3>(); }
+    Vector6::FixedSegmentReturnType<3>::Type externalTorque() { return F_ext_.tail<3>(); }
+
     const Vector6& F_ext() const { return F_ext_; }
     Vector6& F_ext() { return F_ext_; }
     Vector6::ConstFixedSegmentReturnType<3>::Type f_ext() const { return F_ext_.head<3>(); }
@@ -247,53 +302,106 @@ public:
     Vector6::ConstFixedSegmentReturnType<3>::Type tau_ext() const { return F_ext_.tail<3>(); }
     Vector6::FixedSegmentReturnType<3>::Type tau_ext() { return F_ext_.tail<3>(); }
 
-    void addExternalForce(const Vector3& f_global, const Vector3& p_local){
+    void addExternalForceAtLocalPosition(const Vector3& f_global, const Vector3& p_local){
         f_ext() += f_global;
         tau_ext() += (T_ * p_local).cross(f_global);
+    }
+
+    void addExternalForceAtGlobalPosition(const Vector3& f_global, const Vector3& p_global){
+        f_ext() += f_global;
+        tau_ext() += p_global.cross(f_global);
+    }
+
+    [[deprecated("Use addExternalForceAtLocalPosition.")]]
+    void addExternalForce(const Vector3& f_global, const Vector3& p_local){
+        addExternalForceAtLocalPosition(f_global, p_local);
     }
     
     int materialId() const { return materialId_; }
     std::string materialName() const;
+
+    //! All the members are described in the global coordinate system
+    class ContactPoint
+    {
+    public:
+        ContactPoint(const Vector3& position, const Vector3& normal, const Vector3& force, const Vector3& velocity, double depth)
+            : position_(position), normal_(normal), force_(force), velocity_(velocity), depth_(depth) { }
+
+        const Vector3& position() const { return position_; }
+        //! The contact normal vector. The direction is from another object to this link.
+        const Vector3& normal() const { return normal_; }
+        //! The contact force vector. The direction is from another object to this link.
+        const Vector3& force() const { return force_; }
+        //! The relative velocity of the contact point on this link based on the other link.
+        const Vector3& velocity() const { return velocity_; }
+        double depth() { return depth_; }
+
+    private:
+        Vector3 position_;
+        Vector3 normal_;
+        Vector3 force_;
+        Vector3 velocity_;
+        double depth_;
+
+        /**
+           The following value is not yet supported, but is better to include in this data structue
+           in the future. The id is used to identify the counterpart object (link). It is not
+           reasonable to directly store the object pointer because the information could be used in
+           another context such as controller implementations and remote communication codes.
+           It is easier to handle just an integer value rather than handle the pointer.
+           To identy the actual object (link), a simulator item should provide the API to obtain
+           the information on the object corresponding to a given ID number.
+        */
+        //int objectId_;
+    };
+
+    /**
+       The following contact date is avaiable if LinkContactState is included in the sensingMode.
+       \note A dynamics engine should update the data when the above flag is specified in the sensingMode.
+    */
+    std::vector<ContactPoint>& contactPoints() { return contactPoints_; }
+    const std::vector<ContactPoint>& contactPoints() const { return contactPoints_; }
     
-    SgGroup* shape() const;
-    SgGroup* visualShape() const;
-    SgGroup* collisionShape() const;
+    SgGroup* shape() const { return visualShape_; }
+    SgGroup* visualShape() const { return visualShape_; }
+    SgGroup* collisionShape() const { return collisionShape_; }
     bool hasDedicatedCollisionShape() const;
 
-    void setName(const std::string& name);
-
     // functions for constructing a link
+    void setBodyToSubTree(Body* newBody);
+    void setParent(Link* parent){ parent_ = parent; }
     void setIndex(int index) { index_ = index; }
-
+    void setName(const std::string& name);
     virtual void prependChild(Link* link);
     virtual void appendChild(Link* link);
-    bool isOwnerOf(const Link* link) const;
     bool removeChild(Link* link);
 
-    void setOffsetPosition(const Position& T){
+    void setOffsetPosition(const Isometry3& T){
         Tb_ = T;
     }
         
     template<typename Derived>
-        void setOffsetTranslation(const Eigen::MatrixBase<Derived>& offset) {
+    void setOffsetTranslation(const Eigen::MatrixBase<Derived>& offset) {
         Tb_.translation() = offset;
     }
     template<typename Derived>
-        void setOffsetRotation(const Eigen::MatrixBase<Derived>& offset) {
+    void setOffsetRotation(const Eigen::MatrixBase<Derived>& offset) {
         Tb_.linear() = offset;
     }
     template<typename T>
     void setOffsetRotation(const Eigen::AngleAxis<T>& a) {
-        Tb_.linear() = a.template cast<Affine3::Scalar>().toRotationMatrix();
+        Tb_.linear() = a.template cast<Isometry3::Scalar>().toRotationMatrix();
     }
     
     template<typename Derived>
-    [[deprecated]]
-    void setAccumulatedSegmentRotation(const Eigen::MatrixBase<Derived>& Rs) {
+    [[deprecated("No need to use this function.")]]
+    void setAccumulatedSegmentRotation(const Eigen::MatrixBase<Derived>& /* Rs */) {
     }
         
     void setJointType(JointType type) { jointType_ = type; }
     void setJointId(int id) { jointId_ = id; }
+    void setJointName(const std::string& name);
+    void resetJointSpecificName();
     void setJointAxis(const Vector3& axis) { a_ = axis; }
 
     void setInitialJointDisplacement(double q) { q_initial_ = q; }
@@ -309,28 +417,26 @@ public:
     void setMaterial(int id) { materialId_ = id; }
     void setMaterial(const std::string& name);
     
-    void addShapeNode(SgNode* shape, bool doNotify = false);
-    void addVisualShapeNode(SgNode* shape, bool doNotify = false);
-    void addCollisionShapeNode(SgNode* shape, bool doNotify = false);
-    void removeShapeNode(SgNode* shape, bool doNotify = false);
-    void clearShapeNodes(bool doNotify = false);
+    void addShapeNode(SgNode* shape, SgUpdateRef update = nullptr);
+    void addVisualShapeNode(SgNode* shape, SgUpdateRef update = nullptr);
+    void addCollisionShapeNode(SgNode* shape, SgUpdateRef update = nullptr);
+    void removeShapeNode(SgNode* shape, SgUpdateRef update = nullptr);
+    void clearShapeNodes(SgUpdateRef update = nullptr);
 
-    [[deprecated]]
+    [[deprecated("You don't have to use this function.")]]
     void updateShapeRs() {}
 
     // The following two methods should be deprecated after introducing Tb
-    [[deprecated("Please use T() instead")]]
-    Position Ta() const { return T(); }
-    [[deprecated("Please use R() instead")]]
+    [[deprecated("Use T() instead.")]]
+    Isometry3 Ta() const { return T(); }
+    [[deprecated("Uuse R() instead.")]]
     Matrix3 attitude() const { return R(); }
-    [[deprecated("Please use setRotation(.) instead")]]
+    [[deprecated("Use setRotation(.) instead.")]]
     void setAttitude(const Matrix3& Ra) { R() = Ra; }
     [[deprecated]]
     Matrix3 calcRfromAttitude(const Matrix3& Ra) { return Ra; }
-    [[deprecated("Please use T() instead")]]
-    void getAttitudeAndTranslation(Position& out_T) {
-        out_T = T();
-    };
+    [[deprecated("Use T() instead.")]]
+    void getAttitudeAndTranslation(Isometry3& out_T) { out_T = T(); };
 
     const Mapping* info() const { return info_; }
     Mapping* info() { return info_; }
@@ -356,52 +462,58 @@ protected:
 
 private:
     int index_; 
-    int jointId_;
     Link* parent_;
     LinkPtr sibling_;
     LinkPtr child_;
     Body* body_;
-    Position T_;
-    Position Tb_;
-    Matrix3 Rs_; // temporary variable for porting. This should be removed later.    
+
+    Isometry3 T_;
+    Isometry3 Tb_;
+
+    short jointType_;
+    short jointId_;
+    short actuationMode_;
+    short sensingMode_;
+
     Vector3 a_;
-    JointType jointType_;
-    ActuationMode actuationMode_;
     double q_;
     double dq_;
     double ddq_;
-    double u_;
     double q_target_;
     double dq_target_;
+    double u_;
+    
     Vector3 v_;
     Vector3 w_;
     Vector3 dv_;
     Vector3 dw_;
+    Vector6 F_ext_; // should be Vector3 x 2?
+
     Vector3 c_;
     Vector3 wc_;
     double m_;
     Matrix3 I_;
+
     double Jm2_;
-    Vector6 F_ext_; // should be Vector3 x 2?
     double q_initial_;
     double q_upper_;
     double q_lower_;
     double dq_upper_;
     double dq_lower_;
+    
     int materialId_;
-    std::string name_;
 
-    // SgPosTransform is used as the type of the following variables so that Rs can
-    // be reflected. When Rs is invalidated, the types should be modified to SgGroup.
-    ref_ptr<SgPosTransform> visualShape_;
-    ref_ptr<SgPosTransform> collisionShape_;
+    std::vector<ContactPoint> contactPoints_;
+    
+    std::string name_;
+    std::string jointSpecificName_;
+
+    ref_ptr<SgGroup> visualShape_;
+    ref_ptr<SgGroup> collisionShape_;
     
     ref_ptr<Mapping> info_;
 
-    friend class Body;
-    
-    void setBody(Body* newBody);
-    void setBodySub(Body* newBody);
+    void setBodyToSubTreeIter(Body* newBody);
 };
 
 template<> CNOID_EXPORT double Link::info(const std::string& key) const;

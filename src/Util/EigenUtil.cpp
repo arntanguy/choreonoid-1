@@ -180,10 +180,13 @@ Vector3 omegaFromRot(const Matrix3& R)
 {
     double alpha = (R(0,0) + R(1,1) + R(2,2) - 1.0) / 2.0;
 
-    if(fabs(alpha - 1.0) < 1.0e-6) {   //th=0,2PI;
+    if(alpha > 1.0 - 1.0e-6) {   //th=0,2PI;
         return Vector3::Zero();
 
     } else {
+        if (alpha < -1.0) {
+            alpha = -1.0;
+        }
         double th = acos(alpha);
         double s = sin(th);
 
@@ -275,10 +278,10 @@ void normalizeRotation(Matrix3& R)
 }
 
 
-void normalizeRotation(Position& T)
+void normalizeRotation(Affine3& T)
 {
-    typedef Position::LinearPart::ColXpr ColXpr;
-    Position::LinearPart R = T.linear();
+    typedef Affine3::LinearPart::ColXpr ColXpr;
+    Affine3::LinearPart R = T.linear();
     ColXpr x = R.col(0);
     ColXpr y = R.col(1);
     ColXpr z = R.col(2);
@@ -288,10 +291,10 @@ void normalizeRotation(Position& T)
 }
 
 
-void normalizeRotation(Affine3& T)
+void normalizeRotation(Isometry3& T)
 {
-    typedef Affine3::LinearPart::ColXpr ColXpr;
-    Affine3::LinearPart R = T.linear();
+    typedef Isometry3::LinearPart::ColXpr ColXpr;
+    Isometry3::LinearPart R = T.linear();
     ColXpr x = R.col(0);
     ColXpr y = R.col(1);
     ColXpr z = R.col(2);

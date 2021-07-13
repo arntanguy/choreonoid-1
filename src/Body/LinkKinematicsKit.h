@@ -2,7 +2,7 @@
 #define CNOID_BODY_LINK_KINEMATICS_KIT_H
 
 #include <cnoid/EigenTypes>
-#include <cnoid/CloneableReferenced>
+#include <cnoid/ClonableReferenced>
 #include <cnoid/Signal>
 #include <cnoid/GeneralId>
 #include <memory>
@@ -20,14 +20,14 @@ class CoordinateFrameList;
 class InverseKinematics;
 class Mapping;
 
-class CNOID_EXPORT LinkKinematicsKit : public CloneableReferenced
+class CNOID_EXPORT LinkKinematicsKit : public ClonableReferenced
 {
 public:
     LinkKinematicsKit(Link* link);
     ~LinkKinematicsKit();
 
     void setBaseLink(Link* baseLink);
-    void setInversetKinematics(std::shared_ptr<InverseKinematics> ik);
+    void setInverseKinematics(std::shared_ptr<InverseKinematics> ik);
     void setBaseFrames(CoordinateFrameList* frames);
     void setOffsetFrames(CoordinateFrameList* frames);
 
@@ -71,24 +71,24 @@ public:
     void setCurrentOffsetFrame(const GeneralId& id);
 
     //! \note hasJointPath() must be true.
-    Position endPosition(
+    Isometry3 endPosition(
         const GeneralId& baseFrameId = GeneralId() /* Current */,
         const GeneralId& offsetFrameId = GeneralId() /* Current */) const;
 
-    Position globalEndPosition(
+    Isometry3 globalEndPosition(
         const GeneralId& offsetFrameId = GeneralId() /* current */) const;
     
     //! \note hasJointPath() must be true.
-    Position globalBasePosition(const GeneralId& baseFrameId = GeneralId() /* current */) const;
+    Isometry3 globalBasePosition(const GeneralId& baseFrameId = GeneralId() /* current */) const;
 
     bool setEndPosition(
-        const Position& T,
+        const Isometry3& T,
         const GeneralId& baseFrameId = GeneralId() /* Current */,
         const GeneralId& offsetFrameId = GeneralId() /* Current */,
         int configuration = 0 /* Auto */);
 
     bool setGlobalEndPosition(
-        const Position& T_global,
+        const Isometry3& T_global,
         const GeneralId& offsetFrameId = GeneralId() /* Current */,
         int configuration = 0 /* Auto */);
     
@@ -96,8 +96,8 @@ public:
     SignalProxy<void()> sigFrameUpdate();
     void notifyFrameUpdate();
 
-    SignalProxy<void(const Position& T_frameCoordinate)> sigPositionError();
-    void notifyPositionError(const Position& T_frameCoordinate);
+    SignalProxy<void(const Isometry3& T_frameCoordinate)> sigPositionError();
+    void notifyPositionError(const Isometry3& T_frameCoordinate);
 
     bool storeState(Mapping& archive) const;
     bool restoreState(const Mapping& archive);

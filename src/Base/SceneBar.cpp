@@ -40,9 +40,9 @@ class SceneBar::Impl
 public:
     SceneBar* self;
 
-    ScopedConnection viewFocusConnection;
     SceneView* currentSceneView;
     SceneWidget* currentSceneWidget;
+    ScopedConnection sceneViewFocusConnection;
     ScopedConnectionSet sceneViewConnections;
     
     ToolButton* editModeToggle;
@@ -51,6 +51,7 @@ public:
     ToolButton* vertexToggle;
     ButtonGroup polygonModeGroup;
     ToolButton* visualModelToggle;
+    ToolButton* highlightToggle;
     ToolButton* modelTypeFlipButton;
     ToolButton* collisionModelToggle;
     ToolButton* collisionLineToggle;
@@ -67,7 +68,6 @@ public:
     Impl(SceneBar* self);
     void initialize();
     void onCustomModeButtonToggled(int mode, bool on);
-    void onSceneViewFocusChanged(SceneView* sceneView);
     void onCurrentSceneViewDeactivated();
     void setCurrentSceneView(SceneView* sceneView);
     void onSceneWidgetStateChanged();
@@ -77,6 +77,7 @@ public:
     void onEditModeButtonToggled(bool on);
     void onFirstPersonModeButtonToggled(bool on);
     void onPolygonModeButtonToggled();
+    void onHighlightingToggled(bool on);
     void flipVisibleModels();
     void updateCollisionModelVisibility();
     void onCollisionLineButtonToggled(bool on);
@@ -153,7 +154,7 @@ void SceneBar::Impl::initialize()
     self->addButton(QIcon(":/Base/icon/viewfitting.svg"), _("Move the camera to look at the objects"))
         ->sigClicked().connect([&](){
                 currentSceneWidget->viewAll();
-                currentSceneWidget->setViewpointControlMode(SceneWidget::THIRD_PERSON_MODE);
+                currentSceneWidget->setViewpointOperationMode(SceneWidget::ThirdPersonMode);
             });
 
     self->addSpacing();
@@ -162,8 +163,6 @@ void SceneBar::Impl::initialize()
         QIcon(":/Base/icon/vertex.svg"), _("Vertex rendering"));
     vertexToggle->sigToggled().connect(
         [&](bool){ onPolygonModeButtonToggled(); });
-
-    self->addSpacing();
 
     auto wireframeToggle = self->addToggleButton(
         QIcon(":/Base/icon/wireframe.svg"), _("Wireframe rendering"));
@@ -183,7 +182,10 @@ void SceneBar::Impl::initialize()
             if(on){ onPolygonModeButtonToggled(); }
         });
 
-    self->addSpacing();
+    highlightToggle = self->addToggleButton(
+        QIcon(":/Base/icon/highlight.svg"), _("Highlight selected objects"));
+    highlightToggle->sigToggled().connect(
+        [&](bool on){ onHighlightingToggled(on); });
 
     visualModelToggle = self->addToggleButton(
         QIcon(":/Base/icon/visualshape.svg"), _("Show visual models"));
@@ -209,13 +211,9 @@ void SceneBar::Impl::initialize()
     self->addButton(QIcon(":/Base/icon/setup.svg"), _("Show the config dialog"))
         ->sigClicked().connect([&](){ currentSceneWidget->showConfigDialog(); });
 
-    viewFocusConnection =
-        View::sigFocusChanged().connect(
-            [&](View* view){
-                if(auto sceneView = dynamic_cast<SceneView*>(view)){
-                    onSceneViewFocusChanged(sceneView);
-                }
-            });
+    sceneViewFocusConnection =
+        SceneView::sigLastFocusViewChanged().connect(
+            [&](SceneView* view){ setCurrentSceneView(view); });
 
     setCurrentSceneView(SceneView::instance());
 }
@@ -265,14 +263,6 @@ void SceneBar::Impl::onCustomModeButtonToggled(int mode, bool on)
         mode = 0;
     }
     currentSceneView->setCustomMode(mode);
-}
-
-
-void SceneBar::Impl::onSceneViewFocusChanged(SceneView* sceneView)
-{
-    if(sceneView != currentSceneView){
-        setCurrentSceneView(sceneView);
-    }
 }
 
 
@@ -346,10 +336,11 @@ void SceneBar::Impl::onSceneWidgetStateChanged()
     customModeButtonGroup.blockSignals(false);
 
     firstPersonModeToggle->blockSignals(true);
-    firstPersonModeToggle->setChecked(currentSceneWidget->viewpointControlMode() != SceneWidget::THIRD_PERSON_MODE);
+    firstPersonModeToggle->setChecked(
+        currentSceneWidget->viewpointOperationMode() != SceneWidget::ThirdPersonMode);
     firstPersonModeToggle->blockSignals(false);
 
-    int polygonFlags = currentSceneWidget->polygonDisplayElements();
+    int polygonFlags = currentSceneWidget->visiblePolygonElements();
     
     vertexToggle->blockSignals(true);
     vertexToggle->setChecked(polygonFlags & SceneWidget::PolygonVertex);
@@ -368,9 +359,13 @@ void SceneBar::Impl::onSceneWidgetStateChanged()
         }
     }
     polygonModeGroup.blockSignals(false);
+
+    highlightToggle->blockSignals(true);
+    highlightToggle->setChecked(currentSceneWidget->isHighlightingEnabled());
+    highlightToggle->blockSignals(false);
     
     collisionLineToggle->blockSignals(true);
-    collisionLineToggle->setChecked(currentSceneWidget->collisionLinesVisible());
+    collisionLineToggle->setChecked(currentSceneWidget->collisionLineVisibility());
     collisionLineToggle->blockSignals(false);
 }
 
@@ -429,7 +424,8 @@ void SceneBar::Impl::onEditModeButtonToggled(bool on)
 void SceneBar::Impl::onFirstPersonModeButtonToggled(bool on)
 {
     sceneViewConnections.block();
-    currentSceneWidget->setViewpointControlMode(on ? SceneWidget::FIRST_PERSON_MODE : SceneWidget::THIRD_PERSON_MODE);
+    currentSceneWidget->setViewpointOperationMode(
+        on ? SceneWidget::FirstPersonMode : SceneWidget::ThirdPersonMode);
     sceneViewConnections.unblock();
 }
 
@@ -454,8 +450,16 @@ void SceneBar::Impl::onPolygonModeButtonToggled()
         flags |= SceneWidget::PolygonFace;
         break;
     }
-    currentSceneWidget->setPolygonDisplayElements(flags);
+    currentSceneWidget->setVisiblePolygonElements(flags);
     
+    sceneViewConnections.unblock();
+}
+
+
+void SceneBar::Impl::onHighlightingToggled(bool on)
+{
+    sceneViewConnections.block();
+    currentSceneWidget->setHighlightingEnabled(on);
     sceneViewConnections.unblock();
 }
 
@@ -481,14 +485,14 @@ void SceneBar::Impl::updateCollisionModelVisibility()
     }
     auto renderer = currentSceneWidget->renderer();
     renderer->setProperty(SceneRenderer::PropertyKey("collisionDetectionModelVisibility"), mode);
-    renderer->sigRenderingRequest()();
+    currentSceneWidget->renderScene();
 }
 
 
 void SceneBar::Impl::onCollisionLineButtonToggled(bool on)
 {
     sceneViewConnections.block();
-    currentSceneWidget->setCollisionLinesVisible(on);
+    currentSceneWidget->setCollisionLineVisibility(on);
     sceneViewConnections.unblock();
 }
 

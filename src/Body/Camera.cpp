@@ -4,12 +4,20 @@
 */
 
 #include "Camera.h"
+#include "RangeCamera.h"
+#include "StdBodyLoader.h"
+#include "StdBodyWriter.h"
+#include <cnoid/ValueTree>
+#include <cnoid/EigenUtil>
+#include <fmt/format.h>
+#include "gettext.h"
 
 using namespace std;
 using namespace cnoid;
+using fmt::format;
 
 
-const char* Camera::typeName()
+const char* Camera::typeName() const
 {
     return "Camera";
 }
@@ -189,4 +197,100 @@ double* Camera::writeState(double* out_buf) const
     out_buf[6] = frameRate_;
     out_buf[7] = delay_;
     return out_buf + 8;
+}
+
+
+bool Camera::readSpecifications(const Mapping* info)
+{
+    string symbol;
+    
+    setImageType(NO_IMAGE);
+    if(info->read("format", symbol)){
+        if(symbol == "COLOR"){
+            setImageType(COLOR_IMAGE);
+        }
+    }
+    if(info->read({ "lens_type", "lensType" }, symbol)){
+        if(symbol == "NORMAL"){
+            setLensType(NORMAL_LENS);
+        } else if(symbol == "FISHEYE"){
+            setLensType(FISHEYE_LENS);
+        } else if(symbol == "DUAL_FISHEYE"){
+            setLensType(DUAL_FISHEYE_LENS);
+        }
+    }
+    info->read("width", resolutionX_);
+    info->read("height", resolutionY_);
+    info->readAngle({ "field_of_view", "fieldOfView" }, fieldOfView_);
+    info->read({ "near_clip_distance", "nearClipDistance" }, nearClipDistance_);
+    info->read({ "far_clip_distance", "farClipDistance" }, farClipDistance_);
+    info->read({ "frame_rate", "frameRate" }, frameRate_);
+
+    return true;
+}
+
+
+bool Camera::writeSpecifications(Mapping* info) const
+{
+    if(imageType_ == COLOR_IMAGE){
+        info->write("format", "COLOR");
+    }
+    if(lensType_ == FISHEYE_LENS){
+        info->write("lens_type", "FISHEYE");
+    } else if(lensType_ == DUAL_FISHEYE_LENS){
+        info->write("lens_type", "DUAL_FISHEYE");
+    }
+    info->write("width", resolutionX_);
+    info->write("height", resolutionY_);
+    info->write("field_of_view", degree(fieldOfView_));
+    info->write("near_clip_distance", nearClipDistance_);
+    info->write("far_clip_distance", farClipDistance_);
+    info->write("frame_rate", frameRate_);
+
+    return true;
+}
+
+
+namespace {
+
+bool readCamera(StdBodyLoader* loader, const Mapping* info)
+{
+    CameraPtr camera;
+    string format;
+    if(info->read("format", format)){
+        if(format == "COLOR"){
+            camera = new Camera;
+            if(!camera->readSpecifications(info)){
+                camera.reset();
+            }
+        } else if(format == "DEPTH" ||
+                  format == "COLOR_DEPTH" ||
+                  format == "POINT_CLOUD" ||
+                  format == "COLOR_POINT_CLOUD"){
+            RangeCameraPtr range = new RangeCamera;
+            if(range->readSpecifications(info)){
+                camera = range;
+            }
+        }
+    }
+    bool result = false;
+    if(camera){
+        result = loader->readDevice(camera, info);
+    }
+    return result;
+}
+
+
+struct Registration {
+    Registration(){
+        StdBodyLoader::registerNodeType("Camera", readCamera);
+        StdBodyLoader::registerNodeType("CameraDevice", readCamera);
+        StdBodyWriter::registerDeviceWriter<Camera>(
+            "Camera",
+            [](StdBodyWriter* /* writer */, Mapping* info, const Camera* camera){
+                return camera->writeSpecifications(info);
+            });
+    }
+} registration;
+
 }

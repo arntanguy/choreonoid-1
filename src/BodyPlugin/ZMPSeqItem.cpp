@@ -38,12 +38,14 @@ class ZMPSeqEngine : public TimeSyncItemEngine
 public:
         
     ZMPSeqEngine(ZMPSeqItem* seqItem, BodyItem* bodyItem)
-        : seq(seqItem->zmpseq()), bodyItem(bodyItem)
+        : TimeSyncItemEngine(seqItem),
+          seq(seqItem->zmpseq()),
+          bodyItem(bodyItem)
     {
-        seqItem->sigUpdated().connect(std::bind(&TimeSyncItemEngine::notifyUpdate, this));
+        seqItem->sigUpdated().connect([this](){ refresh(); });
     }
 
-    virtual bool onTimeChanged(double time)
+    virtual bool onTimeChanged(double time) override
     {
         bool isValidTime = false;
         if(!seq->empty()){
@@ -65,7 +67,7 @@ TimeSyncItemEngine* createZMPSeqEngine(BodyItem* bodyItem, AbstractSeqItem* seqI
     if(item){
         return new ZMPSeqEngine(item, bodyItem);
     }
-    return 0;
+    return nullptr;
 }
 
 }
@@ -111,18 +113,19 @@ ZMPSeqItem::~ZMPSeqItem()
 bool ZMPSeqItem::makeRootRelative(bool on)
 {
     BodyMotionItem* bodyMotionItem = dynamic_cast<BodyMotionItem*>(parentItem());
+    auto& os = mvout(false);
     if(bodyMotionItem){
         if(cnoid::makeRootRelative(*zmpseq_, *bodyMotionItem->motion(), on)){
-            mvout() << format(_("{0} of {1} has been converted to {2}."),
-                              displayName(), bodyMotionItem->displayName(),
-                              (on ? _("the root relative coordinate") : _("the global coordinate")))
-                    << endl;
+            os << format(_("{0} of {1} has been converted to {2}."),
+                         displayName(), bodyMotionItem->displayName(),
+                         (on ? _("the root relative coordinate") : _("the global coordinate")))
+               << endl;
             return true;
         }
     }
-    mvout() << format(_("{0}'s coordinate system cannot be changed "
-                        "because there is no root link motion associated with {0}."),
-                      displayName()) << endl;
+    os << format(_("{0}'s coordinate system cannot be changed "
+                   "because there is no root link motion associated with {0}."),
+                 displayName()) << endl;
     return false;
 }
 
@@ -137,5 +140,5 @@ void ZMPSeqItem::doPutProperties(PutPropertyFunction& putProperty)
 {
     AbstractSeqItem::doPutProperties(putProperty);
     putProperty(_("Root relative"), zmpseq_->isRootRelative(),
-                std::bind(&ZMPSeqItem::makeRootRelative, this, _1));
+                [this](bool on){ return makeRootRelative(on); });
 }

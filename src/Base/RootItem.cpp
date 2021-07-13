@@ -7,8 +7,6 @@
 #include "ItemManager.h"
 #include "ItemClassRegistry.h"
 #include "MenuManager.h"
-#include "LazyCaller.h"
-#include "LazySignal.h"
 #include "Archive.h"
 #include <fmt/format.h>
 #include <iostream>
@@ -47,8 +45,8 @@ public:
 	
     ItemList<> selectedItems;
     ItemPtr currentItem;
+    int itemSelectionChangeBlockLevel;
     bool needToUpdateSelectedItems;
-    LazyCaller emitSigSelectedItemsChangedLater;
     Signal<void(Item* item, bool on)> sigSelectionChanged;
     Signal<void(const ItemList<>& selectedItems)> sigSelectedItemsChanged;
 
@@ -68,8 +66,8 @@ public:
     Signal<void(Item* item)> sigItemMoved;
     Signal<void(Item* item, bool isMoving)> sigSubTreeRemoving;
     Signal<void(Item* item, bool isMoving)> sigSubTreeRemoved;
-    LazySignal<Signal<void()>> sigTreeChanged;
     Signal<void(Item* assigned, Item* srcItem)> sigItemAssigned;
+    Signal<void(Item* item, const std::string& oldName)> sigItemNameChanged;
 
     Impl(RootItem* self);
     Impl(RootItem* self, const Impl& org);
@@ -81,6 +79,8 @@ public:
 
 }
 
+
+namespace {
 
 CheckEntry::CheckEntry(const string& description)
     : needToUpdateCheckedItemList(false),
@@ -98,7 +98,7 @@ CheckEntry::CheckEntry(const CheckEntry& org)
 }
 
 
-static void putItemTreeWithPolymorphicIds()
+void putItemTreeWithPolymorphicIds()
 {
     auto& registry = ItemClassRegistry::instance();
     cout << "Number of item classes: " << registry.numRegisteredClasses() << endl;
@@ -107,6 +107,8 @@ static void putItemTreeWithPolymorphicIds()
         cout << fmt::format("{}: id {} : {}",
                             item->name(), id, registry.superClassId(id)) << endl;
     }
+}
+
 }
     
 
@@ -121,8 +123,10 @@ void RootItem::initializeClass(ExtensionManager* ext)
         initialized = true;
 
         // debug
+        /*
         ext->menuManager().setPath("/Options").addItem("Polymorphic id test")->sigTriggered().connect(
             [](){ putItemTreeWithPolymorphicIds(); });
+        */
     }
 }
 
@@ -164,13 +168,11 @@ RootItem::Impl::Impl(RootItem* self, const Impl& org)
     doCommonInitialization();
 }
 
-
+#include <iostream>
 void RootItem::Impl::doCommonInitialization()
 {
     needToUpdateSelectedItems = false;
-    
-    emitSigSelectedItemsChangedLater.setFunction(
-        [&](){ sigSelectedItemsChanged(self->getSelectedItems()); });
+    itemSelectionChangeBlockLevel = 0;
 }
 
 
@@ -228,7 +230,6 @@ SignalProxy<void(Item* item)> RootItem::sigItemMoved()
 
 
 /**
-   @if jp
    The signal that is emitted just before an item belonging to the path from
    the root item is being removed.
    
@@ -244,7 +245,6 @@ SignalProxy<void(Item* item, bool isMoving)> RootItem::sigSubTreeRemoving()
 
 
 /**
-   @if jp
    The signal that is emitted when an item belonging to the item tree from the
    root item is removed.
    
@@ -257,21 +257,9 @@ SignalProxy<void(Item* item, bool isMoving)> RootItem::sigSubTreeRemoved()
 }
 
 
-/**
-   @if jp
-   The signal that is emitted when the structure of the item tree changes,
-   such as adding and deleting items.
-
-   Unlike sigItemAdded or sigItemRemoving, it is emitted only once for a series of
-   operations performed at once. To be precise, it is emitted after the events in
-   the queue are processed in the event loop of the framework.   
-   
-   @todo "Once all at once" is probably not being protected at the time of project
-   loading etc, so improve this point.
-*/
 SignalProxy<void()> RootItem::sigTreeChanged()
 {
-    return impl->sigTreeChanged.signal();
+    return sigSubTreeChanged();
 }
 
 
@@ -281,6 +269,12 @@ SignalProxy<void()> RootItem::sigTreeChanged()
 SignalProxy<void(Item* assigned, Item* srcItem)> RootItem::sigItemAssigned()
 {
     return impl->sigItemAssigned;
+}
+
+
+SignalProxy<void(Item* item, const std::string& oldName)> RootItem::sigItemNameChanged()
+{
+    return impl->sigItemNameChanged;
 }
 
 
@@ -295,8 +289,6 @@ void RootItem::notifyEventOnSubTreeAdded(Item* item, std::vector<Item*>& orgSubT
     for(auto& item : orgSubTreeItems){
         impl->sigItemAdded(item);
     }
-    
-    impl->sigTreeChanged.request();
 }
 
 
@@ -311,28 +303,30 @@ void RootItem::notifyEventOnSubTreeMoved(Item* item, std::vector<Item*>& orgSubT
     for(auto& item : orgSubTreeItems){
         impl->sigItemMoved(item);
     }
-    
-    impl->sigTreeChanged.request();
 }
 
 
 void RootItem::notifyEventOnSubTreeRemoving(Item* item, bool isMoving)
 {
     impl->sigSubTreeRemoving(item, isMoving);
-    impl->sigTreeChanged.request();
 }
 
 
 void RootItem::notifyEventOnSubTreeRemoved(Item* item, bool isMoving)
 {
     impl->sigSubTreeRemoved(item, isMoving);
-    impl->sigTreeChanged.request();
 }
 
 
 void RootItem::emitSigItemAssinged(Item* assigned, Item* srcItem)
 {
     impl->sigItemAssigned(assigned, srcItem);
+}
+
+
+void RootItem::emitSigItemNameChanged(Item* item, const std::string& oldName)
+{
+    impl->sigItemNameChanged(item, oldName);
 }
 
 
@@ -411,17 +405,30 @@ void RootItem::emitSigSelectionChanged(Item* item, bool on, bool isCurrent)
 }
 
 
-void RootItem::emitSigSelectedItemsChangedLater()
+void RootItem::requestToEmitSigSelectedItemsChanged()
 {
     impl->needToUpdateSelectedItems = true;
-    impl->emitSigSelectedItemsChangedLater();
+
+    if(impl->itemSelectionChangeBlockLevel == 0){
+        impl->sigSelectedItemsChanged(getSelectedItems());
+    }
 }
 
 
-void RootItem::flushSigSelectedItemsChanged()
+void RootItem::beginItemSelectionChanges()
 {
-    if(impl->emitSigSelectedItemsChangedLater.isPending()){
-        impl->emitSigSelectedItemsChangedLater.flush();
+    impl->itemSelectionChangeBlockLevel++;
+}
+
+
+void RootItem::endItemSelectionChanges()
+{
+    impl->itemSelectionChangeBlockLevel--;
+    if(impl->itemSelectionChangeBlockLevel < 0){
+        impl->itemSelectionChangeBlockLevel = 0;
+    }
+    if(impl->itemSelectionChangeBlockLevel == 0){
+        impl->sigSelectedItemsChanged(getSelectedItems());
     }
 }
 

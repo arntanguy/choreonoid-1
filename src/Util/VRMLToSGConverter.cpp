@@ -16,7 +16,6 @@
 #include "NullOut.h"
 #include "EigenUtil.h"
 #include <fmt/format.h>
-#include <boost/algorithm/string.hpp>
 #include <tuple>
 
 using namespace std;
@@ -323,9 +322,9 @@ SgNode* VRMLToSGConverterImpl::convertShapeNode(VRMLShape* vshape)
         if(p != vrmlGeometryToSgMeshMap.end()){
             mesh = p->second;
         } else {
-            bool generateTexCoord = false;
+            int meshOptions = MeshGenerator::NoOption;
             if(vshape->appearance && vshape->appearance->texture){
-                generateTexCoord = true;
+                meshOptions = MeshGenerator::TextureCoordinate;
             }
             if(VRMLIndexedFaceSet* faceSet = dynamic_cast<VRMLIndexedFaceSet*>(vrmlGeometry)){
                 if(!isTriangulationEnabled){
@@ -352,18 +351,25 @@ SgNode* VRMLToSGConverterImpl::convertShapeNode(VRMLShape* vshape)
                     
             } else if(VRMLBox* box = dynamic_cast<VRMLBox*>(vrmlGeometry)){
                 mesh = meshGenerator.generateBox(
-                    Vector3(box->size[0], box->size[1], box->size[2]), generateTexCoord);
+                    Vector3(box->size[0], box->size[1], box->size[2]), meshOptions);
                 
             } else if(VRMLSphere* sphere = dynamic_cast<VRMLSphere*>(vrmlGeometry)){
-                mesh = meshGenerator.generateSphere(sphere->radius, generateTexCoord);
+                mesh = meshGenerator.generateSphere(sphere->radius, meshOptions);
                 
             } else if(VRMLCylinder* cylinder = dynamic_cast<VRMLCylinder*>(vrmlGeometry)){
-                mesh = meshGenerator.generateCylinder(
-                    cylinder->radius, cylinder->height, cylinder->bottom, cylinder->top, cylinder->side, generateTexCoord);
+                SgMesh::Cylinder param(cylinder->radius, cylinder->height);
+                param.top = cylinder->top;
+                param.bottom = cylinder->bottom;
+                param.side = cylinder->side;
+                mesh = new SgMesh(param);
+                meshGenerator.updateMeshWithPrimitiveInformation(mesh, meshOptions);
                 
             } else if(VRMLCone* cone = dynamic_cast<VRMLCone*>(vrmlGeometry)){
-                mesh = meshGenerator.generateCone(
-                    cone->bottomRadius, cone->height, cone->bottom, cone->side, generateTexCoord);
+                SgMesh::Cone param(cone->bottomRadius, cone->height);
+                param.bottom = cone->bottom;
+                param.side = cone->side;
+                mesh = new SgMesh(param);
+                meshGenerator.updateMeshWithPrimitiveInformation(mesh, meshOptions);
                 
             } else if(VRMLElevationGrid* elevationGrid = dynamic_cast<VRMLElevationGrid*>(vrmlGeometry)){
                 mesh = createMeshFromElevationGrid(elevationGrid);
@@ -457,6 +463,7 @@ SgMeshPtr VRMLToSGConverterImpl::createMeshFromIndexedFaceSet(VRMLIndexedFaceSet
     }
     
     SgMeshPtr mesh = new SgMesh;
+    mesh->setCreaseAngle(vface->creaseAngle);
     mesh->setSolid(vface->solid);
     mesh->setVertices(new SgVertexArray(vface->coord->point));
 
@@ -659,6 +666,7 @@ SgPolygonMeshPtr VRMLToSGConverterImpl::createPolygonMeshFromIndexedFaceSet(VRML
     }
     
     SgPolygonMeshPtr mesh = new SgPolygonMesh;
+    mesh->setCreaseAngle(vface->creaseAngle);
     mesh->setSolid(vface->solid);
     mesh->setVertices(new SgVertexArray(vface->coord->point));
 
@@ -666,11 +674,11 @@ SgPolygonMeshPtr VRMLToSGConverterImpl::createPolygonMeshFromIndexedFaceSet(VRML
     const bool ccw = vface->ccw;
 
     {
-        SgIndexArray& polygonVertices = mesh->polygonVertices();
+        SgIndexArray& vertexIndices = mesh->faceVertexIndices();
         if(ccw){
-            polygonVertices = orgCoordIndices;
+            vertexIndices = orgCoordIndices;
         } else {
-            polygonVertices.reserve(orgCoordIndices.size());
+            vertexIndices.reserve(orgCoordIndices.size());
             int firstVertexIndex = 0;
             int numFaceVertices = 0;
             for(size_t i=0; i < orgCoordIndices.size(); ++i){
@@ -679,9 +687,9 @@ SgPolygonMeshPtr VRMLToSGConverterImpl::createPolygonMeshFromIndexedFaceSet(VRML
                     ++numFaceVertices;
                 } else {
                     while(--numFaceVertices >= 0){
-                        polygonVertices.push_back(orgCoordIndices[firstVertexIndex + numFaceVertices]);
+                        vertexIndices.push_back(orgCoordIndices[firstVertexIndex + numFaceVertices]);
                     }
-                    polygonVertices.push_back(-1);
+                    vertexIndices.push_back(-1);
                     firstVertexIndex = i + 1;
                     numFaceVertices = 0;
                 }
@@ -818,6 +826,7 @@ SgMeshPtr VRMLToSGConverterImpl::createMeshFromElevationGrid(VRMLElevationGrid* 
         }
     }
 
+    mesh->setCreaseAngle(grid->creaseAngle);
     mesh->setSolid(grid->solid);
 
     if(isNormalGenerationEnabled){
@@ -1050,6 +1059,7 @@ SgMeshPtr VRMLToSGConverterImpl::createMeshFromExtrusion(VRMLExtrusion* extrusio
         }
     }
 
+    mesh->setCreaseAngle(extrusion->creaseAngle);
     mesh->setSolid(extrusion->solid);
 
     if(isNormalGenerationEnabled){
@@ -1172,7 +1182,8 @@ SgMaterial* VRMLToSGConverterImpl::createMaterial(VRMLMaterial* vm)
     material->setAmbientIntensity(vm->ambientIntensity);
     material->setEmissiveColor(vm->emissiveColor);
     material->setSpecularColor(vm->specularColor);
-    material->setShininess(vm->shininess);
+    material->setSpecularExponent(
+        127.0f * std::max(0.0f, std::min((float)vm->shininess, 1.0f)) + 1.0f);
     material->setTransparency(vm->transparency);
     return material;
 }
@@ -1192,31 +1203,29 @@ SgTextureTransform* VRMLToSGConverterImpl::createTextureTransform(VRMLTextureTra
 
 SgTexture* VRMLToSGConverterImpl::createTexture(VRMLTexture* vt)
 {
-    SgTexture* texture = 0;
+    SgTexture* texture = nullptr;
 
     VRMLImageTexturePtr imageTextureNode = dynamic_node_cast<VRMLImageTexture>(vt);
     if(imageTextureNode){
         SgImagePtr image;
         SgImagePtr imageForLoading;
-        const MFString& urls = imageTextureNode->url;
-        for(size_t i=0; i < urls.size(); ++i){
-            const string& url = urls[i];
-            if(!url.empty()){
-                ImagePathToSgImageMap::iterator p = imagePathToSgImageMap.find(url);
+        const MFString& filepaths = imageTextureNode->filepath;
+        for(size_t i=0; i < filepaths.size(); ++i){
+            auto& filepath = filepaths[i];
+            if(!filepath.empty()){
+                auto p = imagePathToSgImageMap.find(filepath);
                 if(p != imagePathToSgImageMap.end()){
                     image = p->second;
                     break;
                 } else {
-                    try {
-                        if(!imageForLoading){
-                            imageForLoading = new SgImage;
-                        }
-                        imageIO.load(imageForLoading->image(), url);
+                    if(!imageForLoading){
+                        imageForLoading = new SgImage;
+                    }
+                    if(imageIO.load(imageForLoading->image(), filepath, os())){
                         image = imageForLoading;
-                        imagePathToSgImageMap[url] = image;
+                        image->setUri(imageTextureNode->url[i], filepath);
+                        imagePathToSgImageMap[filepath] = image;
                         break;
-                    } catch(const exception_base& ex){
-                        putMessage(*boost::get_error_info<error_info_message>(ex));
                     }
                 }
             }
@@ -1319,8 +1328,8 @@ SgNode* VRMLToSGConverterImpl::convertLineSet(VRMLIndexedLineSet* vLineSet)
         const int numOrgColorIndices = orgColorIndices.size();
         bool doWarning = false;
         SgIndexArray& colorIndices = lineSet->colorIndices();
-        const SgIndexArray& lineVertices = lineSet->lineVertices();
-        for(size_t i=0; i < lineVertices.size(); ++i){
+        const SgIndexArray& vertexIndices = lineSet->lineVertexIndices();
+        for(size_t i=0; i < vertexIndices.size(); ++i){
             int orgPos = newColorPosToOrgColorPosMap[i];
             if(orgPos >= numOrgColorIndices){
                 orgPos = numOrgColorIndices - 1;

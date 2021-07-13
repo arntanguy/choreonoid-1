@@ -38,15 +38,46 @@ MprStatement::MprStatement(const MprStatement& org)
 }
 
 
+MprStatement::~MprStatement()
+{
+
+}
+
+
 void MprStatement::validateClassId() const
 {
     classId_ = MprStatementClassRegistry::instance().classId(this);
 }
 
 
+std::string MprStatement::label() const
+{
+    string text;
+    for(int i=0; i < 3; ++i){
+        auto element = label(i);
+        if(!element.empty()){
+            if(i >= 1){
+                text += " ";
+            }
+            text += element;
+        }
+    }
+    return text;
+}
+
+
 MprProgram* MprStatement::holderProgram() const
 {
     return holderProgram_.lock();
+}
+
+
+MprStructuredStatement* MprStatement::holderStatement() const
+{
+    if(auto program = holderProgram_.lock()){
+        return program->holderStatement();
+    }
+    return nullptr;
 }
 
 
@@ -72,5 +103,3 @@ void MprStatement::notifyUpdate()
         holder->notifyStatementUpdate(this);
     }
 }
-
-

@@ -12,7 +12,7 @@ PositionTag::PositionTag()
 }
 
 
-PositionTag::PositionTag(const Position& T)
+PositionTag::PositionTag(const Isometry3& T)
 {
     position_ = T;
     hasAttitude_ = true;
@@ -35,6 +35,14 @@ PositionTag::PositionTag(const PositionTag& org)
 }
 
 
+PositionTag& PositionTag::operator=(const PositionTag& rhs)
+{
+    position_ = rhs.position_;
+    hasAttitude_ = rhs.hasAttitude_;
+    return *this;
+}
+
+
 bool PositionTag::read(const Mapping* archive)
 {
     bool isValid = false;
@@ -53,11 +61,12 @@ bool PositionTag::read(const Mapping* archive)
 }
 
 
-void PositionTag::write(Mapping* archive) const
+bool PositionTag::write(Mapping* archive) const
 {
-    archive->setDoubleFormat("%.9g");
+    archive->setFloatingNumberFormat("%.9g");
     cnoid::write(archive, "translation", position_.translation());
     if(hasAttitude_){
         cnoid::write(archive, "rpy", degree(rpyFromRot(position_.linear())));
     }
+    return true;
 }

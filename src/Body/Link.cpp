@@ -16,48 +16,48 @@ using namespace cnoid;
 Link::Link()
 {
     index_ = -1;
-    jointId_ = -1;
     parent_ = nullptr;
     body_ = nullptr;
     T_.setIdentity();
     Tb_.setIdentity();
-    Rs_.setIdentity();
+    jointType_ = FixedJoint;
+    jointId_ = -1;
+    actuationMode_ = StateNone;
+    sensingMode_ = StateNone;
     a_ = Vector3::UnitZ();
-    jointType_ = FIXED_JOINT;
-    actuationMode_ = NO_ACTUATION;
     q_ = 0.0;
     dq_ = 0.0;
     ddq_ = 0.0;
-    u_ = 0.0;
     q_target_ = 0.0;
     dq_target_ = 0.0;
+    u_ = 0.0;
     v_.setZero();
     w_.setZero();
     dv_.setZero();
     dw_.setZero();
+    F_ext_.setZero();
     c_.setZero();
     wc_.setZero();
     m_ = 1.0;
     I_.setIdentity();
     Jm2_ = 0.0;
-    F_ext_.setZero();
     q_initial_ = 0.0;
     q_upper_ = std::numeric_limits<double>::max();
     q_lower_ = -std::numeric_limits<double>::max();
     dq_upper_ = std::numeric_limits<double>::max();
     dq_lower_ = -std::numeric_limits<double>::max();
     materialId_ = 0;
-    visualShape_ = new SgPosTransform;
-    collisionShape_ = new SgPosTransform;
+    visualShape_ = new SgGroup;
+    collisionShape_ = new SgGroup;
     info_ = new Mapping;
 }
 
 
 Link::Link(const Link& org)
-    : name_(org.name_)
+    : name_(org.name_),
+      jointSpecificName_(org.jointSpecificName_)
 {
     index_ = -1; // should be set by a Body object
-    jointId_ = org.jointId_;
 
     parent_ = nullptr;
     body_ = nullptr;
@@ -65,10 +65,12 @@ Link::Link(const Link& org)
     T_ = org.T_;
     Tb_ = org.Tb_;
     
-    a_ = org.a_;
     jointType_ = org.jointType_;
+    jointId_ = org.jointId_;
     actuationMode_ = org.actuationMode_;
-
+    sensingMode_ = org.sensingMode_;
+    
+    a_ = org.a_;
     q_ = org.q_;
     dq_ = org.dq_;
     ddq_ = org.ddq_;
@@ -81,15 +83,14 @@ Link::Link(const Link& org)
     w_ = org.w_;
     dv_ = org.dv_;
     dw_ = org.dw_;
+    F_ext_ = org.F_ext_;
     
     c_ = org.c_;
     wc_ = org.wc_;
     m_ = org.m_;
     I_ = org.I_;
+
     Jm2_ = org.Jm2_;
-
-    F_ext_ = org.F_ext_;
-
     q_initial_ = org.q_initial_;
     q_upper_ = org.q_upper_;
     q_lower_ = org.q_lower_;
@@ -99,10 +100,10 @@ Link::Link(const Link& org)
     materialId_ = org.materialId_;
 
     //! \todo add the mode for doing deep copy of the following objects
-    visualShape_ = new SgPosTransform;
+    visualShape_ = new SgGroup;
     org.visualShape_->copyChildrenTo(visualShape_);
     visualShape_->invalidateBoundingBox();
-    collisionShape_ = new SgPosTransform;
+    collisionShape_ = new SgGroup;
     org.collisionShape_->copyChildrenTo(collisionShape_);
     collisionShape_->invalidateBoundingBox();
     
@@ -130,11 +131,11 @@ Link::~Link()
 
 void Link::initializeState()
 {
-    u_ = 0.0;
     dq_ = 0.0;
     ddq_ = 0.0;
     q_target_ = q_;
     dq_target_ = dq_;
+    u_ = 0.0;
     v_.setZero();
     w_.setZero();
     dv_.setZero();
@@ -143,26 +144,43 @@ void Link::initializeState()
 }
 
 
-void Link::setBody(Body* newBody)
+void Link::setBodyToSubTree(Body* newBody)
 {
     if(body_ != newBody){
-        setBodySub(newBody);
+        setBodyToSubTreeIter(newBody);
     }
 }
 
 
-void Link::setBodySub(Body* newBody)
+void Link::setBodyToSubTreeIter(Body* newBody)
 {
     body_ = newBody;
     for(Link* link = child_; link; link = link->sibling_){
-        link->setBodySub(newBody);
+        link->setBodyToSubTreeIter(newBody);
     }
 }
 
 
-bool Link::isBodyRoot() const
+bool Link::isStatic() const
 {
-    return !parent_ || this == body_->rootLink();
+    if(!isFixedJoint()){
+        return false;
+    }
+    if(!isRoot()){
+        return parent_->isStatic();
+    }
+    return true;
+}
+
+
+bool Link::isFixedToRoot() const
+{
+    if(isRoot()){
+        return true;
+    } else if(isFixedJoint()){
+        return parent_->isFixedToRoot();
+    }
+    return false;
 }
 
 
@@ -177,7 +195,7 @@ void Link::prependChild(Link* link)
     child_ = link;
     link->parent_ = this;
 
-    link->setBody(body_);
+    link->setBodyToSubTree(body_);
 }
 
 
@@ -201,7 +219,7 @@ void Link::appendChild(Link* link)
     }
     link->parent_ = this;
 
-    link->setBody(body_);
+    link->setBodyToSubTree(body_);
 }
 
 
@@ -230,13 +248,13 @@ bool Link::removeChild(Link* childToRemove)
     while(link){
         if(link == childToRemove){
             childToRemove->parent_ = nullptr;
-            childToRemove->sibling_ = nullptr;
             if(prevSibling){
                 prevSibling->sibling_ = link->sibling_;
             } else {
                 child_ = link->sibling_;
             }
-            childToRemove->setBody(0);
+            childToRemove->sibling_ = nullptr;
+            childToRemove->setBodyToSubTree(nullptr);
             return true;
         }
         prevSibling = link;
@@ -255,15 +273,43 @@ void Link::setName(const std::string& name)
 }
 
 
-std::string Link::jointTypeString(bool useUnderscore) const
+void Link::setJointName(const std::string& name)
 {
-    switch(jointType_){
-    case REVOLUTE_JOINT:    return "revolute";
-    case PRISMATIC_JOINT:   return "prismatic";
-    case FREE_JOINT:        return "free";
-    case FIXED_JOINT:       return "fixed";
-    case PSEUDO_CONTINUOUS_TRACK:{
-        if(useUnderscore){
+    if(body_){
+        body_->resetJointSpecificName(this, name);
+    }
+    jointSpecificName_ = name;
+}
+
+
+void Link::resetJointSpecificName()
+{
+    if(body_){
+        body_->resetJointSpecificName(this);
+    }
+    jointSpecificName_.clear();
+}
+
+
+const std::string& Link::jointName() const
+{
+    if(!jointSpecificName_.empty()){
+        return jointSpecificName_;
+    }
+    return name_;
+}
+
+
+static const char* jointTypeString(int jointType, bool isSymbol)
+{
+    switch(jointType){
+    case Link::RevoluteJoint:  return "revolute";
+    case Link::PrismaticJoint: return "prismatic";
+    case Link::FreeJoint:      return "free";
+    case Link::FixedJoint:     return "fixed";
+        
+    case Link::PseudoContinuousTrackJoint: {
+        if(isSymbol){
             return "pseudo_continuous_track";
         } else {
             return "pseudo continuous track";
@@ -274,71 +320,83 @@ std::string Link::jointTypeString(bool useUnderscore) const
 }
 
 
-std::string Link::actuationModeString() const
+const char* Link::jointTypeLabel() const
 {
-    switch(actuationMode_){
+    return ::jointTypeString(jointType_, false);
+}
 
-    case NO_ACTUATION:
-        return "no actuation";
 
-    case JOINT_EFFORT:
-        if(isRevoluteJoint()){
-            return "joint torque";
-        } else if(isPrismaticJoint()){
-            return "joint force";
-        } else {
-            return "joint effort";
+const char* Link::jointTypeSymbol() const
+{
+    return ::jointTypeString(jointType_, true);
+}
+
+
+const char* Link::jointTypeString(bool useUnderscore) const
+{
+    return ::jointTypeString(jointType_, useUnderscore);
+}
+
+
+std::string Link::getStateModeString(short mode)
+{
+    if(mode == StateNone){
+        return "None";
+    } else {
+        string s;
+        for(int i=0; i < NumStateTypes; ++i){
+            int modeBit = 1 << i;
+            if(mode & modeBit){
+                if(!s.empty()){
+                    s += " + ";
+                }
+                switch(modeBit){
+                case JointDisplacement:
+                    s += "Joint Displacement";
+                    break;
+                case JointVelocity:
+                    s += "Joint Velocity";
+                    break;
+                case JointAcceleration:
+                    s += "Joint Acceleration";
+                    break;
+                case JointEffort:
+                    s += "Joint Effort";
+                    break;
+                case LinkPosition:
+                    s += "Link Position";
+                    break;
+                case LinkTwist:
+                    s += "Link Twist";
+                    break;
+                case LinkExtWrench:
+                    s += "Link External Wrench";
+                    break;
+                case LinkContactState:
+                    s += "Link Contact State";
+                    break;
+                case DeprecatedJointSurfaceVelocity:
+                    s += "Joint Surface Velocity";
+                    break;
+                default:
+                    break;
+                }
+            }
         }
-
-    case JOINT_DISPLACEMENT:
-        if(isRevoluteJoint()){
-            return "joint angle";
-        } else {
-            return "joint displacement";
-        }
-
-    case JOINT_VELOCITY:
-        return "joint velocity";
-
-    case JOINT_SURFACE_VELOCITY:
-        return "joint surface velocity";
-
-    case LINK_POSITION:
-        return "link position";
-
-    default:
-        return "unknown";
+        return s;
     }
 }
 
 
 std::string Link::materialName() const
 {
-    return Material::name(materialId_);
+    return Material::nameOfId(materialId_);
 }
 
 
 void Link::setMaterial(const std::string& name)
 {
-    setMaterial(Material::id(name));
-}
-
-
-SgGroup* Link::shape() const
-{
-    return visualShape_;
-}
-
-
-SgGroup* Link::visualShape() const
-{
-    return visualShape_;
-}
-
-
-SgGroup* Link::collisionShape() const
-{
-    return collisionShape_;
+    setMaterial(Material::idOfName(name));
 }
 
 
@@ -352,36 +410,36 @@ bool Link::hasDedicatedCollisionShape() const
 }
 
 
-void Link::addShapeNode(SgNode* shape, bool doNotify)
+void Link::addShapeNode(SgNode* shape, SgUpdateRef update)
 {
-    visualShape_->addChild(shape, doNotify);
-    collisionShape_->addChild(shape, doNotify);
+    visualShape_->addChild(shape, update);
+    collisionShape_->addChild(shape, update);
 }
 
 
-void Link::addVisualShapeNode(SgNode* shape, bool doNotify)
+void Link::addVisualShapeNode(SgNode* shape, SgUpdateRef update)
 {
-    visualShape_->addChild(shape, doNotify);
+    visualShape_->addChild(shape, update);
 }
 
 
-void Link::addCollisionShapeNode(SgNode* shape, bool doNotify)
+void Link::addCollisionShapeNode(SgNode* shape, SgUpdateRef update)
 {
-    collisionShape_->addChild(shape, doNotify);
+    collisionShape_->addChild(shape, update);
 }
 
 
-void Link::removeShapeNode(SgNode* shape, bool doNotify)
+void Link::removeShapeNode(SgNode* shape, SgUpdateRef update)
 {
-    visualShape_->removeChild(shape, doNotify);
-    collisionShape_->removeChild(shape, doNotify);
+    visualShape_->removeChild(shape, update);
+    collisionShape_->removeChild(shape, update);
 }
 
 
-void Link::clearShapeNodes(bool doNotify)
+void Link::clearShapeNodes(SgUpdateRef update)
 {
-    visualShape_->clearChildren(doNotify);
-    collisionShape_->clearChildren(doNotify);
+    visualShape_->clearChildren(update);
+    collisionShape_->clearChildren(update);
 }
 
 

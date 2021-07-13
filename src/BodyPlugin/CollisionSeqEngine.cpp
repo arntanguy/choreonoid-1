@@ -7,7 +7,6 @@
 #include "CollisionSeqEngine.h"
 #include "WorldItem.h"
 #include "CollisionSeqItem.h"
-#include <cnoid/ExtensionManager>
 #include <cnoid/SceneCollision>
 
 using namespace std;
@@ -15,19 +14,22 @@ using namespace cnoid;
 
 namespace cnoid {
 
-class CollisionSeqEngineImpl
+class CollisionSeqEngine::Impl
 {
 public:
     WorldItemPtr worldItem;
     CollisionSeqItemPtr collisionSeqItem;
     shared_ptr<CollisionSeq> colSeq;
-    CollisionSeqEngineImpl(CollisionSeqEngine* self, WorldItem* worldItem, CollisionSeqItem* collisionSeqItem){
-        this->worldItem = worldItem;
-        this->collisionSeqItem = collisionSeqItem;
+
+    Impl(CollisionSeqEngine* self, WorldItem* worldItem, CollisionSeqItem* collisionSeqItem)
+        : worldItem(worldItem),
+          collisionSeqItem(collisionSeqItem)
+    {
         colSeq = collisionSeqItem->collisionSeq();
     }
 
-    bool onTimeChanged(double time){
+    bool onTimeChanged(double time)
+    {
         bool isValid = false;
 
         if(colSeq){
@@ -53,29 +55,31 @@ public:
 
 }
 
-TimeSyncItemEngine* createCollisionSeqEngine(Item* sourceItem)
+
+TimeSyncItemEngine* CollisionSeqEngine::create(CollisionSeqItem* item, CollisionSeqEngine* engine0)
 {
-    CollisionSeqItem* collisionSeqItem = dynamic_cast<CollisionSeqItem*>(sourceItem);
-    if(collisionSeqItem){
-        Item* ownerItem = collisionSeqItem->findOwnerItem<Item>();
-        WorldItem* worldItem = dynamic_cast<WorldItem*>(ownerItem);
-        if(worldItem){
-            return new CollisionSeqEngine(worldItem, collisionSeqItem);
+    if(auto worldItem = item->findOwnerItem<WorldItem>()){
+        if(engine0 && engine0->impl->worldItem == worldItem){
+            return engine0;
+        } else {
+            return new CollisionSeqEngine(worldItem, item);
         }
     }
-    return 0;
+    return nullptr;
 }
 
 
-void CollisionSeqEngine::initializeClass(ExtensionManager* ext)
+void CollisionSeqEngine::initializeClass()
 {
-    ext->timeSyncItemEngineManger().addEngineFactory(createCollisionSeqEngine);
+    TimeSyncItemEngineManager::instance()
+        ->registerFactory<CollisionSeqItem, CollisionSeqEngine>(CollisionSeqEngine::create);
 }
 
 
 CollisionSeqEngine::CollisionSeqEngine(WorldItem* worldItem, CollisionSeqItem* collisionSeqItem)
+    : TimeSyncItemEngine(collisionSeqItem)
 {
-    impl = new CollisionSeqEngineImpl(this, worldItem, collisionSeqItem);
+    impl = new Impl(this, worldItem, collisionSeqItem);
 }
 
 

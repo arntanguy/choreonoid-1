@@ -11,7 +11,7 @@
 namespace cnoid {
 
 class SceneWidget;
-class SceneWidgetEditable;
+class SceneWidgetEventHandler;
 class SceneBar;
 class SgGroup;
 class Item;
@@ -34,7 +34,7 @@ public:
        If you want to add a custom mode button to the scene bar, use the SceneBar::addCustomModeButton function.
        \return Mode id
     */
-    static int registerCustomMode(SceneWidgetEditable* modeHandler);
+    static int registerCustomMode(SceneWidgetEventHandler* modeHandler);
 
     /**
        If the corresponding custom mode button is added to the scene bar, remove it with
@@ -43,6 +43,8 @@ public:
     static void unregisterCustomMode(int mode);
     
     static int customModeId(const std::string& modeName);
+
+    static SignalProxy<void(SceneView* view)> sigLastFocusViewChanged();
         
     SceneView();
     ~SceneView();
@@ -54,6 +56,7 @@ public:
     int customMode() const;
         
 protected:
+    virtual void onFocusChanged(bool on) override;
     virtual QWidget* indicatorOnInfoBar() override;
     virtual bool storeState(Archive& archive) override;
     virtual bool restoreState(const Archive& archive) override;

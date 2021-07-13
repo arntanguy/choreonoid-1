@@ -9,11 +9,15 @@
 #include "OptionManager.h"
 #include "PluginManager.h"
 #include "ItemManager.h"
+#include "MessageView.h"
+#include "RootItem.h"
 #include "ProjectManager.h"
+#include "UnifiedEditHistory.h"
+#include "UnifiedEditHistoryView.h"
+#include "ItemEditRecordManager.h"
 #include "MenuManager.h"
 #include "TimeSyncItemEngine.h"
 #include "MainWindow.h"
-#include "RootItem.h"
 #include "FolderItem.h"
 #include "SubProjectItem.h"
 #include "ExtCommandItem.h"
@@ -34,7 +38,6 @@
 #include "CoordinateFrameItem.h"
 #include "PositionTagGroupItem.h"
 #include "ViewManager.h"
-#include "MessageView.h"
 #include "ItemTreeView.h"
 #include "ItemPropertyView.h"
 #include "SceneView.h"
@@ -71,6 +74,7 @@
 #include <QTextStream>
 #include <QFile>
 #include <QStyleFactory>
+#include <QThread>
 #include <iostream>
 #include <csignal>
 #include <cstdlib>
@@ -86,9 +90,6 @@ using namespace std;
 using namespace cnoid;
 
 namespace {
-
-View* lastFocusView_ = 0;
-Signal<void(View*)> sigFocusViewChanged;
 
 Signal<void()> sigAboutToQuit_;
 
@@ -114,6 +115,7 @@ namespace cnoid {
 
 class App::Impl : public QObject
 {
+public:
     App* self;
     QApplication* qapplication;
     int& argc;
@@ -133,11 +135,7 @@ class App::Impl : public QObject
     void onMainWindowCloseEvent();
     void onSigOptionsParsed(boost::program_options::variables_map& v);
     void showInformationDialog();
-    void onFocusChanged(QWidget* /* old */, QWidget* now);
     virtual bool eventFilter(QObject* watched, QEvent* event);
-
-    friend class App;
-    friend class View;
 };
 
 }
@@ -146,46 +144,6 @@ class App::Impl : public QObject
 App::App(int& argc, char** argv)
 {
     impl = new Impl(this, argc, argv);
-}
-
-
-App::Impl::Impl(App* self, int& argc, char** argv)
-    : self(self),
-      argc(argc),
-      argv(argv)
-{
-    descriptionDialog = 0;
-
-    QCoreApplication::setAttribute(Qt::AA_X11InitThreads);
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-
-    // OpenGL settings
-    GLSceneRenderer::initializeClass();
-    QSurfaceFormat format;
-    switch(GLSceneRenderer::rendererType()){
-    case GLSceneRenderer::GLSL_RENDERER:
-        format.setVersion(3, 3);
-        //format.setVersion(4, 4);
-        format.setProfile(QSurfaceFormat::CoreProfile);
-        break;
-    case GLSceneRenderer::GL1_RENDERER:
-    default:
-        format.setVersion(1, 5);
-        break;
-    }
-    QSurfaceFormat::setDefaultFormat(format);
-
-    doQuit = false;
-
-    qapplication = new QApplication(argc, argv);
-
-#ifdef Q_OS_UNIX
-    // See https://doc.qt.io/qt-5/qcoreapplication.html#locale-settings
-    setlocale(LC_NUMERIC, "C");
-#endif
-
-    connect(qapplication, &QApplication::focusChanged,
-            [&](QWidget* old, QWidget* now){ onFocusChanged(old, now); });
 }
 
 
@@ -223,6 +181,16 @@ App::App(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmd
 #endif
 
 
+App::Impl::Impl(App* self, int& argc, char** argv)
+    : self(self),
+      argc(argc),
+      argv(argv)
+{
+    descriptionDialog = nullptr;
+    doQuit = false;
+}
+
+
 void App::initialize(const char* appName, const char* vendorName, const char* pluginPathList)
 {
     impl->initialize(appName, vendorName, pluginPathList);
@@ -234,13 +202,51 @@ void App::Impl::initialize( const char* appName, const char* vendorName, const c
     this->appName = appName;
     this->vendorName = vendorName;
 
+    AppConfig::initialize(appName, vendorName);
+
+    // OpenGL settings
+    GLSceneRenderer::initializeClass();
+
+    QSurfaceFormat glFormat = QSurfaceFormat::defaultFormat();
+    
+    switch(GLSceneRenderer::rendererType()){
+    case GLSceneRenderer::GLSL_RENDERER:
+        glFormat.setVersion(3, 3);
+        glFormat.setProfile(QSurfaceFormat::CoreProfile);
+        break;
+    case GLSceneRenderer::GL1_RENDERER:
+    default:
+        glFormat.setVersion(1, 5);
+        break;
+    }
+    
+    auto glConfig = AppConfig::archive()->openMapping("open_gl");
+    glFormat.setSwapInterval(glConfig->get("vsync", 0));
+
+    QSurfaceFormat::setDefaultFormat(glFormat);
+
+    QCoreApplication::setAttribute(Qt::AA_X11InitThreads);
+    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+
+    /*
+      This attribute is necessary to render the scene on a scene view when the view is
+      separated from the main window. Note that the default surface format must be
+      initialized before creating the QApplication instance.
+    */
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+
+    qapplication = new QApplication(argc, argv);
+
+#ifdef Q_OS_UNIX
+    // See https://doc.qt.io/qt-5/qcoreapplication.html#locale-settings
+    setlocale(LC_NUMERIC, "C");
+#endif
+
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
     qapplication->setApplicationName(appName);
     qapplication->setOrganizationName(vendorName);
 
     qapplication->setWindowIcon(QIcon(":/Base/icon/choreonoid.svg"));
-
-    AppConfig::initialize(appName, vendorName);
 
     FilePathVariableProcessor::systemInstance()->setUserVariables(
         AppConfig::archive()->openMapping("pathVariables"));
@@ -259,6 +265,9 @@ void App::Impl::initialize( const char* appName, const char* vendorName, const c
     messageView = MessageView::instance();
     RootItem::initializeClass(ext);
     ProjectManager::initializeClass(ext);
+    UnifiedEditHistory::initializeClass(ext);
+    UnifiedEditHistoryView::initializeClass(ext);
+    ItemEditRecordManager::initializeClass(ext);
 
     FileBar::initialize(ext);
     ScriptBar::initialize(ext);
@@ -280,7 +289,7 @@ void App::Impl::initialize( const char* appName, const char* vendorName, const c
     TaskView::initializeClass(ext);
     VirtualJoystickView::initializeClass(ext);
 
-    TimeSyncItemEngineManager::initialize();
+    TimeSyncItemEngineManager::initializeClass(ext);
     
     FolderItem::initializeClass(ext);
     SubProjectItem::initializeClass(ext);
@@ -332,38 +341,24 @@ void App::Impl::initialize( const char* appName, const char* vendorName, const c
     om.sigOptionsParsed().connect(
         [&](boost::program_options::variables_map& v){ onSigOptionsParsed(v); });
 
-    // Some plugins such as OpenRTM plugin are driven by a library which tries to catch SIGINT.
-    // This may block the normal termination by inputting Ctrl+C.
-    // To avoid it, the following signal handliers are set.
+    /*
+      Some plugins such as OpenRTM plugin are driven by a library which tries to catch SIGINT.
+      This may block the normal termination by inputting Ctrl+C.
+      To avoid it, the following signal handliers are set.
+    */
     std::signal(SIGINT, onCtrl_C_Input);
     std::signal(SIGTERM, onCtrl_C_Input);
 
 #ifdef Q_OS_WIN32
-    // The above SIGINT handler seems to work even on Windows
-    // when Choreonoid is compiled as a console-program,
-    // and the following handler only works for a console-program, too.
-    // Hence the folloing handler for Windows is currently disabled.
+    /*
+      The above SIGINT handler seems to work even on Windows
+      when Choreonoid is compiled as a console-program,
+      and the following handler only works for a console-program, too.
+      Hence the folloing handler for Windows is currently disabled.
+    */
     // SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 #endif
 
-#ifdef Q_OS_LINUX
-    /**
-       The following code is neccessary to avoid a crash when a view which has a widget such as
-       QPlainTextEdit and has not been focused yet is first focused (clikced) during the camera
-       image simulation processed by GLVisionSimulatorItem. The crash only occurs in Linux with
-       the nVidia proprietary X driver. If the user clicks such a view to give the focus before
-       the simulation started, the crash doesn't occur, so here the focus is forced to be given
-       by the following code.
-    */
-    /**
-       This is now executed in GLVisionSimulatorItem::initializeSimulation
-       
-       if(QWidget* textEdit = messageView->findChild<QWidget*>("TextEdit")){
-       textEdit->setFocus();
-       textEdit->clearFocus();
-       }
-    */
-#endif
 }
 
 
@@ -417,7 +412,7 @@ int App::Impl::exec()
     PluginManager::finalize();
     delete ext;
     delete mainWindow;
-    mainWindow = 0;
+    mainWindow = nullptr;
     
     return result;
 }
@@ -447,12 +442,6 @@ void App::Impl::onMainWindowCloseEvent()
         }
     }
 }    
-
-
-SignalProxy<void()> cnoid::sigAboutToQuit()
-{
-    return sigAboutToQuit_;
-}
 
 
 void App::Impl::onSigOptionsParsed(boost::program_options::variables_map& v)
@@ -487,40 +476,14 @@ void App::Impl::showInformationDialog()
 }
 
 
-void App::Impl::onFocusChanged(QWidget* /* old */, QWidget* now)
+SignalProxy<void()> cnoid::sigAboutToQuit()
 {
-    while(now){
-        View* view = dynamic_cast<View*>(now);
-        if(view){
-            lastFocusView_ = view;
-            sigFocusViewChanged(lastFocusView_);
-            break;
-        }
-        now = now->parentWidget();
-    }
+    return sigAboutToQuit_;
 }
 
 
-View* View::lastFocusView()
+void cnoid::updateGui()
 {
-    return lastFocusView_;
-}
-
-
-SignalProxy<void(View*)> View::sigFocusChanged()
-{
-    return sigFocusViewChanged;
-}
-
-
-/**
-   This function is called by a View oject when the object to delete
-   is the current focus view.
-*/
-void App::clearFocusView()
-{
-    if(lastFocusView_){
-        lastFocusView_ = 0;
-        sigFocusViewChanged(nullptr);
-    }
+    QCoreApplication::processEvents(
+        QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers, 1.0);
 }

@@ -43,8 +43,9 @@ public:
     
     PositionWidget* self;
 
-    Position T_last;
-    std::function<bool(const Position& T)> positionCallback;
+    Isometry3 T_last;
+    std::function<bool(const Isometry3& T)> callbackOnPositionInput;
+    std::function<void()> callbackOnPositionInputFinished;
     //vector<QWidget*> inputPanelWidgets;
     vector<DoubleSpinBox*> inputSpins;
     vector<bool> inputSpinErrorStates;
@@ -81,13 +82,14 @@ public:
     void resetInputWidgetStyles();
     void clearPosition();
     void refreshPosition();
-    void setPosition(const Position& T);
+    void setPosition(const Isometry3& T);
     void updateRotationMatrix(const Matrix3& R);
     Vector3 getRpyInput();
     void onPositionInput(InputElementSet inputElements);
     void onPositionInputRpy(InputElementSet inputElements);
     void onPositionInputQuaternion(InputElementSet inputElements);
-    void notifyPositionInput(const Position& T, InputElementSet inputElements);
+    void notifyPositionInput(const Isometry3& T, InputElementSet inputElements);
+    void onPositionInputFinished();
     void storeState(Archive& archive);
     void restoreState(const Archive& archive);
 };
@@ -128,12 +130,16 @@ PositionWidget::Impl::Impl(PositionWidget* self)
         // Translation spin boxes
         auto spin = &xyzSpin[i];
         spin->setAlignment(Qt::AlignCenter);
+        spin->setUndoRedoKeyInputEnabled(true);
 
         InputElementSet s;
         s.set(TX + i);
         userInputConnections.add(
             spin->sigValueChanged().connect(
                 [this, s](double){ onPositionInput(s); }));
+        userInputConnections.add(
+            spin->sigEditingFinishedWithValueChange().connect(
+                [this](){ onPositionInputFinished(); }));
 
         auto label = new QLabel(xyzLabels[i]);
         grid->addWidget(label, row, i * 2, Qt::AlignCenter);
@@ -154,12 +160,16 @@ PositionWidget::Impl::Impl(PositionWidget* self)
         // Roll-pitch-yaw spin boxes
         auto spin = &rpySpin[i];
         spin->setAlignment(Qt::AlignCenter);
+        spin->setUndoRedoKeyInputEnabled(true);
 
         InputElementSet s;
         s.set(RX + 1);
         userInputConnections.add(
             spin->sigValueChanged().connect(
                 [this, s](double){ onPositionInputRpy(s); }));
+        userInputConnections.add(
+            spin->sigEditingFinishedWithValueChange().connect(
+                [this](){ onPositionInputFinished(); }));
 
         auto label = new QLabel(rpyLabelChar[i]);
         grid->addWidget(label, row, i * 2, Qt::AlignCenter);
@@ -183,12 +193,16 @@ PositionWidget::Impl::Impl(PositionWidget* self)
         spin->setDecimals(4);
         spin->setRange(-1.0000, 1.0000);
         spin->setSingleStep(0.0001);
+        spin->setUndoRedoKeyInputEnabled(true);
 
         InputElementSet s;
         s.set(QX + i);
         userInputConnections.add(
             spin->sigValueChanged().connect(
                 [this, s](double){ onPositionInputQuaternion(s); }));
+        userInputConnections.add(
+            spin->sigEditingFinishedWithValueChange().connect(
+                [this](){ onPositionInputFinished(); }));
         
         auto label = new QLabel(quatLabelChar[i]);
         grid->addWidget(label, 0, i * 2, Qt::AlignRight);
@@ -345,9 +359,18 @@ void PositionWidget::setUserInputValuePriorityMode(bool on)
 }
     
 
-void PositionWidget::setPositionCallback(std::function<bool(const Position& T)> callback)
+void PositionWidget::setCallbacks
+(std::function<bool(const Isometry3& T)> callbackOnPositionInput,
+ std::function<void()> callbackOnPositionInputFinished)
 {
-    impl->positionCallback = callback;
+    impl->callbackOnPositionInput = callbackOnPositionInput;
+    impl->callbackOnPositionInputFinished = callbackOnPositionInputFinished;
+}
+
+
+void PositionWidget::setPositionCallback(std::function<bool(const Isometry3& T)> callback)
+{
+    impl->callbackOnPositionInput = callback;
 }
 
 
@@ -430,13 +453,13 @@ void PositionWidget::setReferenceRpy(const Vector3& rpy)
 }
 
 
-void PositionWidget::setPosition(const Position& T)
+void PositionWidget::setPosition(const Isometry3& T)
 {
     impl->setPosition(T);
 }
 
 
-void PositionWidget::Impl::setPosition(const Position& T)
+void PositionWidget::Impl::setPosition(const Isometry3& T)
 {
     userInputConnections.block();
 
@@ -546,7 +569,7 @@ void PositionWidget::Impl::onPositionInput(InputElementSet inputElements)
 
 void PositionWidget::Impl::onPositionInputRpy(InputElementSet inputElements)
 {
-    Position T;
+    Isometry3 T;
     Vector3 rpy;
 
     for(int i=0; i < 3; ++i){
@@ -563,7 +586,7 @@ void PositionWidget::Impl::onPositionInputRpy(InputElementSet inputElements)
 
 void PositionWidget::Impl::onPositionInputQuaternion(InputElementSet inputElements)
 {
-    Position T;
+    Isometry3 T;
 
     for(int i=0; i < 3; ++i){
         T.translation()[i] = xyzSpin[i].value() / lengthRatio;
@@ -583,9 +606,9 @@ void PositionWidget::Impl::onPositionInputQuaternion(InputElementSet inputElemen
 }
 
 
-void PositionWidget::Impl::notifyPositionInput(const Position& T, InputElementSet inputElements)
+void PositionWidget::Impl::notifyPositionInput(const Isometry3& T, InputElementSet inputElements)
 {
-    bool accepted = positionCallback(T);
+    bool accepted = callbackOnPositionInput(T);
 
     if(!accepted){
         for(size_t i=0; i < inputSpins.size(); ++i){
@@ -601,6 +624,14 @@ void PositionWidget::Impl::notifyPositionInput(const Position& T, InputElementSe
                 }
             }
         }
+    }
+}
+
+
+void PositionWidget::Impl::onPositionInputFinished()
+{
+    if(callbackOnPositionInputFinished){
+        callbackOnPositionInputFinished();
     }
 }
 

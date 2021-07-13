@@ -6,58 +6,26 @@
 #ifndef CNOID_UTIL_SCENE_GRAPH_H
 #define CNOID_UTIL_SCENE_GRAPH_H
 
-#include <cnoid/CloneableReferenced>
+#include <cnoid/ClonableReferenced>
+#include <cnoid/SceneUpdate>
 #include <cnoid/BoundingBox>
 #include <cnoid/Signal>
 #include <string>
 #include <vector>
 #include <set>
+#include <memory>
 #include "exportdecl.h"
 
 namespace cnoid {
 
 class CloneMap;
-class SgObject;
 class SgNode;
 class SgGroup;
+class SgTransform;
 typedef std::vector<SgNode*> SgNodePath;
 
-class CNOID_EXPORT SgUpdate
-{
-public:
-    enum Action {
-        NONE = 0,
-        ADDED = 1 << 0,
-        REMOVED = 1 << 1,
-        BBOX_UPDATED = 1 << 2,
-        MODIFIED = 1 << 3
-    };
 
-    typedef std::vector<SgObject*> Path;
-        
-    SgUpdate() : action_(MODIFIED) { path_.reserve(16); }
-    SgUpdate(int action) : action_(action) { path_.reserve(16); }
-    SgUpdate(const SgUpdate& org) : path_(org.path_), action_(org.action_) { }
-    virtual ~SgUpdate();
-    int action() const { return action_; }
-    bool isModified() const { return (action_ & MODIFIED); }
-    void setAction(int act) { action_ |= act; }
-    void resetAction(int act = NONE) { action_ = act; }
-    const Path& path() const { return path_; }
-    void pushNode(SgObject* node) { path_.push_back(node); }
-    void popNode() { path_.pop_back(); }
-    void clearPath() { path_.clear(); }
-
-    [[deprecated("Use clearPath()")]]
-    void clear() { path_.clear(); }
-
-private:
-    Path path_;
-    int action_;
-};
-
-
-class CNOID_EXPORT SgObject : public CloneableReferenced
+class CNOID_EXPORT SgObject : public ClonableReferenced
 {
 public:
     typedef std::set<SgObject*> ParentContainer;
@@ -74,6 +42,30 @@ public:
 
     static bool checkNonNodeCloning(const CloneMap& cloneMap);
     static void setNonNodeCloning(CloneMap& cloneMap, bool on);
+
+    enum Attribute {
+        Node = 1 << 0,
+        GroupNode = 1 << 1,
+        TransformNode = 1 << 2,
+        Composite = 1 << 3, // the object has some SgObject members other than group node children
+        Geometry = 1 << 4,
+        Appearance = 1 << 5,
+        NodeDecoration = 1 << 6,
+        Marker = 1 << 7,
+        Operable = 1 << 8,
+        MaxAttributeBit = 9,
+
+        // deprecated
+        GroupAttribute = GroupNode,
+        NodeDecorationGroup = NodeDecoration,
+        MarkerAttribute = Marker
+    };
+
+    void setAttribute(int attr){ attributes_ |= attr; }
+    void setAttributes(int attrs){ attributes_ |= attrs; }
+    int attributes() const { return attributes_; }
+    bool hasAttribute(int attr) const { return attributes_ & attr; }
+    bool hasAttributes(int attrs) const { return (attributes_ & attrs) == attrs; }
     
     const std::string& name() const { return name_; }
     void setName(const std::string& name) { name_ = name; }
@@ -87,17 +79,16 @@ public:
         
     void notifyUpdate(SgUpdate& update) {
         update.clearPath();
-        onUpdated(update);
+        notifyUpperNodesOfUpdate(update);
     }
 
-    void notifyUpdate(int action = SgUpdate::MODIFIED) {
+    void notifyUpdate(int action = SgUpdate::Modified) {
         SgUpdate update(action);
-        onUpdated(update);
+        update.reservePathCapacity(16);
+        notifyUpperNodesOfUpdate(update);
     }
 
-    void addParent(SgObject* parent, bool doNotify = false);
-    void addParent(SgObject* parent, SgUpdate& update);
-    void addParent(SgObject* parent, SgUpdate* update);
+    void addParent(SgObject* parent, SgUpdateRef update = nullptr);
     void removeParent(SgObject* parent);
     int numParents() const { return static_cast<int>(parents.size()); }
     bool hasParents() const { return !parents.empty(); }
@@ -113,21 +104,51 @@ public:
         return sigGraphConnection_;
     }
 
-    const std::string& uri() const { return uri_; }
-    void setUri(const std::string& uri) { uri_ = uri; }
+    bool hasValidBoundingBoxCache() const { return hasValidBoundingBoxCache_; }
+    void invalidateBoundingBox() { hasValidBoundingBoxCache_ = false; }
+    void setBoundingBoxCacheReady() const { hasValidBoundingBoxCache_ = true; }
+
+    bool hasUri() const { return uriInfo && !uriInfo->uri.empty(); }
+    const std::string& uri() const;
+    bool hasAbsoluteUri() const { return uriInfo && !uriInfo->absoluteUri.empty(); }
+    const std::string& absoluteUri() const;
+    bool hasUriFragment() const { return uriInfo && !uriInfo->fragment.empty(); }
+    const std::string& uriFragment() const;
+    void setUriByFilePathAndBaseDirectory(const std::string& filePath, const std::string& baseDirectory);
+    void setUriByFilePathAndCurrentDirectory(const std::string& filePath);
+    void setUri(const std::string& uri, const std::string& absoluteUri);
+    void setUriFragment(const std::string& fragment);
+    void clearUri() { uriInfo.reset(); }
+
+    bool isNode() const { return hasAttribute(Node); }
+    SgNode* toNode();
+    bool isGroupNode() const { return hasAttribute(GroupNode); }
+    SgGroup* toGroupNode();
+    bool isTransformNode() const { return hasAttribute(TransformNode); }
+    SgTransform* toTransformNode();
 
 protected:
     SgObject();
     SgObject(const SgObject& org);
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
-    virtual void onUpdated(SgUpdate& update);
+    void notifyUpperNodesOfUpdate(SgUpdate& update);
+    void notifyUpperNodesOfUpdate(SgUpdate& update, bool doInvalidateBoundingBox);
             
 private:
-    std::string name_;
+    unsigned short attributes_;
+    mutable bool hasValidBoundingBoxCache_;
     ParentContainer parents;
     Signal<void(const SgUpdate& update)> sigUpdated_;
     Signal<void(bool on)> sigGraphConnection_;
-    std::string uri_;
+    std::string name_;
+
+    struct UriInfo {
+        std::string uri;
+        std::string absoluteUri;
+        std::string fragment;
+    };
+    
+    mutable std::unique_ptr<UriInfo> uriInfo;
 };
 
 typedef ref_ptr<SgObject> SgObjectPtr;
@@ -154,6 +175,7 @@ public:
     }
 
     virtual const BoundingBox& boundingBox() const;
+    virtual const BoundingBox& untransformedBoundingBox() const;
 
     SgNodePath findNode(const std::string& name, Affine3& out_T);
 
@@ -170,19 +192,6 @@ public:
         return findClassId(typeid(NodeType));
     }
 
-    enum NodeAttribute {
-        GroupAttribute = 1,
-        NodeDecorationGroup = 2,
-        NumAttributes = 2
-    };
-
-    void setAttribute(int attr){ attributes_ |= attr; }
-    int attributes() const { return attributes_; }
-    bool hasAttribute(int attr) const { return attributes_ & attr; }
-    
-    bool isGroup() const { return hasAttribute(GroupAttribute); }
-    SgGroup* toGroup();
-
     void addDecorationReference() { ++decorationRefCounter; }
     void releaseDecorationReference() { --decorationRefCounter; }
     bool isDecoratedSomewhere() const { return decorationRefCounter > 0; }
@@ -193,7 +202,6 @@ protected:
 
 private:
     int classId_;
-    unsigned char attributes_;
     int decorationRefCounter;
 
     //! \deprecated
@@ -201,6 +209,12 @@ private:
 };
 
 typedef ref_ptr<SgNode> SgNodePtr;
+
+
+inline SgNode* SgObject::toNode()
+{
+    return isNode() ? static_cast<SgNode*>(this) : nullptr;
+}
 
 
 class CNOID_EXPORT SgGroup : public SgNode
@@ -219,10 +233,7 @@ public:
         
     virtual int numChildObjects() const override;
     virtual SgObject* childObject(int index) override;
-    virtual void onUpdated(SgUpdate& update) override;
     virtual const BoundingBox& boundingBox() const override;
-    
-    void invalidateBoundingBox() { isBboxCacheValid = false; }
 
     iterator begin() { return children.begin(); }
     iterator end() { return children.end(); }
@@ -238,12 +249,12 @@ public:
 
     iterator erase(iterator pos) { return children.erase(pos); }
 
-    bool contains(SgNode* node) const;
-
     bool empty() const { return children.empty(); }
     int numChildren() const { return static_cast<int>(children.size()); }
     SgNode* child(int index) { return children[index]; }
     const SgNode* child(int index) const { return children[index]; }
+    bool contains(SgNode* node) const;
+    int findChildIndex(SgNode* child) const;
 
     //! This throws an exeption when the index is invalid or the type is not matched.
     template<class NodeType> NodeType* getChild(int index) {
@@ -252,31 +263,26 @@ public:
         return node;
     }
 
-    void clearChildren(bool doNotify = false);
-    void clearChildren(SgUpdate& update);
-    void addChild(SgNode* node, bool doNotify = false);
-    void addChild(SgNode* node, SgUpdate& update);
-    bool addChildOnce(SgNode* node, bool doNotify = false);
-    bool addChildOnce(SgNode* node, SgUpdate& update);
-    void insertChild(int index, SgNode* node, bool doNotify = false);
-    void insertChild(int index, SgNode* node, SgUpdate& update);
-    void setSingleChild(SgNode* node, bool doNotify = false);
-    void setSingleChild(SgNode* node, SgUpdate& update);
-    bool removeChild(SgNode* node, bool doNotify = false);
-    bool removeChild(SgNode* node, SgUpdate& update);
-    void removeChildAt(int index, bool doNotify = false);
-    void removeChildAt(int index, SgUpdate& update);
-    void copyChildrenTo(SgGroup* group, bool doNotify = false);
-    void copyChildrenTo(SgGroup* group, SgUpdate& update);
-    void moveChildrenTo(SgGroup* group, bool doNotify = false);
-    void moveChildrenTo(SgGroup* group, SgUpdate& update);
+    void addChild(SgNode* node, SgUpdateRef update = nullptr);
+    bool addChildOnce(SgNode* node, SgUpdateRef update = nullptr);
+    void insertChild(int index, SgNode* node, SgUpdateRef update = nullptr);
+    void insertChild(SgNode* nextNode, SgNode* node, SgUpdateRef update = nullptr);
+    void setSingleChild(SgNode* node, SgUpdateRef update = nullptr);
+    iterator removeChild(iterator childIter, SgUpdateRef update = nullptr);
+    bool removeChild(SgNode* node, SgUpdateRef update = nullptr);
+    void removeChildAt(int index, SgUpdateRef update = nullptr);
+    void clearChildren(SgUpdateRef update = nullptr);
+    void copyChildrenTo(SgGroup* group, SgUpdateRef update = nullptr);
+    void moveChildrenTo(SgGroup* group, SgUpdateRef update = nullptr);
 
-    [[deprecated("Use insertChild(int index, SgNode* node, bool doNotify = false)")]]
-    void insertChild(SgNode* node, int index = 0, bool doNotify = false);
+    [[deprecated("Use insertChild(int index, SgNode* node, SgUpdateRef update)")]]
+    void insertChild(SgNode* node, int index, SgUpdateRef update = nullptr){
+        insertChild(index, node, update);
+    }
     
     SgGroup* nextChainedGroup();
-    void insertChainedGroup(SgGroup* group);
-    void removeChainedGroup(SgGroup* group);
+    void insertChainedGroup(SgGroup* group, SgUpdateRef update = nullptr);
+    void removeChainedGroup(SgGroup* group, SgUpdateRef update = nullptr);
 
     template<class NodeType> NodeType* findNodeOfType(int depth = -1) {
         for(int i=0; i < numChildren(); ++i){
@@ -285,7 +291,7 @@ public:
         if(depth < 0 || --depth > 0){
             for(int i=0; i < numChildren(); ++i){
                 auto child_ = child(i);
-                if(child_->isGroup()){
+                if(child_->isGroupNode()){
                     if(NodeType* node = static_cast<SgGroup*>(child_)->findNodeOfType<NodeType>(depth)){
                         return node;
                     }
@@ -299,26 +305,18 @@ protected:
     SgGroup(int classId);
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
     mutable BoundingBox bboxCache;
-    mutable bool isBboxCacheValid;
 
 private:
     Container children;
     static void throwTypeMismatchError();
-    void addChild(SgNode* node, SgUpdate* update);
-    void insertChild(int index, SgNode* node, SgUpdate* update);
-    void setSingleChild(SgNode* node, SgUpdate* update);
-    iterator removeChild(iterator childIter, SgUpdate* update);
-    bool removeChild(SgNode* node, SgUpdate* update);
-    void clearChildren(SgUpdate* update);
-    void moveChildrenTo(SgGroup* group, SgUpdate* update);
 };
 
 typedef ref_ptr<SgGroup> SgGroupPtr;
 
 
-inline SgGroup* SgNode::toGroup()
+inline SgGroup* SgObject::toGroupNode()
 {
-    return isGroup() ? static_cast<SgGroup*>(this) : nullptr;
+    return isGroupNode() ? static_cast<SgGroup*>(this) : nullptr;
 }
 
 
@@ -338,9 +336,8 @@ typedef ref_ptr<SgInvariantGroup> SgInvariantGroupPtr;
 class CNOID_EXPORT SgTransform : public SgGroup
 {
 public:
-    const BoundingBox& untransformedBoundingBox() const;
-
     virtual void getTransform(Affine3& out_T) const = 0;
+    virtual const BoundingBox& untransformedBoundingBox() const override;
     
 protected:
     SgTransform(int classId);
@@ -351,53 +348,65 @@ protected:
 typedef ref_ptr<SgTransform> SgTransformPtr;
 
 
+inline SgTransform* SgObject::toTransformNode()
+{
+    return isTransformNode() ? static_cast<SgTransform*>(this) : nullptr;
+}
+
+
 class CNOID_EXPORT SgPosTransform : public SgTransform
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     SgPosTransform();
+    SgPosTransform(const Isometry3& T);
+    [[deprecated("Use SgPosTransform(const Isometry3& T)")]]
     SgPosTransform(const Affine3& T);
     SgPosTransform(const SgPosTransform& org, CloneMap* cloneMap = nullptr);
 
     virtual const BoundingBox& boundingBox() const override;
     virtual void getTransform(Affine3& out_T) const override;
 
-    Affine3& T() { return T_; }
-    const Affine3& T() const { return T_; }
+    Isometry3& T() { return T_; }
+    const Isometry3& T() const { return T_; }
 
-    Affine3& position() { return T_; }
-    const Affine3& position() const { return T_; }
+    Isometry3& position() { return T_; }
+    const Isometry3& position() const { return T_; }
 
-    Affine3::TranslationPart translation() { return T_.translation(); }
-    Affine3::ConstTranslationPart translation() const { return T_.translation(); }
+    Isometry3::TranslationPart translation() { return T_.translation(); }
+    Isometry3::ConstTranslationPart translation() const { return T_.translation(); }
 
-    Affine3::LinearPart rotation() { return T_.linear(); }
-    Affine3::ConstLinearPart rotation() const { return T_.linear(); }
+    Isometry3::LinearPart rotation() { return T_.linear(); }
+    Isometry3::ConstLinearPart rotation() const { return T_.linear(); }
 
     template<class Scalar, int Mode, int Options>
-        void setPosition(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
-        T_ = T.template cast<Affine3::Scalar>();
+    void setPosition(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
+        T_ = T.template cast<Isometry3::Scalar>();
+    }
+    template<class Derived>
+    void setPosition(const Eigen::MatrixBase<Derived>& T){
+        T_ = T.template cast<Isometry3::Scalar>();
     }
     template<class Scalar, int Mode, int Options>
-        void setTransform(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
-        T_ = T.template cast<Affine3::Scalar>();
+    void setTransform(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
+        T_ = T.template cast<Isometry3::Scalar>();
     }
     template<typename Derived>
-        void setRotation(const Eigen::MatrixBase<Derived>& R) {
-        T_.linear() = R.template cast<Affine3::Scalar>();
+    void setRotation(const Eigen::MatrixBase<Derived>& R) {
+        T_.linear() = R.template cast<Isometry3::Scalar>();
     }
     template<typename T>
-        void setRotation(const Eigen::AngleAxis<T>& a) {
-        T_.linear() = a.template cast<Affine3::Scalar>().toRotationMatrix();
+    void setRotation(const Eigen::AngleAxis<T>& aa) {
+        T_.linear() = aa.template cast<Isometry3::Scalar>().toRotationMatrix();
     }
     template<typename T>
-        void setRotation(const Eigen::Quaternion<T>& q) {
-        T_.linear() = q.template cast<Affine3::Scalar>().toRotationMatrix();
+    void setRotation(const Eigen::Quaternion<T>& q) {
+        T_.linear() = q.template cast<Isometry3::Scalar>().toRotationMatrix();
     }
     template<typename Derived>
-        void setTranslation(const Eigen::MatrixBase<Derived>& p) {
-        T_.translation() = p.template cast<Affine3::Scalar>();
+    void setTranslation(const Eigen::MatrixBase<Derived>& p) {
+        T_.translation() = p.template cast<Isometry3::Scalar>();
     }
 
 protected:
@@ -405,7 +414,7 @@ protected:
     virtual Referenced* doClone(CloneMap* cloneMap) const override;
 
 private:
-    Affine3 T_;
+    Isometry3 T_;
 };
 
 typedef ref_ptr<SgPosTransform> SgPosTransformPtr;
@@ -423,7 +432,8 @@ public:
 
     const Vector3& scale() const { return scale_; }
     Vector3& scale() { return scale_; }
-    template<typename Derived> void setScale(const Eigen::MatrixBase<Derived>& s) {
+    template<typename Derived>
+    void setScale(const Eigen::MatrixBase<Derived>& s) {
         scale_ = s.template cast<Vector3::Scalar>();
     }
     void setScale(double s){
@@ -462,7 +472,7 @@ public:
     const Affine3& transform() const { return T_; }
 
     template<class Scalar, int Mode, int Options>
-        void setTransform(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
+    void setTransform(const Eigen::Transform<Scalar, 3, Mode, Options>& T) {
         T_ = T.template cast<Affine3::Scalar>();
     }
 
@@ -477,8 +487,8 @@ public:
         T_.linear() = M.template cast<Affine3::Scalar>();
     }
     template<typename T>
-        void setLinear(const Eigen::AngleAxis<T>& a) {
-        T_.linear() = a.template cast<Affine3::Scalar>().toRotationMatrix();
+        void setLinear(const Eigen::AngleAxis<T>& aa) {
+        T_.linear() = aa.template cast<Affine3::Scalar>().toRotationMatrix();
     }
     template<typename Derived>
         void setTranslation(const Eigen::MatrixBase<Derived>& p) {
@@ -523,7 +533,7 @@ public:
     SgSwitch(bool on = true);
     SgSwitch(const SgSwitch& org);
     
-    void setTurnedOn(bool on, bool doNotify = false);
+    void setTurnedOn(bool on, SgUpdateRef update = nullptr);
     bool isTurnedOn() const { return isTurnedOn_; }
 
 protected:
@@ -546,15 +556,15 @@ public:
 
     void setSwitch(SgSwitch* newSwitchObject);
 
-    void setTurnedOn(bool on, bool doNotify = false);
+    void setTurnedOn(bool on, SgUpdateRef update = nullptr);
 
     bool isTurnedOn() const {
         return switchObject ? switchObject->isTurnedOn() : isTurnedOn_;
     }
 
-    //! \deprecated
+    [[deprecated("Use the setTurnedOn function.")]]
     void turnOn(bool doNotify = false) { setTurnedOn(true, doNotify); }
-    //! \deprecated
+    [[deprecated("Use the setTurnedOn function.")]]
     void turnOff(bool doNotify = false) { setTurnedOn(false, doNotify); }
 
 protected:
@@ -588,6 +598,8 @@ protected:
     SgPreprocessed(int classId);
     SgPreprocessed(const SgPreprocessed& org);
 };
+
+typedef ref_ptr<SgPreprocessed> SgPreprocessedPtr;
 
 
 class SgMaterial;

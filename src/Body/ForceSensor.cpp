@@ -4,6 +4,8 @@
 */
 
 #include "ForceSensor.h"
+#include "StdBodyFileUtil.h"
+#include <cnoid/EigenArchive>
 
 using namespace cnoid;
 
@@ -16,7 +18,7 @@ ForceSensor::ForceSensor()
 }
 
 
-const char* ForceSensor::typeName()
+const char* ForceSensor::typeName() const
 {
     return "ForceSensor";
 }
@@ -96,4 +98,48 @@ double* ForceSensor::writeState(double* out_buf) const
 {
     Eigen::Map<Vector6>(out_buf) << F_;
     return out_buf + 6;
+}
+
+
+bool ForceSensor::readSpecifications(const Mapping* info)
+{
+    Vector3 v;
+    if(read(info, { "max_force", "maxForce" }, v)){
+        F_max().head<3>() = v;
+    }
+    if(cnoid::read(info, { "max_torque", "maxTorque" }, v)){
+        F_max().tail<3>() = v;
+    }
+    return true;
+}
+
+
+bool ForceSensor::writeSpecifications(Mapping* info) const
+{
+    if(!F_max().head<3>().isConstant(std::numeric_limits<double>::max())){
+        write(info, "max_force", F_max().head<3>());
+    }
+    if(!F_max().tail<3>().isConstant(std::numeric_limits<double>::max())){
+        write(info, "max_torque", F_max().tail<3>());
+    }
+    return true;
+}
+
+
+namespace {
+
+StdBodyFileDeviceTypeRegistration<ForceSensor>
+registerHolderDevice(
+    "ForceSensor",
+     [](StdBodyLoader* loader, const Mapping* info){
+         ForceSensorPtr sensor = new ForceSensor;
+         if(sensor->readSpecifications(info)){
+            return loader->readDevice(sensor, info);
+        }
+        return false;
+    },
+    [](StdBodyWriter* /* writer */, Mapping* info, const ForceSensor* sensor)
+    {
+        return sensor->writeSpecifications(info);
+    });
 }

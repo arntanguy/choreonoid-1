@@ -25,6 +25,8 @@ using fmt::format;
 
 namespace {
 
+map<string, vector<ItemTreeWidget::Impl*>> selectionSyncGroupMap;
+
 class ItwItem : public QTreeWidgetItem
 {
 public:
@@ -54,10 +56,9 @@ public:
     ConnectionSet subTreeAddedOrMovedConnections;
     ItemPtr localRootItem;
     ScopedConnection localRootItemConnection;
+    bool isRootItemVisible;
     bool isProcessingSlotOnlocalRootItemPositionChanged;
     std::function<Item*(bool doCreate)> localRootItemUpdateFunction;
-    ScopedConnectionSet treeWidgetSelectionChangeConnections;
-    vector<ItemPtr> topLevelItems;
     unordered_map<Item*, ItwItem*> itemToItwItemMap;
     ItemPtr lastClickedItem;
     map<int, int> checkIdToColumnMap;
@@ -70,7 +71,12 @@ public:
     
     bool isCheckColumnShown;
 
-    Signal<void(const ItemList<>&)> sigSelectionChanged;    
+    ScopedConnectionSet treeWidgetSelectionChangeConnections;
+    string selectionSyncGroupId;
+    vector<ItemTreeWidget::Impl*>* pSelectionSyncGroup;
+    Signal<void(const ItemList<>&)> sigSelectionChanged;
+    bool isControlModifierEnabledInMousePressEvent;
+    bool upOrDownKeyPressed;
 
     PolymorphicItemFunctionSet  visibilityFunctions;
     bool visibilityFunction_isTopLevelItemCandidate;
@@ -102,6 +108,7 @@ public:
     void initialize();
     Item* findOrCreateLocalRootItem(bool doCreate);
     void setLocalRootItem(Item* item);
+    void releaseFromSelectionSyncGroup();
     void setCheckColumnShown(int column, bool on);
     bool checkPositionAcceptance(Item* item, Item* parentItem) const;
     void clearTreeWidgetItems();
@@ -111,9 +118,6 @@ public:
     void addCheckColumn(int checkId);
     void updateCheckColumnIter(QTreeWidgetItem* twItem, int checkId, int column);
     void releaseCheckColumn(int checkId);
-    void registerTopLevelItem(Item* item);
-    bool registerTopLevelItemIter(Item* item, Item* newTopLevelItem, vector<ItemPtr>::iterator& pos);
-    void unregisterTopLevelItem(Item* item);
     void updateItemDisplay(ItwItem* itwItem);
     void insertItem(QTreeWidgetItem* parentTwItem, Item* item, bool isTopLevelItemCandidate);
     ItwItem* findNextItwItem(Item* item, bool isTopLevelItem);
@@ -126,6 +130,7 @@ public:
     void getItemsIter(ItwItem* itwItem, ItemList<>& itemList);
     ItemList<> getSelectedItems() const;
     void selectAllItems();
+    bool unselectItemsInOtherWidgetsInSelectionSyncGroup();
     void clearSelection();
     void setSelectedItemsChecked(bool on);
     void toggleSelectedItemChecks();
@@ -225,6 +230,8 @@ void ItemTreeWidget::Display::setNameEditable(bool on)
 }
 
 
+namespace {
+
 ItwItem::ItwItem(Item* item, ItemTreeWidget::Impl* widgetImpl)
     : item(item),
       widgetImpl(widgetImpl)
@@ -315,6 +322,8 @@ void ItwItem::setData(int column, int role, const QVariant& value)
     }
 }
 
+}
+
 
 ItemTreeWidget::ItemTreeWidget(QWidget* parent)
     : QWidget(parent)
@@ -346,13 +355,18 @@ ItemTreeWidget::~ItemTreeWidget()
 ItemTreeWidget::Impl::~Impl()
 {
     clear();
+    releaseFromSelectionSyncGroup();
 }
 
 
 void ItemTreeWidget::Impl::initialize()
 {
+    isRootItemVisible = false;
+    isProcessingSlotOnlocalRootItemPositionChanged = false;
     isChangingTreeWidgetTreeStructure = 0;
     isCheckColumnShown = true;
+    isControlModifierEnabledInMousePressEvent = false;
+    upOrDownKeyPressed = false;
     isDropping = false;
     
     setColumnCount(1);
@@ -373,15 +387,6 @@ void ItemTreeWidget::Impl::initialize()
     setDragDropMode(QAbstractItemView::InternalMove);
     setExpandsOnDoubleClick(false);
 
-    treeWidgetSelectionChangeConnections.add(
-        sigItemSelectionChanged().connect(
-            [&](){ onTreeWidgetSelectionChanged(); }));
-
-    treeWidgetSelectionChangeConnections.add(
-        sigCurrentItemChanged().connect(
-            [&](QTreeWidgetItem* current, QTreeWidgetItem* previous){
-                onTreeWidgetCurrentItemChanged(current, previous); }));
-    
     projectRootItemConnections.add(
         projectRootItem->sigCheckEntryAdded().connect(
             [&](int checkId){ addCheckColumn(checkId); }));
@@ -416,6 +421,17 @@ void ItemTreeWidget::Impl::initialize()
         [&](const QModelIndex& parent, int start, int end){
             onTreeWidgetRowsInserted(parent, start, end);  });
 
+    treeWidgetSelectionChangeConnections.add(
+        sigItemSelectionChanged().connect(
+            [&](){ onTreeWidgetSelectionChanged(); }));
+
+    treeWidgetSelectionChangeConnections.add(
+        sigCurrentItemChanged().connect(
+            [&](QTreeWidgetItem* current, QTreeWidgetItem* previous){
+                onTreeWidgetCurrentItemChanged(current, previous); }));
+
+    pSelectionSyncGroup = nullptr;
+    
     projectManagerConnections.add(
         projectManager->sigProjectAboutToBeLoaded().connect(
             [&](int recursiveLevel){ onProjectAboutToBeLoaded(recursiveLevel); }));
@@ -424,8 +440,6 @@ void ItemTreeWidget::Impl::initialize()
         projectManager->sigProjectLoaded().connect(
             [&](int recursiveLevel){ onProjectLoaded(recursiveLevel); }));
 
-    isProcessingSlotOnlocalRootItemPositionChanged = false;
-    
     fontPointSizeDiff = 0;
 }
 
@@ -478,7 +492,7 @@ void ItemTreeWidget::Impl::setLocalRootItem(Item* item)
             // the local root item may also be changed.
             // Check it in the following callback function.
             localRootItemConnection =
-                item->sigPositionChanged2().connect(
+                item->sigTreePositionChanged2().connect(
                     [&,item](Item* topItem, Item* prevTopParentItem){
                         if(!isProcessingSlotOnlocalRootItemPositionChanged){
                             isProcessingSlotOnlocalRootItemPositionChanged = true;
@@ -506,6 +520,42 @@ void ItemTreeWidget::setRootItemUpdateFunction(std::function<Item*(bool doCreate
 {
     impl->localRootItemUpdateFunction = callback;
     impl->localRootItem = nullptr;
+}
+
+
+void ItemTreeWidget::setRootItemVisible(bool on)
+{
+    impl->isRootItemVisible = on;
+}
+
+
+bool ItemTreeWidget::isRootItemVisible() const
+{
+    return impl->isRootItemVisible;
+}
+
+
+void ItemTreeWidget::setSelectionSyncGroup(const std::string& id)
+{
+    impl->releaseFromSelectionSyncGroup();
+    impl->selectionSyncGroupId = id;
+    impl->pSelectionSyncGroup = &selectionSyncGroupMap[id];
+    impl->pSelectionSyncGroup->push_back(impl);
+}
+
+
+void ItemTreeWidget::Impl::releaseFromSelectionSyncGroup()
+{
+    if(pSelectionSyncGroup){
+        auto iter = std::find(pSelectionSyncGroup->begin(), pSelectionSyncGroup->end(), this);
+        if(iter != pSelectionSyncGroup->end()){
+            pSelectionSyncGroup->erase(iter);
+        }
+        if(pSelectionSyncGroup->empty()){
+            selectionSyncGroupMap.erase(selectionSyncGroupId);
+        }
+        pSelectionSyncGroup = nullptr;
+    }
 }
 
 
@@ -614,7 +664,6 @@ void ItemTreeWidget::updateTreeWidgetItems()
 void ItemTreeWidget::Impl::clearTreeWidgetItems()
 {
     clear();
-    topLevelItems.clear();
 }
 
 
@@ -624,8 +673,12 @@ void ItemTreeWidget::Impl::updateTreeWidgetItems()
 
     if(localRootItem){
         isChangingTreeWidgetTreeStructure++;
-        for(auto item = localRootItem->childItem(); item; item = item->nextItem()){
-            insertItem(invisibleRootItem(), item, true);
+        if(isRootItemVisible && localRootItem != projectRootItem){
+            insertItem(invisibleRootItem(), localRootItem, true);
+        } else {
+            for(auto item = localRootItem->childItem(); item; item = item->nextItem()){
+                insertItem(invisibleRootItem(), item, true);
+            }
         }
         isChangingTreeWidgetTreeStructure--;
     }
@@ -725,41 +778,6 @@ void ItemTreeWidget::Impl::releaseCheckColumn(int checkId)
 }
 
 
-void ItemTreeWidget::Impl::registerTopLevelItem(Item* item)
-{
-    auto pos = topLevelItems.begin();
-    registerTopLevelItemIter(localRootItem, item, pos);
-}
-
-
-bool ItemTreeWidget::Impl::registerTopLevelItemIter(Item* item, Item* newTopLevelItem, vector<ItemPtr>::iterator& pos)
-{
-    if(item == newTopLevelItem){
-        if(pos == topLevelItems.end() || newTopLevelItem != *pos){
-            topLevelItems.insert(pos, newTopLevelItem);
-        }
-        return true;
-    }
-    if(pos != topLevelItems.end() && item == *pos){
-        ++pos;
-    }
-    for(auto child = item->childItem(); child; child = child->nextItem()){
-        if(registerTopLevelItemIter(child, newTopLevelItem, pos)){
-            return true;
-        }
-    }
-    return false;
-}
-
-
-void ItemTreeWidget::Impl::unregisterTopLevelItem(Item* item)
-{
-    topLevelItems.erase(
-        std::remove(topLevelItems.begin(), topLevelItems.end(), item),
-        topLevelItems.end());
-}
- 
-
 void ItemTreeWidget::Impl::updateItemDisplay(ItwItem* itwItem)
 {
     itemDisplay.item = itwItem;
@@ -773,7 +791,7 @@ void ItemTreeWidget::Impl::insertItem(QTreeWidgetItem* parentTwItem, Item* item,
         return;
     }
 
-    bool isVisible = item->isOwnedBy(localRootItem);
+    bool isVisible = item->isOwnedBy(localRootItem) || (isRootItemVisible && item == localRootItem);
     if(isVisible){
         visibilityFunction_isTopLevelItemCandidate = isTopLevelItemCandidate;
         visibilityFunction_result = true;
@@ -782,12 +800,12 @@ void ItemTreeWidget::Impl::insertItem(QTreeWidgetItem* parentTwItem, Item* item,
     }
     
     if(!isVisible){
-        parentTwItem = nullptr;
+        if(!isTopLevelItemCandidate){
+            parentTwItem = nullptr;
+        }
     } else {
         auto itwItem = findOrCreateItwItem(item);
-        if(isTopLevelItemCandidate){
-            registerTopLevelItem(item);
-        }
+        bool isNewChildItem = parentTwItem->childCount() == 0;
         auto nextItwItem = findNextItwItem(item, isTopLevelItemCandidate);
         if(nextItwItem){
             int index = parentTwItem->indexOfChild(nextItwItem);
@@ -797,7 +815,7 @@ void ItemTreeWidget::Impl::insertItem(QTreeWidgetItem* parentTwItem, Item* item,
         }
         if(projectLoadingWithItemExpansionInfoStack.empty() ||
            !projectLoadingWithItemExpansionInfoStack.top()){
-            if(!parentTwItem->isExpanded() && !item->hasAttribute(Item::Attached)){
+            if(!parentTwItem->isExpanded() && isNewChildItem && !item->hasAttribute(Item::Attached)){
                 parentTwItem->setExpanded(true);
             }
         }
@@ -817,13 +835,14 @@ ItwItem* ItemTreeWidget::Impl::findNextItwItem(Item* item, bool isTopLevelItem)
 {
     auto nextItwItem = findNextItwItemInSubTree(item, isTopLevelItem);
 
-    if(!nextItwItem){
-        if(isTopLevelItem){
-            auto it = ++std::find(topLevelItems.begin(), topLevelItems.end(), item);
-            if(it != topLevelItems.end()){
-                auto nextTopLevelItem = *it;
-                nextItwItem = findItwItem(nextTopLevelItem);
+    if(!nextItwItem && isTopLevelItem){
+        auto upperItem = item->parentItem();
+        while(upperItem){
+            nextItwItem = findNextItwItemInSubTree(upperItem, true);
+            if(nextItwItem){
+                break;
             }
+            upperItem = upperItem->parentItem();
         }
     }
     
@@ -836,12 +855,14 @@ ItwItem* ItemTreeWidget::Impl::findNextItwItemInSubTree(Item* item, bool doTrave
     ItwItem* found = nullptr;
 
     for(auto nextItem = item->nextItem(); nextItem; nextItem = nextItem->nextItem()){
-        if(found = findItwItem(nextItem)){
+        found = findItwItem(nextItem);
+        if(found){
             break;
         }
         if(doTraverse){
             if(auto childItem = nextItem->childItem()){
-                if(found = findNextItwItemInSubTree(childItem, true)){
+                found = findNextItwItemInSubTree(childItem, true);
+                if(found){
                     break;
                 }
             }
@@ -905,7 +926,6 @@ void ItemTreeWidget::Impl::onSubTreeRemoved(Item* item)
             parentTwItem->removeChild(itwItem);
         } else {
             takeTopLevelItem(indexOfTopLevelItem(itwItem));
-            unregisterTopLevelItem(item);
         }
         delete itwItem;
     } else {
@@ -975,23 +995,14 @@ ItemList<> ItemTreeWidget::Impl::getSelectedItems() const
 }
 
 
-void ItemTreeWidget::selectAllItems()
-{
-    impl->selectAllItems();
-}
-
-
-void ItemTreeWidget::Impl::selectAllItems()
-{
-    for(auto& kv : itemToItwItemMap){
-        auto& item = kv.first;
-        item->setSelected(true);
-    }
-}
-
-
 bool ItemTreeWidget::selectOnly(Item* item)
 {
+    bool selectionChanged = false;
+    
+    impl->projectRootItem->beginItemSelectionChanges();
+    
+    selectionChanged = impl->unselectItemsInOtherWidgetsInSelectionSyncGroup();
+
     bool isSelected = false;
     for(auto& selected : impl->getSelectedItems()){
         if(selected == item){
@@ -1003,11 +1014,73 @@ bool ItemTreeWidget::selectOnly(Item* item)
     if(!isSelected){
         if(impl->findItwItem(item)){
             item->setSelected(true, true);
-            isSelected = true;
+            selectionChanged = true;
         }
     }
-    return isSelected;
+
+    impl->projectRootItem->endItemSelectionChanges();
+    
+    return selectionChanged;
 }
+
+
+void ItemTreeWidget::selectAllItems()
+{
+    impl->selectAllItems();
+}
+
+
+void ItemTreeWidget::Impl::selectAllItems()
+{
+    projectRootItem->beginItemSelectionChanges();
+
+    unselectItemsInOtherWidgetsInSelectionSyncGroup();
+    
+    for(auto& kv : itemToItwItemMap){
+        auto& item = kv.first;
+        item->setSelected(true);
+    }
+
+    projectRootItem->endItemSelectionChanges();
+}
+
+
+// Returns true if some items are unselected
+bool ItemTreeWidget::Impl::unselectItemsInOtherWidgetsInSelectionSyncGroup()
+{
+    bool selectionChanged = false;
+    
+    if(pSelectionSyncGroup){
+        vector<Item*> itemsToUnselect;
+        for(auto item : projectRootItem->selectedItems()){
+            bool isSelfMember = false;
+            bool isAnotherMember = false;
+            if(findItwItem(item)){
+                isSelfMember = true;
+            } else {
+                for(auto& treeWidget : *pSelectionSyncGroup){
+                    if(treeWidget != this){
+                        if(treeWidget->findItwItem(item)){
+                            isAnotherMember = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if(!isSelfMember && isAnotherMember){
+                itemsToUnselect.push_back(item);
+            }
+        }
+        if(!itemsToUnselect.empty()){
+            for(auto& item : itemsToUnselect){
+                item->setSelected(false);
+            }
+            selectionChanged = true;
+        }
+    }
+
+    return selectionChanged;
+}        
 
 
 void ItemTreeWidget::clearSelection()
@@ -1018,9 +1091,11 @@ void ItemTreeWidget::clearSelection()
 
 void ItemTreeWidget::Impl::clearSelection()
 {
+    projectRootItem->beginItemSelectionChanges();
     for(auto& item : getSelectedItems()){
         item->setSelected(false);
     }
+    projectRootItem->endItemSelectionChanges();
 }
 
 
@@ -1297,7 +1372,6 @@ void ItemTreeWidget::Impl::onTreeWidgetRowsInserted(const QModelIndex& parent, i
     for(auto item : items){
         if(!parentItem->insertChild(nextItem, item, true)){
             canceledItems.push_back(item);
-            //callLater([this, item](){ revertItemPosition(item); },  LazyCaller::PRIORITY_HIGH);
         }
     }
 
@@ -1343,8 +1417,8 @@ void ItemTreeWidget::Impl::revertItemPosition(Item* item)
 
 void ItemTreeWidget::Impl::onTreeWidgetSelectionChanged()
 {
-    auto selectedTwItems = selectedItems();
     ItemList<> items;
+    auto selectedTwItems = selectedItems();
     bool doEmitSignal = !sigSelectionChanged.empty();
     if(doEmitSignal){
         items.reserve(selectedTwItems.size());
@@ -1359,7 +1433,18 @@ void ItemTreeWidget::Impl::onTreeWidgetSelectionChanged()
             }
         }
     }
+
+    projectRootItem->beginItemSelectionChanges();
+
+    if(!isControlModifierEnabledInMousePressEvent){
+        unselectItemsInOtherWidgetsInSelectionSyncGroup();
+    }
+
     updateItemSelectionIter(invisibleRootItem(), selectedItemSet);
+
+    if(!upOrDownKeyPressed){
+        projectRootItem->endItemSelectionChanges();
+    }
 
     if(doEmitSignal){
         sigSelectionChanged(items);
@@ -1406,6 +1491,11 @@ void ItemTreeWidget::Impl::onTreeWidgetCurrentItemChanged(QTreeWidgetItem* curre
             itwItem->itemSelectionConnection.unblock();
         }
     }
+    if(upOrDownKeyPressed){
+        // End the changes begun in the onTreeWidgetSelectionChanged function
+        projectRootItem->endItemSelectionChanges();
+    }
+    upOrDownKeyPressed = false;
 }
 
 
@@ -1454,12 +1544,17 @@ void ItemTreeWidget::Impl::mousePressEvent(QMouseEvent* event)
     ItwItem* itwItem = dynamic_cast<ItwItem*>(itemAt(event->pos()));
     lastClickedItem = nullptr;
 
+    if(event->modifiers() & Qt::ControlModifier){
+        isControlModifierEnabledInMousePressEvent = true;
+    }
+
     // Emit sigSelectionChanged when clicking on an already selected item
     if(event->button() == Qt::LeftButton){
         auto selected = selectedItems();
         if(itwItem){
             if(selected.size() == 1 && itwItem == selected.front()){
                 itwItem->itemSelectionConnection.block();
+                unselectItemsInOtherWidgetsInSelectionSyncGroup();
                 itwItem->item->setSelected(true, true);
                 itwItem->itemSelectionConnection.unblock();
             } else {
@@ -1469,6 +1564,8 @@ void ItemTreeWidget::Impl::mousePressEvent(QMouseEvent* event)
     }
     
     TreeWidget::mousePressEvent(event);
+
+    isControlModifierEnabledInMousePressEvent = false;
 
     if(event->button() == Qt::RightButton){
         menuManager.setNewPopupMenu(this);
@@ -1489,21 +1586,26 @@ void ItemTreeWidget::Impl::mousePressEvent(QMouseEvent* event)
 
 void ItemTreeWidget::Impl::keyPressEvent(QKeyEvent* event)
 {
-    bool processed = true;
+    bool processed = false;
 
-    switch(event->key()){
-
-    case Qt::Key_Escape:
-        clearSelection();
-        break;
-        
-    case Qt::Key_Delete:
-        cutSelectedItems();
-        break;
-        
-    default:
-        processed = false;
-        break;
+    if(event->modifiers() == Qt::NoModifier){
+        switch(event->key()){
+        case Qt::Key_Up:
+        case Qt::Key_Down:
+            upOrDownKeyPressed = true;
+            break;
+            
+        case Qt::Key_Escape:
+            clearSelection();
+            processed = true;
+            break;
+        case Qt::Key_Delete:
+            cutSelectedItems();
+            processed = true;
+            break;
+        default:
+            break;
+        }
     }
         
     if(!processed && (event->modifiers() & Qt::ControlModifier)){
@@ -1517,7 +1619,9 @@ void ItemTreeWidget::Impl::keyPressEvent(QKeyEvent* event)
             break;
             
         case Qt::Key_R:
-            ItemManager::reloadItems(getSelectedItems());
+            for(auto& item : getSelectedItems()){
+                item->reload();
+            }
             break;
             
         case Qt::Key_Plus:

@@ -75,7 +75,7 @@ public:
 
     virtual const std::string& className() const { return className_; }
 
-    ViewInfo(ViewManagerImpl* managerImpl,
+    ViewInfo(ViewManager::Impl* managerImpl,
              const type_info& view_type_info, const string& className, const string& defaultInstanceName,
              const string& textDomain, ViewManager::InstantiationType itype, ViewManager::FactoryBase* factory);
 
@@ -197,7 +197,7 @@ map<string, string> classNameAliasMap;
 
 namespace cnoid {
 
-class ViewManagerImpl
+class ViewManager::Impl
 {
 public:
     const string& moduleName;
@@ -206,8 +206,8 @@ public:
     ClassNameToViewInfoMapPtr classNameToViewInfoMap;
     InstanceInfoList instances;
 
-    ViewManagerImpl(ExtensionManager* ext);
-    ~ViewManagerImpl();
+    Impl(ExtensionManager* ext);
+    ~Impl();
     static void notifySigRemoved(View* view){
         view->notifySigRemoved();
     }
@@ -221,8 +221,10 @@ public:
 }
 
 
+namespace {
+
 ViewInfo::ViewInfo
-(ViewManagerImpl* managerImpl,
+(ViewManager::Impl* managerImpl,
  const type_info& view_type_info, const string& className, const string& defaultInstanceName,
  const string& textDomain, ViewManager::InstantiationType itype, ViewManager::FactoryBase* factory)
     : view_type_info(view_type_info),
@@ -238,12 +240,10 @@ ViewInfo::ViewInfo
 }
 
 
-namespace {
-
 InstanceInfo::~InstanceInfo()
 {
     if(view){
-        ViewManagerImpl::deactivateView(view);
+        ViewManager::Impl::deactivateView(view);
         delete view;
     }
 }
@@ -251,8 +251,8 @@ InstanceInfo::~InstanceInfo()
 void InstanceInfo::remove()
 {
     if(view){
-        ViewManagerImpl::deactivateView(view);
-        ViewManagerImpl::notifySigRemoved(view);
+        ViewManager::Impl::deactivateView(view);
+        ViewManager::Impl::notifySigRemoved(view);
         sigViewRemoved_(view);
         delete view;
         view = nullptr;
@@ -432,13 +432,16 @@ void onViewMenuAboutToShow(Menu* menu)
         }
     }
 }
+
 }
 
 
 void ViewManager::initializeClass(ExtensionManager* ext)
 {
     static bool initialized = false;
+
     if(!initialized){
+        View::initializeClass();
         
         mainWindow = MainWindow::instance();
         MenuManager& mm = ext->menuManager();
@@ -458,7 +461,7 @@ void ViewManager::initializeClass(ExtensionManager* ext)
         deleteViewMenu = new Menu(viewMenu);
         deleteViewMenu->sigAboutToShow().connect([=](){ onViewMenuAboutToShow(deleteViewMenu); });
         deleteViewAction->setMenu(deleteViewMenu);
-        
+
         initialized = true;
     }
 }
@@ -466,11 +469,11 @@ void ViewManager::initializeClass(ExtensionManager* ext)
 
 ViewManager::ViewManager(ExtensionManager* ext)
 {
-    impl = new ViewManagerImpl(ext);
+    impl = new Impl(ext);
 }
 
 
-ViewManagerImpl::ViewManagerImpl(ExtensionManager* ext)
+ViewManager::Impl::Impl(ExtensionManager* ext)
     : moduleName(ext->name()),
       textDomain(ext->textDomain()),
       menuManager(ext->menuManager())
@@ -493,7 +496,7 @@ ViewManager::~ViewManager()
 }
 
 
-ViewManagerImpl::~ViewManagerImpl()
+ViewManager::Impl::~Impl()
 {
     ClassNameToViewInfoMap::iterator p;
     for(p = classNameToViewInfoMap->begin(); p != classNameToViewInfoMap->end(); ++p){
@@ -783,7 +786,8 @@ static View* restoreView(Archive* archive, const string& moduleName, const strin
     string instanceName;
                     
     if(!archive->read("name", instanceName)){
-        if(info = findViewInfo(moduleName, className)){
+        info = findViewInfo(moduleName, className);
+        if(info){
             view = info->getOrCreateView();
         }
     } else {

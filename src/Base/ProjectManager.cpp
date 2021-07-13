@@ -14,6 +14,7 @@
 #include "OptionManager.h"
 #include "MenuManager.h"
 #include "AppConfig.h"
+#include "AppUtil.h"
 #include "LazyCaller.h"
 #include "FileDialog.h"
 #include <cnoid/MainWindow>
@@ -24,7 +25,7 @@
 #include <cnoid/Sleep>
 #include <cnoid/UTF8>
 #include <cnoid/stdx/filesystem>
-#include <QCoreApplication>
+#include <QEvent>
 #include <QResource>
 #include <QMessageBox>
 #include <string>
@@ -46,9 +47,25 @@ Action* perspectiveCheck = nullptr;
 MainWindow* mainWindow = nullptr;
 MessageView* mv = nullptr;
 
-
 Signal<void(int recursiveLevel)> sigProjectAboutToBeLoaded;
 Signal<void(int recursiveLevel)> sigProjectLoaded;
+
+#ifdef Q_OS_UNIX
+class WindowActivationChecker : public QObject
+{
+public:
+    bool isWindowActivated;
+
+    WindowActivationChecker() : isWindowActivated(false) { }
+
+    bool eventFilter(QObject* obj, QEvent* event) override {
+        if(event->type() == QEvent::ActivationChange){
+            isWindowActivated = true;
+        }
+        return false;
+    }
+};
+#endif
 
 }
 
@@ -68,8 +85,9 @@ public:
     bool restoreObjectStates(
         Archive* projectArchive, Archive* states, const vector<TObject*>& objects, const char* nameSuffix);
 
-    ItemList<> loadProject(
-        const std::string& filename, Item* parentItem, bool isInvokingApplication, bool isBuiltinProject);
+    void loadProject(
+        const std::string& filename, Item* parentItem,
+        bool isInvokingApplication, bool isBuiltinProject, bool doClearExistingProject);
 
     template<class TObject>
     bool storeObjects(Archive& parentArchive, const char* key, vector<TObject*> objects);
@@ -104,6 +122,10 @@ public:
     typedef map<string, ArchiverInfo> ArchiverMap;
     typedef map<string, ArchiverMap> ArchiverMapMap;
     ArchiverMapMap archivers;
+
+#ifdef Q_OS_UNIX
+    WindowActivationChecker mainWindowActivationChecker;
+#endif
 
     MappingPtr config;
     MappingPtr managerConfig;
@@ -302,26 +324,30 @@ bool ProjectManager::Impl::restoreObjectStates
 }
 
 
-ItemList<> ProjectManager::loadProject(const std::string& filename, Item* parentItem)
+void ProjectManager::loadProject(const std::string& filename, Item* parentItem)
 {
-    return impl->loadProject(filename, parentItem, false, false);
+    impl->loadProject(filename, parentItem, false, false, (parentItem == nullptr));
 }
 
 
-ItemList<> ProjectManager::loadBuiltinProject(const std::string& resourceFile, Item* parentItem)
+void ProjectManager::loadBuiltinProject(const std::string& resourceFile, Item* parentItem)
 {
-    return impl->loadProject(resourceFile, parentItem, true, true);
+    impl->loadProject(resourceFile, parentItem, true, true, false);
 }
 
 
-ItemList<> ProjectManager::Impl::loadProject
-(const std::string& filename, Item* parentItem, bool isInvokingApplication, bool isBuiltinProject)
+void ProjectManager::Impl::loadProject
+(const std::string& filename, Item* parentItem,
+ bool isInvokingApplication, bool isBuiltinProject, bool doClearExistingProject)
 {
-    ItemList<> loadedItems;
-    
     ::sigProjectAboutToBeLoaded(projectBeingLoadedCounter);
     
     ++projectBeingLoadedCounter;
+
+    if(doClearExistingProject){
+        clearProject();
+        mv->flush();
+    }
     
     bool loaded = false;
     YAMLReader reader;
@@ -362,10 +388,11 @@ ItemList<> ProjectManager::Impl::loadProject
 
         } else if(parsed){
 
-            bool isSubProject = parentItem != nullptr;
+            bool isSubProject = (parentItem != nullptr);
             if(!isSubProject){
                 parentItem = RootItem::instance();
             }
+
             Archive* archive = static_cast<Archive*>(reader.document()->toMapping());
             archive->initSharedInfo(filename, isSubProject);
 
@@ -388,23 +415,10 @@ ItemList<> ProjectManager::Impl::loadProject
                     mainWindow->setInitialLayout(archive);
                 }
                 if(!isBuiltinProject){
-                    mainWindow->show();
-
 #ifdef Q_OS_UNIX
-                    /**
-                       There is a delay between executing the show function of a window and the window
-                       is actually displayed. If the event loop is blocked by an item that takes a long
-                       time to load before the window is displayed, the window will remain hidden for
-                       a while. This behavior gives the user the bad impression that the application is
-                       slow to start. To avoid this problem, the window should be displayed before any
-                       items are loaded. This can be achieved by decreasing the time difference from
-                       the window display delay by the following sleep.
-                    */
-                    msleep(2);
+                    mainWindow->installEventFilter(&mainWindowActivationChecker);
 #endif
-                    // The following functions are probably useless for this problem.
-                    // mv->flush();
-                    // mainWindow->repaint();
+                    mainWindow->show();
                 }
             } else {
                 if(isBuiltinProject || perspectiveCheck->isChecked()){
@@ -450,19 +464,44 @@ ItemList<> ProjectManager::Impl::loadProject
 
             Archive* barStates = archive->findSubArchive("toolbars");
             if(barStates->isValid()){
-                vector<ToolBar*> toolBars;
-                mainWindow->getAllToolBars(toolBars);
-                if(restoreObjectStates(archive, barStates, toolBars, "bar")){
+                if(restoreObjectStates(archive, barStates, mainWindow->toolBars(), "bar")){
                     loaded = true;
                 }
             }
 
+#ifdef Q_OS_UNIX
+            if(isInvokingApplication && !isBuiltinProject){
+                /**
+                   There is a delay between executing the show function of a window and the window
+                   is actually displayed. If the event loop is blocked by an item that takes a long
+                   time to load before the window is displayed, the window will remain hidden for
+                   a while. This behavior gives a user the bad impression that the application is
+                   slow to start. To avoid this problem, the window should be displayed before any
+                   items are loaded. This can be achieved by decreasing the time difference from
+                   the window display delay by the following loop to check if the window is actually shown.
+                */
+                int timeoutCounter = 0;
+                while(true){
+                    updateGui();
+                    if(mainWindowActivationChecker.isWindowActivated){
+                        break;
+                    }
+                    msleep(1);
+                    ++timeoutCounter;
+                    if(timeoutCounter > 100){
+                        break;
+                    }
+                }
+                mainWindow->removeEventFilter(&mainWindowActivationChecker);
+            }
+#endif
+            
             itemTreeArchiver.reset();
             Archive* items = archive->findSubArchive("items");
             if(items->isValid()){
                 items->inheritSharedInfoFrom(*archive);
 
-                loadedItems = itemTreeArchiver.restore(items, parentItem, optionalPlugins);
+                itemTreeArchiver.restore(items, parentItem, optionalPlugins);
                 
                 numArchivedItems = itemTreeArchiver.numArchivedItems();
                 numRestoredItems = itemTreeArchiver.numRestoredItems();
@@ -495,7 +534,7 @@ ItemList<> ProjectManager::Impl::loadProject
                 }
 
                 mv->flush();
-                
+
                 archive->callPostProcesses();
 
                 if(!isBuiltinProject){
@@ -520,15 +559,15 @@ ItemList<> ProjectManager::Impl::loadProject
 
     --projectBeingLoadedCounter;
 
-    ::sigProjectLoaded(projectBeingLoadedCounter);
-
-    if(!self->isLoadingProject()){
+    if(self->isLoadingProject()){
+        ::sigProjectLoaded(projectBeingLoadedCounter);
+    } else {
+        Archive::callFinalProcesses();
+        ::sigProjectLoaded(projectBeingLoadedCounter);
         auto vp = FilePathVariableProcessor::systemInstance();
         vp->clearBaseDirectory();
         vp->clearProjectDirectory();
     }
-    
-    return loadedItems;
 }
 
 
@@ -538,13 +577,13 @@ template<class TObject> bool ProjectManager::Impl::storeObjects
     bool result = true;
     
     if(!objects.empty()){
-        MappingPtr archives = new Mapping();
+        MappingPtr archives = new Mapping;
         archives->setKeyQuoteStyle(DOUBLE_QUOTED);
         for(size_t i=0; i < objects.size(); ++i){
             TObject* object = objects[i];
             string name = object->objectName().toStdString();
             if(!name.empty()){
-                ArchivePtr archive = new Archive();
+                ArchivePtr archive = new Archive;
                 archive->inheritSharedInfoFrom(parentArchive);
                 if(object->storeState(*archive) && !archive->empty()){
                     archives->insert(name, archive);
@@ -594,8 +633,8 @@ void ProjectManager::Impl::saveProject(const string& filename, Item* item)
     mv->flush();
     
     itemTreeArchiver.reset();
-    
-    ArchivePtr archive = new Archive();
+
+    ArchivePtr archive = new Archive;
     archive->initSharedInfo(filename, isSubProject);
 
     ArchivePtr itemArchive = itemTreeArchiver.store(archive, item);
@@ -606,13 +645,11 @@ void ProjectManager::Impl::saveProject(const string& filename, Item* item)
 
     bool stored = ViewManager::storeViewStates(archive, "views");
 
-    vector<ToolBar*> toolBars;
-    mainWindow->getAllToolBars(toolBars);
-    stored |= storeObjects(*archive, "toolbars", toolBars);
+    stored |= storeObjects(*archive, "toolbars", mainWindow->toolBars());
 
     ArchiverMapMap::iterator p;
     for(p = archivers.begin(); p != archivers.end(); ++p){
-        ArchivePtr moduleArchive = new Archive();
+        ArchivePtr moduleArchive = new Archive;
         moduleArchive->setKeyQuoteStyle(DOUBLE_QUOTED);
         ArchiverMap::iterator q;
         for(q = p->second.begin(); q != p->second.end(); ++q){
@@ -621,7 +658,7 @@ void ProjectManager::Impl::saveProject(const string& filename, Item* item)
             if(objectName.empty()){
                 objArchive = moduleArchive;
             } else {
-                objArchive = new Archive();
+                objArchive = new Archive;
             }
             objArchive->inheritSharedInfoFrom(*archive);
             ArchiverInfo& info = q->second;
@@ -678,7 +715,7 @@ void ProjectManager::Impl::onProjectOptionsParsed(boost::program_options::variab
     if(v.count("project")){
         vector<string> projectFileNames = v["project"].as<vector<string>>();
         for(size_t i=0; i < projectFileNames.size(); ++i){
-            loadProject(projectFileNames[i], nullptr, true, false);
+            loadProject(projectFileNames[i], nullptr, true, false, false);
         }
     }
 }
@@ -689,7 +726,7 @@ void ProjectManager::Impl::onInputFileOptionsParsed(std::vector<std::string>& in
     auto iter = inputFiles.begin();
     while(iter != inputFiles.end()){
         if(filesystem::path(*iter).extension().string() == ".cnoid"){
-            loadProject(*iter, nullptr, true, false);
+            loadProject(*iter, nullptr, true, false, false);
             iter = inputFiles.erase(iter);
         } else {
             ++iter;
@@ -745,10 +782,8 @@ void ProjectManager::Impl::openDialogToLoadProject()
     dialog.updatePresetDirectories();
     
     if(dialog.exec()){
-        clearProject();
-        mv->flush();
         string filename = dialog.selectedFiles().front().toStdString();
-        loadProject(filename, nullptr, false, false);
+        loadProject(filename, nullptr, false, false, true);
     }
 }
 

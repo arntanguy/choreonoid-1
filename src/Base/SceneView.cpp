@@ -4,6 +4,7 @@
 
 #include "SceneView.h"
 #include "SceneWidget.h"
+#include "SceneWidgetEventHandler.h"
 #include "ViewManager.h"
 #include "Separator.h"
 #include "RootItem.h"
@@ -22,6 +23,8 @@ namespace {
 
 vector<SceneView*> instances_;
 Connection sigItemAddedConnection;
+Signal<void(SceneView* view)> sigLastFocusViewChanged_;
+SceneView* lastFocusView_ = nullptr;
 
 struct SceneInfo {
     Item* item;
@@ -37,7 +40,7 @@ struct SceneInfo {
     }
 };
 
-std::map<int, SceneWidgetEditable*> customModeIdToHandlerMap;
+std::map<int, SceneWidgetEventHandler*> customModeIdToHandlerMap;
 
 }
 
@@ -51,6 +54,7 @@ public:
     SgGroup* scene;
     SgUnpickableGroup* unpickableScene;
     list<SceneInfo> sceneInfos;
+    SgUpdate sgUpdate;
     RootItem* rootItem;
     CheckBox dedicatedCheckCheck;
     int dedicatedCheckId;
@@ -105,7 +109,7 @@ std::vector<SceneView*> SceneView::instances()
 }
 
 
-int SceneView::registerCustomMode(SceneWidgetEditable* modeHandler)
+int SceneView::registerCustomMode(SceneWidgetEventHandler* modeHandler)
 {
     int id = SceneWidget::issueUniqueCustomModeId();
     customModeIdToHandlerMap[id] = modeHandler;
@@ -121,6 +125,12 @@ void SceneView::unregisterCustomMode(int id)
         }
     }
     customModeIdToHandlerMap.erase(id);
+}
+
+
+SignalProxy<void(SceneView* view)> SceneView::sigLastFocusViewChanged()
+{
+    return sigLastFocusViewChanged_;
 }
 
 
@@ -142,6 +152,7 @@ SceneView::Impl::Impl(SceneView* self)
     self->setDefaultLayoutArea(View::RIGHT);
     
     sceneWidget = new SceneWidget(self);
+    sceneWidget->setModeSyncEnabled(true);
     //sceneWidget->activate();
     scene = sceneWidget->scene();
     sceneWidget->setObjectName(self->windowTitle());
@@ -195,6 +206,15 @@ SceneView::Impl::~Impl()
 
     instances_.erase(std::find(instances_.begin(), instances_.end(), self));
 
+    if(lastFocusView_ == self){
+        if(instances_.empty()){
+            lastFocusView_ = nullptr;
+        } else {
+            lastFocusView_ = instances_.front();
+        }
+        sigLastFocusViewChanged_(lastFocusView_);
+    }
+    
     if(instances_.empty()){
         finalizeClass();
     }
@@ -204,6 +224,15 @@ SceneView::Impl::~Impl()
 SceneWidget* SceneView::sceneWidget()
 {
     return impl->sceneWidget;
+}
+
+
+void SceneView::onFocusChanged(bool on)
+{
+    if(on){
+        lastFocusView_ = this;
+        sigLastFocusViewChanged_(this);
+    }
 }
     
 
@@ -302,11 +331,11 @@ void SceneView::Impl::onSensitiveChanged(list<SceneInfo>::iterator infoIter, boo
     if(infoIter->isShown){
         if(auto node = infoIter->node){
             if(on){
-                unpickableScene->removeChild(node, true);
-                scene->addChild(node, true);
+                unpickableScene->removeChild(node, sgUpdate);
+                scene->addChild(node, sgUpdate);
             } else {
-                scene->removeChild(node, true);
-                unpickableScene->addChild(node, true);
+                scene->removeChild(node, sgUpdate);
+                unpickableScene->addChild(node, sgUpdate);
             }
         }
     }
@@ -318,9 +347,9 @@ void SceneView::Impl::showScene(list<SceneInfo>::iterator infoIter, bool show)
     if(infoIter->isShown && !show){
         if(auto node = infoIter->node){
             if(infoIter->renderable->isSceneSensitive()){
-                scene->removeChild(node, true);
+                scene->removeChild(node, sgUpdate);
             } else {
-                unpickableScene->removeChild(node, true);
+                unpickableScene->removeChild(node, sgUpdate);
             }
         }
         infoIter->isShown = false;
@@ -331,9 +360,9 @@ void SceneView::Impl::showScene(list<SceneInfo>::iterator infoIter, bool show)
         }
         if(auto node = infoIter->node){
             if(infoIter->renderable->isSceneSensitive()){
-                scene->addChild(node, true);
+                scene->addChild(node, sgUpdate);
             } else {
-                unpickableScene->addChild(node, true);
+                unpickableScene->addChild(node, sgUpdate);
             }
             infoIter->isShown = true;
         }

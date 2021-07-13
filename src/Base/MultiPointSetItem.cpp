@@ -8,7 +8,7 @@
 #include "MenuManager.h"
 #include "RootItem.h"
 #include "SceneWidget.h"
-#include "SceneWidgetEditable.h"
+#include "SceneWidgetEventHandler.h"
 #include "PutPropertyFunction.h"
 #include "Archive.h"
 #include <cnoid/PointSetUtil>
@@ -27,7 +27,7 @@ namespace filesystem = cnoid::stdx::filesystem;
 
 namespace {
 
-class SceneMultiPointSet : public SgPosTransform, public SceneWidgetEditable
+class SceneMultiPointSet : public SgPosTransform, public SceneWidgetEventHandler
 {
   public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -36,7 +36,7 @@ class SceneMultiPointSet : public SgPosTransform, public SceneWidgetEditable
     bool isEditable;
     SgGroupPtr pointSetGroup;
     SgGroupPtr attentionPointMarkerGroup;
-    Signal<void(const Affine3& T)> sigOffsetTransformChanged;
+    Signal<void(const Isometry3& T)> sigOffsetPositionChanged;
     Signal<void()> sigAttentionPointsChanged;
     
     RectRegionMarkerPtr regionMarker;
@@ -52,11 +52,11 @@ class SceneMultiPointSet : public SgPosTransform, public SceneWidgetEditable
     bool removeAttentionPoint(const Vector3& point, double distanceThresh, bool doNotify);
     void notifyAttentionPointChange();
 
-    virtual bool onButtonPressEvent(const SceneWidgetEvent& event) override;
-    virtual bool onPointerMoveEvent(const SceneWidgetEvent& event) override;
-    virtual bool onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager) override;
+    virtual bool onButtonPressEvent(SceneWidgetEvent* event) override;
+    virtual bool onPointerMoveEvent(SceneWidgetEvent* event) override;
+    virtual bool onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager) override;
 
-    void onContextMenuRequestInEraserMode(const SceneWidgetEvent& event, MenuManager& menuManager);
+    void onContextMenuRequestInEraserMode(SceneWidgetEvent* event, MenuManager* menuManager);
     void onRegionFixed(const PolyhedralRegion& region);    
 };
 
@@ -89,7 +89,6 @@ public:
     Selection renderingMode;
     double pointSize;
     double voxelSize;
-    string directory;
     ScopedConnection itemSelectionChangedConnection;
     ScopedConnection subTreeChangedConnection;
     Signal<void(int index)> sigPointSetItemAdded;
@@ -443,49 +442,49 @@ SignalProxy<void(int index)> MultiPointSetItem::sigPointSetUpdated()
 }
 
 
-const Affine3& MultiPointSetItem::topOffsetTransform() const
+const Isometry3& MultiPointSetItem::offsetPosition() const
 {
     return impl->scene->T();
 }
 
 
-void MultiPointSetItem::setTopOffsetTransform(const Affine3& T)
+void MultiPointSetItem::setOffsetPosition(const Isometry3& T)
 {
     impl->scene->setPosition(T);
 }
 
 
-SignalProxy<void(const Affine3& T)> MultiPointSetItem::sigTopOffsetTransformChanged()
+SignalProxy<void(const Isometry3& T)> MultiPointSetItem::sigOffsetPositionChanged()
 {
-    return impl->scene->sigOffsetTransformChanged;
+    return impl->scene->sigOffsetPositionChanged;
 }
 
 
-void MultiPointSetItem::notifyTopOffsetTransformChange()
+void MultiPointSetItem::notifyOffsetPositionChange()
 {
-    impl->scene->sigOffsetTransformChanged(impl->scene->T());
+    impl->scene->sigOffsetPositionChanged(impl->scene->T());
     impl->scene->notifyUpdate();
     Item::notifyUpdate();
 }
 
 
-Affine3 MultiPointSetItem::offsetTransform(int index) const
+Isometry3 MultiPointSetItem::totalOffsetPositionOf(int index) const
 {
-    return topOffsetTransform() * pointSetItem(index)->offsetTransform();
+    return offsetPosition() * pointSetItem(index)->offsetPosition();
 }
 
 
 SgPointSetPtr MultiPointSetItem::getTransformedPointSet(int index) const
 {
-    SgPointSetPtr transformed = new SgPointSet();
+    SgPointSetPtr transformed = new SgPointSet;
     SgVertexArray& points = *transformed->getOrCreateVertices();
     const SgVertexArray* orgPoints = pointSetItem(index)->pointSet()->vertices();
     if(orgPoints){
         const int n = orgPoints->size();
         points.resize(n);
-        const Affine3f T = offsetTransform(index).cast<Affine3f::Scalar>();
+        const Isometry3 T = totalOffsetPositionOf(index);//.cast<Isometry3::Scalar>();
         for(int i=0; i < n; ++i){
-            points[i] = T * (*orgPoints)[i];
+            points[i] = (T * (*orgPoints)[i].cast<Isometry3::Scalar>()).cast<SgVertexArray::Scalar>();
         }
     }
     return transformed;
@@ -540,7 +539,6 @@ void MultiPointSetItem::doPutProperties(PutPropertyFunction& putProperty)
                 [&](int mode){
                     setVisibilityMode(mode); impl->updateVisibilities(); return true; });
     putProperty(_("Auto save"), false);
-    putProperty(_("Directory"), string(""));
     putProperty(_("Num point sets"), numPointSetItems());
     putProperty(_("Rendering mode"), impl->renderingMode,
                 [&](int mode){ return impl->onRenderingModePropertyChanged(mode); });
@@ -548,9 +546,9 @@ void MultiPointSetItem::doPutProperties(PutPropertyFunction& putProperty)
                                      [&](double size){ setPointSize(size); return true; });
     putProperty.decimals(4)(_("Voxel size"), voxelSize(),
                             [&](double size){ setVoxelSize(size); return true; });
-    putProperty(_("Translation"), str(Vector3(topOffsetTransform().translation())),
+    putProperty(_("Translation"), str(Vector3(offsetPosition().translation())),
                 [&](const string& value){ return impl->onTopTranslationPropertyChanged(value); });
-    Vector3 rpy(TO_DEGREE * rpyFromRot(topOffsetTransform().linear()));
+    Vector3 rpy(TO_DEGREE * rpyFromRot(offsetPosition().linear()));
     putProperty(_("Rotation"), str(rpy), [&](const string& value){ return impl->onTopRotationPropertyChanged(value); });
 }
 
@@ -572,7 +570,7 @@ bool MultiPointSetItem::Impl::onTopTranslationPropertyChanged(const std::string&
     Vector3 p;
     if(toVector3(value, p)){
         scene->setTranslation(p);
-        self->notifyTopOffsetTransformChange();
+        self->notifyOffsetPositionChange();
         return true;
     }
     return false;
@@ -584,7 +582,7 @@ bool MultiPointSetItem::Impl::onTopRotationPropertyChanged(const std::string& va
     Vector3 rpy;
     if(toVector3(value, rpy)){
         scene->setRotation(rotFromRpy(TO_RADIAN * rpy));
-        self->notifyTopOffsetTransformChange();
+        self->notifyOffsetPositionChange();
         return true;
     }
     return false;
@@ -595,9 +593,6 @@ bool MultiPointSetItem::store(Archive& archive)
 {
     archive.write("visibilityMode", impl->visibilityMode.selectedSymbol());
     archive.write("autoSave", false);
-    if(!impl->directory.empty()){
-        archive.writeRelocatablePath("directory", impl->directory);
-    }
 
     auto& scene = impl->scene;
     write(archive, "translation", Vector3(scene->translation()));
@@ -622,10 +617,6 @@ bool MultiPointSetItem::restore(const Archive& archive)
     }
     
     archive.get("autoSave", false);
-    string directory;
-    if(archive.readRelocatablePath("directory", directory)){
-
-    }
 
     auto& scene = impl->scene;
     Vector3 translation;
@@ -654,6 +645,8 @@ bool MultiPointSetItem::restore(const Archive& archive)
 }
 
 
+namespace {
+
 SceneMultiPointSet::SceneMultiPointSet(MultiPointSetItem::Impl* multiPointSetItem)
     : weakMultiPointSetItem(multiPointSetItem->self)
 {
@@ -668,7 +661,8 @@ SceneMultiPointSet::SceneMultiPointSet(MultiPointSetItem::Impl* multiPointSetIte
     regionMarker->sigRegionFixed().connect(
         [&](const PolyhedralRegion& region){ onRegionFixed(region); });
     regionMarker->sigContextMenuRequest().connect(
-        [&](const SceneWidgetEvent& event, MenuManager& manager){ onContextMenuRequestInEraserMode(event, manager); });
+        [&](SceneWidgetEvent* event, MenuManager* manager){
+            onContextMenuRequestInEraserMode(event, manager); });
     isEditable = true;
 }
 
@@ -750,7 +744,7 @@ void SceneMultiPointSet::notifyAttentionPointChange()
 }
 
     
-bool SceneMultiPointSet::onButtonPressEvent(const SceneWidgetEvent& event)
+bool SceneMultiPointSet::onButtonPressEvent(SceneWidgetEvent* event)
 {
 	if(!isEditable){
         return false;
@@ -758,13 +752,13 @@ bool SceneMultiPointSet::onButtonPressEvent(const SceneWidgetEvent& event)
     
     bool processed = false;
     
-    if(event.button() == Qt::LeftButton){
-        if(event.modifiers() & Qt::ControlModifier){
-            if(!removeAttentionPoint(event.point(), 0.01, true)){
-                addAttentionPoint(event.point(), true);
+    if(event->button() == Qt::LeftButton){
+        if(event->modifiers() & Qt::ControlModifier){
+            if(!removeAttentionPoint(event->point(), 0.01, true)){
+                addAttentionPoint(event->point(), true);
             }
         } else {
-            setAttentionPoint(event.point(), true);
+            setAttentionPoint(event->point(), true);
         }
         processed = true;
     }
@@ -773,21 +767,21 @@ bool SceneMultiPointSet::onButtonPressEvent(const SceneWidgetEvent& event)
 }
 
 
-bool SceneMultiPointSet::onPointerMoveEvent(const SceneWidgetEvent&)
+bool SceneMultiPointSet::onPointerMoveEvent(SceneWidgetEvent*)
 {
     return false;
 }
 
 
-bool SceneMultiPointSet::onContextMenuRequest(const SceneWidgetEvent& event, MenuManager& menuManager)
+bool SceneMultiPointSet::onContextMenuRequest(SceneWidgetEvent* event, MenuManager* menuManager)
 {
-    menuManager.addItem(_("PointSet: Clear Attention Points"))->sigTriggered().connect(
+    menuManager->addItem(_("PointSet: Clear Attention Points"))->sigTriggered().connect(
         [&](){ clearAttentionPoints(true); });
 
     if(!regionMarker->isEditing()){
-        SceneWidget* sceneWidget = event.sceneWidget();
+        SceneWidget* sceneWidget = event->sceneWidget();
         eraserModeMenuItemConnection.reset(
-            menuManager.addItem(_("PointSet: Start Eraser Mode"))->sigTriggered().connect(
+            menuManager->addItem(_("PointSet: Start Eraser Mode"))->sigTriggered().connect(
                 [&, sceneWidget](){ regionMarker->startEditing(sceneWidget); }));
     }
 
@@ -795,10 +789,10 @@ bool SceneMultiPointSet::onContextMenuRequest(const SceneWidgetEvent& event, Men
 }
 
 
-void SceneMultiPointSet::onContextMenuRequestInEraserMode(const SceneWidgetEvent&, MenuManager& menuManager)
+void SceneMultiPointSet::onContextMenuRequestInEraserMode(SceneWidgetEvent*, MenuManager* menuManager)
 {
     eraserModeMenuItemConnection.reset(
-        menuManager.addItem(_("PointSet: Exit Eraser Mode"))->sigTriggered().connect(
+        menuManager->addItem(_("PointSet: Exit Eraser Mode"))->sigTriggered().connect(
             [&](){ regionMarker->finishEditing(); }));
 }
 
@@ -812,6 +806,8 @@ void SceneMultiPointSet::onRegionFixed(const PolyhedralRegion& region)
             item->activePointSetItem(i)->removePoints(region);
         }
     }
+}
+
 }
 
 
@@ -835,11 +831,11 @@ bool MultiPointSetItem::Impl::load(const std::string& filename)
                 if(info.read("file", pcdFilename)){
                     filesystem::path path(fromUTF8(pcdFilename));
                     PointSetItemPtr childItem = new PointSetItem();
-                    if(childItem->load(toUTF8((directory / path).string()), "PCD-FILE")){
+                    if(childItem->load(toUTF8((directory / path).string()), self, "PCD-FILE")){
                         childItem->setName(toUTF8(path.stem().string()));
-                        Affine3 T;
+                        Isometry3 T;
                         if(read(info, "offsetTransform", T)){
-                            childItem->setOffsetTransform(T);
+                            childItem->setOffsetPosition(T);
                         }
                         self->addSubItem(childItem);
                     }
@@ -861,7 +857,7 @@ bool MultiPointSetItem::Impl::saveItem(MultiPointSetItem* item, const std::strin
 bool MultiPointSetItem::Impl::save(const std::string& filename)
 {
     outputArchive = new Mapping();
-    outputArchive->setDoubleFormat("%.9g");
+    outputArchive->setFloatingNumberFormat("%.9g");
 
     outputArchive->write("type", "MultiPointSet");
     outputArchive->write("fileFormat", "PCD");
@@ -887,12 +883,12 @@ bool MultiPointSetItem::Impl::outputPointSetItem(int index)
         string fullPathString = toUTF8((autoSaveFilePath.parent_path() / path).string());
 
         try {
-            cnoid::savePCD(item->pointSet(), fullPathString, item->offsetTransform());
+            cnoid::savePCD(item->pointSet(), fullPathString, item->offsetPosition());
 
             MappingPtr info = new Mapping();
             info->write("file", filename);
-            info->setDoubleFormat("%.9g");
-            write(*info, "offsetTransform", item->offsetTransform());
+            info->setFloatingNumberFormat("%.9g");
+            write(*info, "offsetTransform", item->offsetPosition());
             outputFileListing->insert(index, info);
             result = true;
 

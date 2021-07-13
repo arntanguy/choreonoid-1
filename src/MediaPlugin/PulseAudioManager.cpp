@@ -26,7 +26,7 @@ namespace {
 
 const bool TRACE_FUNCTIONS = true;
 
-PulseAudioManager* pulseAudioManager = 0;
+PulseAudioManager* pulseAudioManager = nullptr;
 
 class Source
 {
@@ -160,9 +160,9 @@ PulseAudioManager::PulseAudioManager(ExtensionManager* ext)
 
 
 PulseAudioManagerImpl::PulseAudioManagerImpl(ExtensionManager* ext)
-    : os(mvout())
+    : os(mvout(false))
 {
-    context = 0;
+    context = nullptr;
     
     mainloop = pa_threaded_mainloop_new();
     if(!mainloop){
@@ -263,12 +263,12 @@ void PulseAudioManagerImpl::finalize()
         pa_context_disconnect(context);
         pa_context_unref(context);
         pa_threaded_mainloop_unlock(mainloop);
-        context = 0;
+        context = nullptr;
     }
     if(mainloop){
         pa_threaded_mainloop_stop(mainloop);
         pa_threaded_mainloop_free(mainloop);
-        mainloop = 0;
+        mainloop = nullptr;
     }
 }
 
@@ -284,7 +284,7 @@ bool PulseAudioManager::playAudioFile(const std::string& filename, double volume
 
 bool PulseAudioManagerImpl::playAudioFile(const std::string& filename, double volumeRatio)
 {
-    AudioItemPtr audioItem = new AudioItem();
+    AudioItemPtr audioItem = new AudioItem;
     if(audioItem->load(filename)){
         SourcePtr source = std::make_shared<Source>(this, audioItem);
         source->volumeRatio = volumeRatio;
@@ -401,16 +401,18 @@ void PulseAudioManagerImpl::restore(const Archive& archive)
 }
 
 
+namespace {
+
 Source::Source(PulseAudioManagerImpl* manager, AudioItemPtr audioItem)
     : manager(manager),
       audioItem(audioItem),
       stopLater([&](){ stop(); })
 {
-    stream = 0;
+    stream = nullptr;
     currentFrame = 0;
     isConnected = false;
     isActive_ = false;
-    operation = 0;
+    operation = nullptr;
     doAdjustTime = false;
     initialWritingDone = false;
     hasAllFramesWritten = false;
@@ -424,13 +426,12 @@ Source::~Source()
 }
 
 
-namespace {
-
 void pa_stream_state_callback(pa_stream* stream, void* userdata)
 {
     Source* source = (Source*)userdata;
     pa_threaded_mainloop_signal(source->manager->mainloop, 0);
 }
+
 
 void pa_stream_write_callback(pa_stream* stream,  size_t nbytes, void* userdata)
 {
@@ -438,11 +439,13 @@ void pa_stream_write_callback(pa_stream* stream,  size_t nbytes, void* userdata)
     source->write(nbytes, false);
 }
 
+
 void pa_stream_success_callback(pa_stream* stream, int success, void* userdata)
 {
     Source* source = (Source*)userdata;
     pa_threaded_mainloop_signal(source->manager->mainloop, 0);
 }
+
 
 void pa_stream_overflow_notify_callback(pa_stream* stream, void* userdata)
 {
@@ -450,13 +453,13 @@ void pa_stream_overflow_notify_callback(pa_stream* stream, void* userdata)
     callLater([source](){ source->onBufferOverflow(); });
 }
 
+
 void pa_stream_underflow_notify_callback(pa_stream* stream, void* userdata)
 {
     Source* source = (Source*)userdata;
     if(!source->hasAllFramesWritten){
         callLater([source](){ source->onBufferUnderflow(); });
     }
-}
 }
 
 
@@ -470,7 +473,7 @@ bool Source::waitForOperation()
             pa_threaded_mainloop_wait(manager->mainloop);
         }
         pa_operation_unref(operation);
-        operation = 0;
+        operation = nullptr;
     }
     return waited;
 }
@@ -517,7 +520,7 @@ bool Source::connectStream()
         return true;
     }
 
-    pa_buffer_attr* pattr = 0;
+    pa_buffer_attr* pattr = nullptr;
     //pa_stream_flags_t flags = PA_STREAM_START_CORKED;
     pa_stream_flags_t flags = (pa_stream_flags)(PA_STREAM_START_CORKED | PA_STREAM_AUTO_TIMING_UPDATE | PA_STREAM_INTERPOLATE_TIMING);
     
@@ -582,7 +585,7 @@ bool Source::disconnectStream()
             isConnected = false;
         }
         pa_stream_unref(stream);
-        stream = 0;
+        stream = nullptr;
         return true;
     }
 
@@ -758,4 +761,6 @@ void Source::stop()
         pa_threaded_mainloop_unlock(manager->mainloop);
     }
     isActive_ = false;
+}
+
 }

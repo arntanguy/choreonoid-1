@@ -33,8 +33,11 @@ public:
     SignalProxy<void(Item* item)> sigItemMoved();
     SignalProxy<void(Item* item, bool isMoving)> sigSubTreeRemoving();
     SignalProxy<void(Item* item, bool isMoving)> sigSubTreeRemoved();
-    SignalProxy<void()> sigTreeChanged();
     SignalProxy<void(Item* assigned, Item* srcItem)> sigItemAssigned();
+    SignalProxy<void(Item* item, const std::string& oldName)> sigItemNameChanged();
+
+    [[deprecated("Use Item::sigSubTreeChanged()")]]
+    SignalProxy<void()> sigTreeChanged();
 
     Item* currentItem();
     
@@ -49,8 +52,10 @@ public:
     void selectItem(Item* item);
 
     SignalProxy<void(Item* item, bool on)> sigSelectionChanged();
+
     SignalProxy<void(const ItemList<>& selectedItems)> sigSelectedItemsChanged();
-    void flushSigSelectedItemsChanged();
+    void beginItemSelectionChanges();
+    void endItemSelectionChanges();
 
     //! \return The state id of the new check state.
     int addCheckEntry(const std::string& description);
@@ -91,8 +96,9 @@ private:
     void notifyEventOnSubTreeRemoving(Item* item, bool isMoving);
     void notifyEventOnSubTreeRemoved(Item* item, bool isMoving);
     void emitSigItemAssinged(Item* assigned, Item* srcItem);
+    void emitSigItemNameChanged(Item* item, const std::string& oldName);
     void emitSigSelectionChanged(Item* item, bool on, bool isCurrent);
-    void emitSigSelectedItemsChangedLater();
+    void requestToEmitSigSelectedItemsChanged();
     void emitSigCheckToggled(Item* item, int checkId, bool on);
 
     const ItemList<>& getSelectedItems();

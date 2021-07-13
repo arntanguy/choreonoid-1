@@ -92,13 +92,18 @@ void ParticlesProgramBase::requestRendering
             render(static_cast<SceneParticles*>(object), position, renderingFunction); });
 }
 
+float ParticlesProgramBase::frandom(float max)
+{
+    floatDistribution.param(FloatDistribution::param_type(0.0f, max));
+    return floatDistribution(randomNumberGenerator);
+}
 
 void ParticlesProgramBase::render
 (SceneParticles* particles, const Affine3& position, const std::function<void()>& renderingFunction)
 {
     ShaderProgram* program = shaderProgram();
     
-    renderer_->pushShaderProgram(*program);
+    renderer_->pushShaderProgram(program);
 
     auto lightingProgram = dynamic_cast<BasicLightingProgram*>(program);
     if(lightingProgram){

@@ -2,9 +2,9 @@
   @author Shizuko Hattori
 */
 
+#include "PyUtil.h"
 #include "../ExecutablePath.h"
 #include "../FloatingNumberString.h"
-#include <pybind11/pybind11.h>
 
 using namespace cnoid;
 namespace py = pybind11;
@@ -18,6 +18,9 @@ void exportPyEigenTypes(py::module& m);
 void exportPyEigenArchive(py::module& m);
 void exportPySeqTypes(py::module& m);
 void exportPySceneGraph(py::module& m);
+void exportPySceneDrawables(py::module& m);
+void exportPySceneRenderer(py::module& m);
+void exportPyMeshUtils(py::module& m);
 void exportPyGeometryTypes(py::module& m);
 void exportPyTaskTypes(py::module& m);
 
@@ -34,6 +37,9 @@ PYBIND11_MODULE(Util, m)
     exportPyEigenArchive(m);
     exportPySeqTypes(m);
     exportPySceneGraph(m);
+    exportPySceneDrawables(m);
+    exportPySceneRenderer(m);
+    exportPyMeshUtils(m);
     exportPyGeometryTypes(m);
     exportPyTaskTypes(m);
 

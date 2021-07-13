@@ -31,7 +31,7 @@ public:
 
     bool setTargetLink(const std::string& name);
     bool setTargetNode(const std::string& name);
-    void setOffsetPosition(const Position& T);
+    void setOffsetPosition(const Isometry3& T);
     
     enum MarkerType {
         CROSS_MARKER,
@@ -49,7 +49,7 @@ public:
 
 protected:
     virtual Item* doDuplicate() const override;
-    virtual void onPositionChanged() override;
+    virtual void onTreePathChanged() override;
     virtual void doPutProperties(PutPropertyFunction& putProperty) override;
     virtual bool store(Archive& archive) override;
     virtual bool restore(const Archive& archive) override;
